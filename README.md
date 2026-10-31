@@ -28,10 +28,11 @@ The implementation plan lives in [`phase1-implementation-blueprint.md`](phase1-i
 
 ## Status
 
-Tasks A01–A05 of the Phase 1 task board are complete: repository bootstrapped,
+Tasks A01–A07 of the Phase 1 task board are complete: repository bootstrapped,
 the Go module initialized, Fiber v3 (pinned at v3.6.1) added with a
 `GET /healthz` endpoint in `cmd/example`, recovery + request-logging middleware
-installed, and the frontend toolchain initialized (Vite 8 + Svelte 5 +
-TypeScript; `npm run build` passes with a minimal `frontend/entry.ts`).
-Subsequent tasks (typecheck, templ, route generation) are implemented
-sequentially per the blueprint's gates.
+installed, the frontend toolchain initialized (Vite 8 + Svelte 5 + TypeScript,
+with `npm run check` via svelte-check), and templ v0.3.1100 pinned as a Go
+tool dependency (`go tool templ generate`; sample `app/page.templ` compiles
+and renders HTML under test). Subsequent tasks (build scripts, route
+generation) are implemented sequentially per the blueprint's gates.
