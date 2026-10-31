@@ -1,7 +1,11 @@
 package app
 
-// Page is the root route sample page. Real content arrives with D02;
-// A07 proves only that templ source compiles into Go and renders HTML.
+// Page renders the site's root route. D02 makes it real content:
+// headings and body text render server-side with no JavaScript —
+// the D-phase acceptance contract is "text present without JS".
 templ Page() {
-	<main data-go-page-root>Welcome</main>
+	<main data-go-page-root>
+		<h1>go-meta</h1>
+		<p>A Go-first full-stack web framework.</p>
+	</main>
 }

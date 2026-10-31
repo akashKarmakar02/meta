@@ -22,7 +22,7 @@ func renderToString(t *testing.T) string {
 // renders HTML via Go tests).
 func TestPageRendersHTML(t *testing.T) {
 	got := renderToString(t)
-	want := `<main data-go-page-root>Welcome</main>`
+	want := `<h1>go-meta</h1>`
 	if !strings.Contains(got, want) {
 		t.Errorf("render = %q, want substring %q", got, want)
 	}
@@ -32,7 +32,7 @@ func TestPageRendersHTML(t *testing.T) {
 // with a plain io.Writer, matching the D04 adapter contract.
 func TestPageRenderComponentContext(t *testing.T) {
 	got := renderToString(t)
-	if !strings.Contains(got, "Welcome") {
-		t.Errorf("render = %q, want it to contain %q", got, "Welcome")
+	if !strings.Contains(got, "A Go-first full-stack web framework.") {
+		t.Errorf("render = %q, want it to contain body text", got)
 	}
 }

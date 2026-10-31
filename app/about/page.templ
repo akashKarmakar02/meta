@@ -1,7 +1,10 @@
-package app
+package about
 
-// About is the /about page (C05 registration fixture; content arrives
-// with D02).
+// About is the /about page. D02 makes it real content: a distinct
+// heading and body text render server-side with no JavaScript.
 templ About() {
-	<main data-go-page-about>About</main>
+	<main data-go-page-about>
+		<h1>About</h1>
+		<p>go-meta renders templ pages server-side; this one is distinct from the root page.</p>
+	</main>
 }

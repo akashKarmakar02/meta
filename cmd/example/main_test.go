@@ -54,7 +54,7 @@ func TestGeneratedRoutesRespond(t *testing.T) {
 	app := newApp()
 
 	for path, wantBody := range map[string]string{
-		"/":      "<main data-go-page",
+		"/":      "<main data-go-page-root>",
 		"/about": "<main data-go-page-about>",
 	} {
 		resp, err := app.Test(httptest.NewRequest(http.MethodGet, path, nil))
@@ -109,8 +109,8 @@ func TestDashboardCSRShell(t *testing.T) {
 func TestSSRStillRender(t *testing.T) {
 	app := newApp()
 	for path, want := range map[string]string{
-		"/":      `<main data-go-page-root>Welcome</main>`,
-		"/about": `<main data-go-page-about>About</main>`,
+		"/":      `<h1>go-meta</h1>`,
+		"/about": `<h1>About</h1>`,
 	} {
 		resp, err := app.Test(httptest.NewRequest(http.MethodGet, path, nil))
 		if err != nil {
