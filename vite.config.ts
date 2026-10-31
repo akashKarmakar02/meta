@@ -1,12 +1,16 @@
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 
-// Minimal Phase 1 (A05) configuration: build the client entry bundle.
-// Route registration, manifests, and dist/client output layout arrive with
-// later tasks (E06/E07) per the blueprint.
+// Production client build (E07): explicit entry, Vite asset manifest on,
+// output under dist/client. The backend reads dist/client/.vite/manifest.json
+// at startup (E08) to emit hashed asset URLs — hashed filenames stay
+// Vite-controlled; nothing hardcodes them. Static serving of dist/client
+// arrives with E09.
 export default defineConfig({
   plugins: [svelte()],
   build: {
+    manifest: true,
+    outDir: 'dist/client',
     rollupOptions: {
       input: 'frontend/entry.ts',
     },
