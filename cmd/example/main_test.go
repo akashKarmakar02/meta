@@ -271,6 +271,45 @@ func TestNestedLayoutComposition(t *testing.T) {
 	}
 }
 
+// TestDocsWrapperOrder is D08's acceptance fixture: the composed
+// wrapper order must be root > docs > page, each exactly once.
+func TestDocsWrapperOrder(t *testing.T) {
+	app := newApp()
+	resp, err := app.Test(httptest.NewRequest("GET", "/docs", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	body := string(b)
+
+	// Root layout owns the document: exactly one <html>, <head>, <body>.
+	if n := strings.Count(body, "<html"); n != 1 {
+		t.Fatalf("root layout: %d <html> elements, want 1", n)
+	}
+	if n := strings.Count(body, "<body>"); n != 1 {
+		t.Fatalf("root layout: %d <body> elements, want 1", n)
+	}
+
+	// Strict ordering: root(document) > docs layout > page.
+	rootIdx := strings.Index(body, "<body>")
+	docsIdx := strings.Index(body, "data-go-layout-docs")
+	pageIdx := strings.Index(body, "data-go-page-docs")
+	if rootIdx == -1 || docsIdx == -1 || pageIdx == -1 {
+		t.Fatalf("missing composition markers in: %q", body)
+	}
+	if !(rootIdx < docsIdx && docsIdx < pageIdx) {
+		t.Fatalf("wrapper order root(%d) > docs(%d) > page(%d) violated", rootIdx, docsIdx, pageIdx)
+	}
+
+	// No duplication: each layer appears exactly once.
+	if n := strings.Count(body, "data-go-layout-docs"); n != 1 {
+		t.Fatalf("docs layout applied %d times, want 1", n)
+	}
+	if n := strings.Count(body, "data-go-page-docs"); n != 1 {
+		t.Fatalf("docs page rendered %d times, want 1", n)
+	}
+}
+
 func TestSiblingLayoutsDoNotLeak(t *testing.T) {
 	app := newApp()
 	resp, err := app.Test(httptest.NewRequest("GET", "/about", nil))
