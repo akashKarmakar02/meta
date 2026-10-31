@@ -3,6 +3,7 @@ package routing
 import (
 	"errors"
 	"io/fs"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -296,25 +297,126 @@ func TestDiscoverNestedTemplLayoutChain(t *testing.T) {
 	}
 }
 
-// TestDiscoverLayoutSvelteNotYetClassified: B06 recognizes only
-// layout.templ; layout.svelte in the same directory must not error (that
-// conflict is B09's to reject) and must not become a route. It stays a
-// dormant component until B07 classifies it.
-func TestDiscoverLayoutSvelteNotYetClassified(t *testing.T) {
+// TestDiscoverConflictingLayoutsError covers the same-directory
+// layout.templ + layout.svelte rejection (blueprint §3.4).
+func TestDiscoverConflictingLayoutsError(t *testing.T) {
 	fsys := fstest.MapFS{
 		"layout.templ":  &fstest.MapFile{Data: []byte("templ T() {}")},
 		"layout.svelte": &fstest.MapFile{Data: []byte("<div />")},
 		"page.templ":    &fstest.MapFile{Data: []byte("templ Page() {}")},
 	}
+	_, err := Discover(fsys)
+	if err == nil {
+		t.Fatal("Discover succeeded with layout.templ + layout.svelte in the root, want error")
+	}
+	want := `conflicting layouts`
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("error = %q, want it to mention %q", err.Error(), want)
+	}
+}
+
+// TestDiscoverRootSvelteLayout matches the blueprint's target app tree:
+// dashboard/layout.svelte wraps both dashboard CSR pages.
+func TestDiscoverNestedSvelteLayoutAncestry(t *testing.T) {
+	fsys := fstest.MapFS{
+		"layout.templ":                   &fstest.MapFile{Data: []byte("templ Root() {}")},
+		"page.templ":                     &fstest.MapFile{Data: []byte("templ Page() {}")},
+		"about/page.templ":               &fstest.MapFile{Data: []byte("templ About() {}")},
+		"dashboard/layout.svelte":        &fstest.MapFile{Data: []byte("<div />")},
+		"dashboard/page.svelte":          &fstest.MapFile{Data: []byte("<main />")},
+		"dashboard/settings/page.svelte": &fstest.MapFile{Data: []byte("<main />")},
+	}
 	routes, err := Discover(fsys)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
-	if len(routes) != 1 || routes[0].Path != "/" {
-		t.Errorf("routes = %+v, want only root page", routes)
+	byPath := map[string]Route{}
+	for _, r := range routes {
+		byPath[r.Path] = r
 	}
-	if len(routes[0].Layouts) != 1 || routes[0].Layouts[0].SourceFile != "layout.templ" {
-		t.Errorf("Layouts = %+v, want only layout.templ", routes[0].Layouts)
+	dash, ok := byPath["/dashboard"]
+	if !ok {
+		t.Fatalf("/dashboard missing: %+v", routes)
+	}
+	settings, ok := byPath["/dashboard/settings"]
+	if !ok {
+		t.Fatalf("/dashboard/settings missing: %+v", routes)
+	}
+	for name, r := range map[string]Route{"dashboard": dash, "settings": settings} {
+		if len(r.Layouts) != 2 {
+			t.Fatalf("/%s Layouts = %+v, want [layout.templ, dashboard/layout.svelte]", name, r.Layouts)
+		}
+		if r.Layouts[0].SourceFile != "layout.templ" || r.Layouts[0].Mode != ModeSSR {
+			t.Errorf("/%s outermost = %+v, want layout.templ ssr", name, r.Layouts[0])
+		}
+		if r.Layouts[1].SourceFile != "dashboard/layout.svelte" || r.Layouts[1].Mode != ModeCSR {
+			t.Errorf("/%s inner = %+v, want dashboard/layout.svelte csr", name, r.Layouts[1])
+		}
+		// Both dashboard routes report the same nested layout ID (B07 acceptance).
+		if r.Layouts[1].ID != "dashboard/layout.svelte" {
+			t.Errorf("/%s layout ID = %q, want dashboard/layout.svelte", name, r.Layouts[1].ID)
+		}
+	}
+}
+
+func TestDiscoverRootSvelteLayoutWithCSRPage(t *testing.T) {
+	fsys := fstest.MapFS{
+		"layout.svelte": &fstest.MapFile{Data: []byte("<div />")},
+		"page.svelte":   &fstest.MapFile{Data: []byte("<main />")},
+	}
+	routes, err := Discover(fsys)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("routes = %+v, want single / route", routes)
+	}
+	r := routes[0]
+	if len(r.Layouts) != 1 || r.Layouts[0].SourceFile != "layout.svelte" || r.Layouts[0].Mode != ModeCSR {
+		t.Errorf("Layouts = %+v, want [layout.svelte csr]", r.Layouts)
+	}
+}
+
+// TestDiscoverSiblingLayoutNoLeak verifies a layout applies only within its
+// subtree: dashboard/layout.svelte must not wrap /about.
+func TestDiscoverSiblingLayoutNoLeak(t *testing.T) {
+	fsys := fstest.MapFS{
+		"page.templ":              &fstest.MapFile{Data: []byte("templ Page() {}")},
+		"about/page.templ":        &fstest.MapFile{Data: []byte("templ About() {}")},
+		"dashboard/layout.svelte": &fstest.MapFile{Data: []byte("<div />")},
+		"dashboard/page.svelte":   &fstest.MapFile{Data: []byte("<main />")},
+	}
+	routes, err := Discover(fsys)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	for _, r := range routes {
+		switch r.Path {
+		case "/", "/about":
+			for _, l := range r.Layouts {
+				if l.SourceFile == "dashboard/layout.svelte" {
+					t.Errorf("route %q wrapped by sibling layout %q", r.Path, l.SourceFile)
+				}
+			}
+		case "/dashboard":
+			if len(r.Layouts) != 1 || r.Layouts[0].SourceFile != "dashboard/layout.svelte" {
+				t.Errorf("/dashboard Layouts = %+v, want dashboard/layout.svelte only", r.Layouts)
+			}
+		}
+	}
+}
+
+func TestDiscoverSvelteLayoutAloneNotARoute(t *testing.T) {
+	fsys := fstest.MapFS{
+		"dashboard/layout.svelte":        &fstest.MapFile{Data: []byte("<div />")},
+		"dashboard/settings/page.svelte": &fstest.MapFile{Data: []byte("<main />")},
+	}
+	routes, err := Discover(fsys)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(routes) != 1 || routes[0].Path != "/dashboard/settings" {
+		t.Fatalf("routes = %+v, want only /dashboard/settings", routes)
 	}
 }
 

@@ -9,10 +9,11 @@ import (
 )
 
 // Discover walks an fs.FS rooted at the app directory and describes every
-// page route it finds. B06 scope: page.templ/page.svelte classification
-// plus layout.templ discovery and ancestry resolution (outermost ->
-// innermost). Nested layout.svelte ancestry arrives with B07; ignore rules
-// and collision validation arrive in later tasks.
+// page route it finds. B07 scope: page.templ/page.svelte classification
+// plus layout.templ (SSR) and layout.svelte (CSR) discovery and ancestry
+// resolution (outermost -> innermost). Same-directory layout conflicts are
+// rejected; mixed-mode chain validation and other collision rules arrive in
+// later tasks.
 //
 // Route output is deterministic: sorted by normalized path.
 //
@@ -42,8 +43,8 @@ func Discover(fsys fs.FS) ([]Route, error) {
 			if key == "" {
 				key = "."
 			}
-			if _, dup := layouts[key]; dup {
-				return fmt.Errorf("routing: conflicting layout files in directory %q", key)
+			if existing, dup := layouts[key]; dup {
+				return fmt.Errorf("routing: conflicting layouts in directory %q: %s and %s; do not place layout.templ and layout.svelte in the same folder", key, existing.SourceFile, p)
 			}
 			layouts[key] = layout
 			return nil
@@ -110,12 +111,15 @@ func classifyPage(base string) (RenderMode, bool) {
 	}
 }
 
-// classifyLayout maps a layout filename to its render mode. B06 recognizes
-// only layout.templ; layout.svelte classification arrives with B07.
+// classifyLayout maps a layout filename to its render mode: layout.templ is
+// an SSR layout, layout.svelte a CSR layout. Both exact filenames count;
+// anything else is a component.
 func classifyLayout(base string) (RenderMode, bool) {
 	switch base {
 	case "layout.templ":
 		return ModeSSR, true
+	case "layout.svelte":
+		return ModeCSR, true
 	default:
 		return "", false
 	}
