@@ -1,0 +1,18 @@
+package app
+
+// Layout is the root document wrapper for SSR pages. D06 will generate the
+// root->page composition; D01 defines the component contract: full HTML5
+// document, metadata in head, and a single content slot in body.
+templ Layout(pageContent templ.Component) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>go-meta</title>
+		</head>
+		<body>
+			@pageContent
+		</body>
+	</html>
+}
