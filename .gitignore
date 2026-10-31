@@ -1,6 +1,9 @@
 # Build output (Vite client bundle and manifest)
 dist/
 
+# Go binaries produced by make build
+bin/
+
 # Generated code — always produced by the generator, never edited by hand
 generated/
 
