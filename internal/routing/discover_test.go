@@ -578,6 +578,72 @@ func TestValidateRoutesPureCSRTree(t *testing.T) {
 	}
 }
 
+// TestDiscoverStaticPageRejectedAtRoot is the B12 fixture: root
+// page.static.templ fails discovery naming STATIC_NOT_IMPLEMENTED.
+func TestDiscoverStaticPageRejectedAtRoot(t *testing.T) {
+	fsys := fstest.MapFS{
+		"page.static.templ": &fstest.MapFile{Data: []byte("templ P() {}")},
+	}
+	_, err := Discover(fsys)
+	if err == nil {
+		t.Fatal("Discover succeeded on page.static.templ, want STATIC_NOT_IMPLEMENTED")
+	}
+	for _, want := range []string{"STATIC_NOT_IMPLEMENTED", "page.static.templ"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err.Error(), want)
+		}
+	}
+}
+
+// TestDiscoverStaticPageRejectedNested covers docs/page.static.templ: the
+// error carries the full relative source path.
+func TestDiscoverStaticPageRejectedNested(t *testing.T) {
+	fsys := fstest.MapFS{
+		"page.templ":             &fstest.MapFile{Data: []byte("templ Page() {}")},
+		"docs/page.static.templ": &fstest.MapFile{Data: []byte("templ Doc() {}")},
+	}
+	_, err := Discover(fsys)
+	if err == nil {
+		t.Fatal("Discover succeeded on nested page.static.templ, want error")
+	}
+	for _, want := range []string{"STATIC_NOT_IMPLEMENTED", "docs/page.static.templ"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err.Error(), want)
+		}
+	}
+}
+
+// TestDiscoverStaticPageFailsWholeDiscovery: a static file alongside an
+// otherwise valid route tree still fails the build.
+func TestDiscoverStaticPageFailsWholeDiscovery(t *testing.T) {
+	fsys := fstest.MapFS{
+		"page.templ":                &fstest.MapFile{Data: []byte("templ Page() {}")},
+		"about/page.templ":          &fstest.MapFile{Data: []byte("templ About() {}")},
+		"dashboard/page.svelte":     &fstest.MapFile{Data: []byte("<main />")},
+		"pricing/page.static.templ": &fstest.MapFile{Data: []byte("templ P() {}")},
+	}
+	if _, err := Discover(fsys); err == nil {
+		t.Fatal("Discover succeeded with a static page in a valid tree, want error")
+	}
+}
+
+// TestDiscoverStaticLookalikeNotRejected: near-miss filenames are ordinary
+// components and must not trigger the reservation.
+func TestDiscoverStaticLookalikeNotRejected(t *testing.T) {
+	fsys := fstest.MapFS{
+		"page.templ":              &fstest.MapFile{Data: []byte("templ Page() {}")},
+		"static-page.templ":       &fstest.MapFile{Data: []byte("templ S() {}")},
+		"docs/page.static.svelte": &fstest.MapFile{Data: []byte("<main />")},
+	}
+	routes, err := Discover(fsys)
+	if err != nil {
+		t.Fatalf("Discover rejected lookalike components: %v", err)
+	}
+	if len(routes) != 1 || routes[0].SourceFile != "page.templ" {
+		t.Errorf("routes = %+v, want only root page; lookalikes are components", routes)
+	}
+}
+
 // errorFS always fails with a permission error, exercising Discover's
 // walk error wrapping.
 type errorFS struct{}

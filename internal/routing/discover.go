@@ -34,6 +34,12 @@ func Discover(fsys fs.FS) ([]Route, error) {
 		}
 		dir, base := path.Split(p)
 
+		// page.static.templ is reserved for future static generation:
+		// reject it loudly instead of silently registering or ignoring it.
+		if base == "page.static.templ" {
+			return fmt.Errorf("routing: STATIC_NOT_IMPLEMENTED: %q: static generation is reserved for a future implementation; rename the file to page.templ (SSR) or page.svelte (CSR)", p)
+		}
+
 		if mode, ok := classifyLayout(base); ok {
 			layout, lerr := NewLayout(p, p, mode)
 			if lerr != nil {
