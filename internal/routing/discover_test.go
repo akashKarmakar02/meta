@@ -174,6 +174,57 @@ func TestDiscoverIgnoresOtherSvelteFiles(t *testing.T) {
 	}
 }
 
+// TestDiscoverIgnoresNonPageComponents is the B05 acceptance test: no
+// accidental routes from component files, exhaustively across both
+// technologies, both file extensions, and nested directories.
+func TestDiscoverIgnoresNonPageComponents(t *testing.T) {
+	fsys := fstest.MapFS{
+		// Valid root page so discovery succeeds.
+		"page.templ": &fstest.MapFile{Data: []byte("templ Page() {}")},
+		// Non-page .templ components at multiple depths.
+		"card.templ":            &fstest.MapFile{Data: []byte("templ Card() {}")},
+		"about/sidebar.templ":   &fstest.MapFile{Data: []byte("templ Sidebar() {}")},
+		"deep/nested/nav.templ": &fstest.MapFile{Data: []byte("templ Nav() {}")},
+		// Non-page .svelte components at multiple depths.
+		"widget.svelte":                   &fstest.MapFile{Data: []byte("<div />")},
+		"dashboard/chart.svelte":          &fstest.MapFile{Data: []byte("<svg />")},
+		"dashboard/settings/panel.svelte": &fstest.MapFile{Data: []byte("<aside />")},
+	}
+	routes, err := Discover(fsys)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("routes = %d, want exactly 1 (the root page); got %+v", len(routes), routes)
+	}
+	if routes[0].Path != "/" || routes[0].SourceFile != "page.templ" {
+		t.Errorf("route = %+v, want only the root page route", routes[0])
+	}
+}
+
+// TestClassifyPageExactFilenames locks the exact-filename contract from
+// binding decision #4: near-miss names must not classify as pages.
+func TestClassifyPageExactFilenames(t *testing.T) {
+	for base, want := range map[string]RenderMode{
+		"page.templ":  ModeSSR,
+		"page.svelte": ModeCSR,
+	} {
+		if got, ok := classifyPage(base); !ok || got != want {
+			t.Errorf("classifyPage(%q) = (%q, %v), want (%q, true)", base, got, ok, want)
+		}
+	}
+	// Every other name — including near-misses — is a component, not a page.
+	for _, base := range []string{
+		"Page.templ", "pages.templ", "page.htm", "page.js",
+		"Page.svelte", "pages.svelte", "component.svelte", "layout.templ",
+		"layout.svelte", "card.templ", ".svelte", "temple.templ",
+	} {
+		if mode, ok := classifyPage(base); ok {
+			t.Errorf("classifyPage(%q) = (%q, true), want not-a-page", base, mode)
+		}
+	}
+}
+
 // errorFS always fails with a permission error, exercising Discover's
 // walk error wrapping.
 type errorFS struct{}
