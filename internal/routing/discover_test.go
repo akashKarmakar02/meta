@@ -32,10 +32,68 @@ func TestDiscoverRootPage(t *testing.T) {
 
 func TestDiscoverEmptyApp(t *testing.T) {
 	fsys := fstest.MapFS{
-		"about/page.templ": &fstest.MapFile{Data: []byte("templ About() {}")},
+		"about/card.templ": &fstest.MapFile{Data: []byte("templ Card() {}")},
 	}
 	if _, err := Discover(fsys); err == nil {
-		t.Fatal("Discover succeeded without a root page, want error")
+		t.Fatal("Discover succeeded with no page files, want error")
+	}
+}
+
+// TestDiscoverAboutOnly matches the B03 acceptance fixture: an app with
+// only about/page.templ (no root page) is a valid route tree.
+func TestDiscoverAboutOnly(t *testing.T) {
+	fsys := fstest.MapFS{
+		"about/page.templ": &fstest.MapFile{Data: []byte("templ About() {}")},
+	}
+	routes, err := Discover(fsys)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(routes) != 1 || routes[0].Path != "/about" || routes[0].SourceFile != "about/page.templ" {
+		t.Errorf("routes = %+v, want single /about route", routes)
+	}
+}
+
+func TestDiscoverNestedPagesSorted(t *testing.T) {
+	fsys := fstest.MapFS{
+		"page.templ":                   &fstest.MapFile{Data: []byte("templ Page() {}")},
+		"about/page.templ":             &fstest.MapFile{Data: []byte("templ About() {}")},
+		"deep/nested/route/page.templ": &fstest.MapFile{Data: []byte("templ Deep() {}")},
+	}
+	routes, err := Discover(fsys)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	wantPaths := []string{"/", "/about", "/deep/nested/route"}
+	wantSources := []string{"page.templ", "about/page.templ", "deep/nested/route/page.templ"}
+	if len(routes) != len(wantPaths) {
+		t.Fatalf("routes = %d, want %d; got %+v", len(routes), len(wantPaths), routes)
+	}
+	for i, r := range routes {
+		if r.Path != wantPaths[i] {
+			t.Errorf("routes[%d].Path = %q, want %q (all: %+v)", i, r.Path, wantPaths[i], routes)
+		}
+		if r.SourceFile != wantSources[i] {
+			t.Errorf("routes[%d].SourceFile = %q, want %q", i, r.SourceFile, wantSources[i])
+		}
+		if r.Mode != ModeSSR {
+			t.Errorf("routes[%d].Mode = %q, want ssr", i, r.Mode)
+		}
+	}
+}
+
+func TestDiscoverIgnoresNonPageFilesAtDepth(t *testing.T) {
+	fsys := fstest.MapFS{
+		"page.templ":       &fstest.MapFile{Data: []byte("templ Page() {}")},
+		"about/card.templ": &fstest.MapFile{Data: []byte("templ Card() {}")},
+		"about/notes.txt":  &fstest.MapFile{Data: []byte("not a page")},
+	}
+	routes, err := Discover(fsys)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(routes) != 1 || routes[0].Path != "/" {
+		t.Errorf("routes = %+v, want only root route; components are not pages", routes)
 	}
 }
 
@@ -53,8 +111,8 @@ func TestDiscoverIgnoresNonRootPageFiles(t *testing.T) {
 	}
 }
 
-// errorFS always fails with a permission error (errors other than
-// ErrNotExist must propagate out of fs.Glob), exercising Discover's wrapping.
+// errorFS always fails with a permission error, exercising Discover's
+// walk error wrapping.
 type errorFS struct{}
 
 func (errorFS) Open(string) (fs.File, error) {
