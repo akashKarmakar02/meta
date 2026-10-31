@@ -66,5 +66,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("load client assets: %v", err)
 	}
-	log.Fatal(newApp(&assets).Listen(":3000"))
+	app := newApp(&assets)
+	// E09: serve the hashed production bundle at the same /assets prefix
+	// the shells reference. Fails explicitly when the build output is
+	// missing rather than serving pages that cannot boot.
+	if err := httpserver.MountAssets(app, "dist/client"); err != nil {
+		log.Fatalf("mount client assets: %v", err)
+	}
+	log.Fatal(app.Listen(":3000"))
 }
