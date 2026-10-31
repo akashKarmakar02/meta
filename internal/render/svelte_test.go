@@ -33,7 +33,7 @@ func TestShellDocument(t *testing.T) {
 	got := Shell(fixtureRoute(), nil)
 	for _, want := range []string{
 		"<!DOCTYPE html>",
-		`<div id="app" data-go-route="/dashboard" data-go-route-id="dashboard/page.svelte">`,
+		`<div id="app" data-go-page-root data-go-route="/dashboard" data-go-route-id="dashboard/page.svelte">`,
 		"</html>",
 	} {
 		if !strings.Contains(got, want) {

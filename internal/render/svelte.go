@@ -42,7 +42,7 @@ func Shell(route routing.Route, assets *httpserver.Assets) string {
 	}
 	head += "</head>\n" +
 		"<body>\n" +
-		"<div id=\"app\" data-go-route=\"" + path + "\" data-go-route-id=\"" + id + "\"></div>\n"
+		"<div id=\"" + MountID + "\" " + PageRootAttr + " " + RouteAttr + "=\"" + path + "\" " + RouteIDAttr + "=\"" + id + "\"></div>\n"
 	if assets != nil {
 		head += "<script type=\"module\" src=\"" + html.EscapeString(assets.EntryScriptURL) + "\"></script>\n"
 	}
@@ -64,6 +64,10 @@ func ShellHandler(route routing.Route, assets *httpserver.Assets) func(c fiber.C
 
 // MountID is the DOM element the Svelte runtime mounts into.
 const MountID = "app"
+
+// PageRootAttr marks the shell's mount point explicitly (blueprint §4:
+// the client runtime queries [data-go-page-root] to find the app root).
+const PageRootAttr = "data-go-page-root"
 
 // RouteAttr and RouteIDAttr are the stable data attributes the client
 // runtime reads to identify the requested page.

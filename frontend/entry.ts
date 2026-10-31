@@ -1,16 +1,17 @@
 // Client entry point for the go-meta framework.
 //
-// E03-E05: mount the CSR page for the current document from the route
+// E03-E10: mount the CSR page for the current document from the route
 // import map — no routing yet (SPA navigation arrives in later phases).
-// Route selection reads the shell's data-go-route-id attribute here in
-// the bootstrap; the general-purpose mount/unmount lifecycle lives in
-// svelte-mounter.ts, and lazy component loading lives in
-// route-import-map.ts.
+// Route selection reads the shell's data-go-page-root mount point and
+// its data-go-route-id attribute here in the bootstrap; the
+// general-purpose mount/unmount lifecycle lives in svelte-mounter.ts,
+// and lazy component loading lives in route-import-map.ts. Blueprint §4:
+// the client queries [data-go-page-root] to find the app root.
 import { mountComponent } from './svelte-mounter';
 import type { MountHandle } from './svelte-mounter';
 import { loadPage } from './route-import-map';
 
-const MountID = 'app';
+const PageRootSelector = '[data-go-page-root]';
 const RouteIDAttr = 'data-go-route-id';
 
 // Handle for the live page instance; later phases' navigation runtime
@@ -18,7 +19,7 @@ const RouteIDAttr = 'data-go-route-id';
 let currentPage: MountHandle | null = null;
 
 async function boot(): Promise<void> {
-  const target = document.getElementById(MountID);
+  const target = document.querySelector(PageRootSelector);
   if (!target) {
     // No CSR shell on this document (SSR page or plain HTML): nothing to do.
     return;

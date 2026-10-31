@@ -3,4 +3,4 @@
   // Registered by generated routes; static path takes priority over /products/:id.
 </script>
 
-<main data-go-page-root>products new</main>
+<main data-go-page="products-new">products new</main>

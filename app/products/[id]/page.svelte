@@ -3,4 +3,4 @@
   // Served at /products/:id; param mounting is a later Phase E task.
 </script>
 
-<main data-go-page-root>products detail</main>
+<main data-go-page="products-detail">products detail</main>
