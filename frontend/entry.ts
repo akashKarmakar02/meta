@@ -1,12 +1,14 @@
 // Client entry point for the go-meta framework.
 //
-// E03/E04: mount the CSR component from a static import, no routing.
-// Route selection lives here in the bootstrap — the general-purpose
-// mount/unmount lifecycle is delegated to svelte-mounter.ts, and the
-// route import map arrives with E05 (generated registry: E06).
+// E03-E05: mount the CSR page for the current document from the route
+// import map — no routing yet (SPA navigation arrives in later phases).
+// Route selection reads the shell's data-go-route-id attribute here in
+// the bootstrap; the general-purpose mount/unmount lifecycle lives in
+// svelte-mounter.ts, and lazy component loading lives in
+// route-import-map.ts.
 import { mountComponent } from './svelte-mounter';
 import type { MountHandle } from './svelte-mounter';
-import Dashboard from '../app/dashboard/page.svelte';
+import { loadPage } from './route-import-map';
 
 const MountID = 'app';
 const RouteIDAttr = 'data-go-route-id';
@@ -15,17 +17,23 @@ const RouteIDAttr = 'data-go-route-id';
 // unmounts this before mounting the next route.
 let currentPage: MountHandle | null = null;
 
-function mountDashboard(): void {
+async function boot(): Promise<void> {
   const target = document.getElementById(MountID);
   if (!target) {
     // No CSR shell on this document (SSR page or plain HTML): nothing to do.
     return;
   }
-  if (target.getAttribute(RouteIDAttr) !== 'dashboard/page.svelte') {
-    // Not the dashboard route; components for other routes arrive with E05.
+  const routeId = target.getAttribute(RouteIDAttr);
+  if (!routeId) {
     return;
   }
-  currentPage = mountComponent(Dashboard, { target });
+  const component = await loadPage(routeId);
+  if (!component) {
+    // Unknown route ID: mount nothing. No silent fallback to another
+    // page; the navigation runtime (later phase) will hard-navigate.
+    return;
+  }
+  currentPage = mountComponent(component, { target });
 }
 
-mountDashboard();
+void boot();
