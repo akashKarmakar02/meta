@@ -28,3 +28,6 @@ npm-debug.log*
 .idea/
 .vscode/
 *.swp
+
+# Compiled binaries from local go build verification
+/example
