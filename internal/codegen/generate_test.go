@@ -29,6 +29,62 @@ func fixtureManifest(t *testing.T) routing.Manifest {
 	return routing.NewManifest(routes)
 }
 
+// TestVerifySymbolsRejection is the C09 acceptance criterion: an SSR page
+// whose templ component does not match the expected symbol fails generation
+// with an error naming the source file, before any code is emitted.
+func TestVerifySymbolsRejection(t *testing.T) {
+	fsys := fstest.MapFS{
+		"layout.templ":          &fstest.MapFile{Data: []byte("templ Root() {}")},
+		"page.templ":            &fstest.MapFile{Data: []byte("templ Page() {}")},
+		"about/page.templ":      &fstest.MapFile{Data: []byte("templ Hello() {}")}, // wrong name
+		"dashboard/page.svelte": &fstest.MapFile{Data: []byte("<main />")},
+	}
+	routes, err := routing.Discover(fsys)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	m := routing.NewManifest(routes)
+
+	err = VerifySymbols(fsys, m)
+	if err == nil {
+		t.Fatal("VerifySymbols: want error for misnamed component, got nil")
+	}
+	for _, want := range []string{"about/page.templ", "About"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err.Error(), want)
+		}
+	}
+}
+
+// TestVerifySymbolsAccepts: a valid tree verifies cleanly, and a CSR-only
+// tree (no SSR routes at all) also verifies cleanly — no nonexistent SSR
+// component imports are demanded.
+func TestVerifySymbolsAccepts(t *testing.T) {
+	valid := fstest.MapFS{
+		"layout.templ":          &fstest.MapFile{Data: []byte("templ Root() {}")},
+		"page.templ":            &fstest.MapFile{Data: []byte("templ Page() {}")},
+		"dashboard/page.svelte": &fstest.MapFile{Data: []byte("<main />")},
+	}
+	routes, err := routing.Discover(valid)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if err := VerifySymbols(valid, routing.NewManifest(routes)); err != nil {
+		t.Fatalf("VerifySymbols valid tree: %v", err)
+	}
+
+	csrOnly := fstest.MapFS{
+		"dashboard/page.svelte": &fstest.MapFile{Data: []byte("<main />")},
+	}
+	routes, err = routing.Discover(csrOnly)
+	if err != nil {
+		t.Fatalf("Discover csr-only: %v", err)
+	}
+	if err := VerifySymbols(csrOnly, routing.NewManifest(routes)); err != nil {
+		t.Fatalf("VerifySymbols CSR-only tree: %v", err)
+	}
+}
+
 // TestPageSymbol locks the source-path-to-symbol convention used by the
 // generated SSRPage mapping.
 func TestPageSymbol(t *testing.T) {

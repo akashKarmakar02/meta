@@ -43,6 +43,10 @@ func run(appDir, outDir string) error {
 
 	manifest := routing.NewManifest(routes)
 
+	if err := codegen.VerifySymbols(fsys, manifest); err != nil {
+		return fmt.Errorf("verify SSR page symbols in %s: %w", appDir, err)
+	}
+
 	if err := codegen.WriteRoutesFile(outDir, manifest); err != nil {
 		return err
 	}

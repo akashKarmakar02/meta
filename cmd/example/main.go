@@ -2,6 +2,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/gofiber/fiber/v3"
@@ -36,7 +37,13 @@ func newApp() *fiber.App {
 		switch route.Mode {
 		case routing.ModeSSR:
 			fapp.Get(route.Path, func(c fiber.Ctx) error {
-				return routes.SSRPage(route).Render(c.RequestCtx(), c)
+				component, err := routes.SSRPage(route)
+				if err != nil {
+					// Generation-time checks make this unreachable in practice;
+					// the typed error keeps the handler safe if descriptors diverge.
+					return fmt.Errorf("routes: SSRPage: %w", err)
+				}
+				return component.Render(c.RequestCtx(), c)
 			})
 		case routing.ModeCSR:
 			fapp.Get(route.Path, render.ShellHandler(route))
