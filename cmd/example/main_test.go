@@ -1,10 +1,15 @@
 package main
 
 import (
+	"io"
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
+
+	routes "go-meta/generated"
 )
 
 func TestHealthz(t *testing.T) {
@@ -39,6 +44,74 @@ func TestUnknownRoute404(t *testing.T) {
 	}
 	if resp.StatusCode != fiber.StatusNotFound {
 		t.Errorf("status = %d, want %d", resp.StatusCode, fiber.StatusNotFound)
+	}
+}
+
+// TestGeneratedRoutesRespond is the C05 acceptance fixture: both generated
+// routes answer through Fiber with their own SSR pages; unknown routes 404;
+// /healthz is untouched.
+func TestGeneratedRoutesRespond(t *testing.T) {
+	app := newApp()
+
+	for path, wantBody := range map[string]string{
+		"/":      "<main data-go-page",
+		"/about": "<main data-go-page-about>",
+	} {
+		resp, err := app.Test(httptest.NewRequest(http.MethodGet, path, nil))
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("GET %s status = %d, want 200", path, resp.StatusCode)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		if !strings.Contains(string(body), wantBody) {
+			t.Errorf("GET %s body = %q, missing %q", path, body, wantBody)
+		}
+	}
+
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/nope", nil))
+	if err != nil {
+		t.Fatalf("GET /nope: %v", err)
+	}
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("GET /nope status = %d, want 404", resp.StatusCode)
+	}
+}
+
+// TestRoutesRegisteredExactlyOnce: registration cannot duplicate routes.
+// Duplicates would require duplicate paths in the generated descriptor set
+// (B08 rejects those at discovery), and the registration loop is a single
+// pass. Verified two ways: descriptor paths are unique, and /about — a
+// path that exists only as generated output, not as middleware (Fiber
+// middleware mounts appear in Stack() as "/" entries) — occurs exactly
+// once in the GET stack.
+func TestRoutesRegisteredExactlyOnce(t *testing.T) {
+	seen := map[string]bool{}
+	for _, r := range routes.RegisterRoutes() {
+		if seen[r.Path] {
+			t.Errorf("duplicate path %q in RegisterRoutes()", r.Path)
+		}
+		seen[r.Path] = true
+	}
+
+	app := newApp()
+	count := 0
+	for _, entry := range app.Stack()[0] { // stack[0] is GET
+		if entry.Path == "/about" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("GET stack contains %d /about entries, want exactly 1", count)
+	}
+}
+
+// TestGeneratedRouteCount: the app registers exactly the routes the
+// generator emitted (2 in this tree) — deterministic, no drift.
+func TestGeneratedRouteCount(t *testing.T) {
+	if got := len(routes.RegisterRoutes()); got != 2 {
+		t.Errorf("RegisterRoutes() = %d routes, want 2", got)
 	}
 }
 

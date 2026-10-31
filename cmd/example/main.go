@@ -7,23 +7,36 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/logger"
 	"github.com/gofiber/fiber/v3/middleware/recover"
+
+	routes "go-meta/generated"
 )
 
 // newApp constructs the Fiber application with its middleware and routes.
 func newApp() *fiber.App {
-	app := fiber.New()
+	fapp := fiber.New()
 
 	// Recover converts panics into 500 responses instead of killing the server.
-	app.Use(recover.New())
+	fapp.Use(recover.New())
 	// Request logging; default config logs method, path, status, latency —
 	// never request or response bodies.
-	app.Use(logger.New())
+	fapp.Use(logger.New())
 
-	app.Get("/healthz", func(c fiber.Ctx) error {
+	fapp.Get("/healthz", func(c fiber.Ctx) error {
 		return c.SendString("ok")
 	})
 
-	return app
+	// Generated page routes: registered from build-time codegen as plain
+	// compiled data — no request-time discovery, no reflection. Order is
+	// the manifest (path-sorted) order; paths are unique post-validation
+	// (B08), so no route can be registered twice.
+	for _, r := range routes.RegisterRoutes() {
+		route := r
+		fapp.Get(route.Path, func(c fiber.Ctx) error {
+			return routes.SSRPage(route).Render(c.RequestCtx(), c)
+		})
+	}
+
+	return fapp
 }
 
 func main() {

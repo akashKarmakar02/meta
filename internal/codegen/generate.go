@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"go/format"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -32,12 +33,20 @@ func RoutesFile(m routing.Manifest) ([]byte, error) {
 	b.WriteString(header)
 	b.WriteString("\n\npackage routes\n\n")
 
-	// Imports are sorted alphabetically per gofmt convention; the set is
-	// fixed for this generator version, so ordering is deterministic.
+	// Import the templ-generated package for every SSR route. Each nested
+	// directory is its own Go package (about/page.templ -> go-meta/app/about),
+	// so per-route aliases keep one flat namespace inside this generated
+	// file. Aliases are deterministic (pageN by manifest order); gofmt
+	// keeps the block sorted.
 	b.WriteString("import (\n")
 	b.WriteString("\t\"github.com/a-h/templ\"\n")
-	b.WriteString("\t\"go-meta/app\"\n")
 	b.WriteString("\t\"go-meta/internal/routing\"\n")
+	for _, r := range m.Routes {
+		if r.Mode != routing.ModeSSR {
+			continue
+		}
+		fmt.Fprintf(&b, "\tpage%d %q\n", ssrIndex(r, m), templImportPath(r))
+	}
 	b.WriteString(")\n\n")
 
 	b.WriteString("// RegisterRoutes is generated from the app tree at build time.\n")
@@ -48,13 +57,20 @@ func RoutesFile(m routing.Manifest) ([]byte, error) {
 	}
 	b.WriteString("\t}\n}\n\n")
 
-	// SSRPage resolves the templ-generated page symbol for an SSR route.
-	// The generator emits exactly the symbols the app tree provides; a
-	// missing symbol is a build error at generation time, never a runtime
-	// panic (C09 will extend diagnostics).
+	// SSRPage resolves each SSR route's templ-generated page symbol from
+	// its compiled package. Symbols follow the file convention:
+	// <dir>/page.templ declares templ <PascalDir>() — Page, About. The
+	// mapping is emitted per route at generation time (no reflection, no
+	// runtime lookup).
 	b.WriteString("// SSRPage returns the templ-generated page component for an SSR route.\n")
 	b.WriteString("func SSRPage(r routing.Route) templ.Component {\n")
-	b.WriteString("\treturn app.Page()\n")
+	for _, r := range m.Routes {
+		if r.Mode != routing.ModeSSR {
+			continue
+		}
+		fmt.Fprintf(&b, "\tif r.ID == %q {\n\t\treturn page%d.%s()\n\t}\n", r.ID, ssrIndex(r, m), pageSymbol(r))
+	}
+	b.WriteString("\tpanic(\"routes: SSRPage: no component mapped for route \" + r.ID)\n")
 	b.WriteString("}\n")
 
 	formatted, err := format.Source([]byte(b.String()))
@@ -64,6 +80,58 @@ func RoutesFile(m routing.Manifest) ([]byte, error) {
 		return nil, fmt.Errorf("codegen: generated source does not format (generator bug): %w", err)
 	}
 	return formatted, nil
+}
+
+// templImportPath returns the Go import path of the templ-generated
+// package containing an SSR route's page: the page's directory relative to
+// module root. The templ files declare `package app`, so every directory
+// under app/ compiles to its own go-meta/app/<dir> package.
+func templImportPath(r routing.Route) string {
+	dir := path.Dir(r.SourceFile)
+	if dir == "." || dir == "/" {
+		return "go-meta/app"
+	}
+	return "go-meta/app/" + dir
+}
+
+// ssrIndex is the manifest-order index of an SSR route, used for its
+// deterministic generated alias.
+func ssrIndex(r routing.Route, m routing.Manifest) int {
+	n := 0
+	for _, c := range m.Routes {
+		if c.ID == r.ID && c.SourceFile == r.SourceFile {
+			return n
+		}
+		if c.Mode == routing.ModeSSR {
+			n++
+		}
+	}
+	return n
+}
+
+// pageSymbol derives the templ component symbol name for a page source
+// file: the Pascal-cased directory name (root page.templ -> Page,
+// about/page.templ -> About, dashboard/settings/page.svelte ->
+// DashboardSettings).
+func pageSymbol(r routing.Route) string {
+	dir := path.Dir(r.SourceFile)
+	if dir == "." || dir == "/" {
+		dir = ""
+	}
+	parts := strings.Split(dir, "/")
+	name := ""
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		// Upper-case first letter; leave the rest as-is. Directory names
+		// are already validated to be URL-safe single segments.
+		name += strings.ToUpper(p[:1]) + p[1:]
+	}
+	if name == "" {
+		name = "Page"
+	}
+	return name
 }
 
 func writeRouteLiteral(b *strings.Builder, r routing.Route) {

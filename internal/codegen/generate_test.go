@@ -29,6 +29,48 @@ func fixtureManifest(t *testing.T) routing.Manifest {
 	return routing.NewManifest(routes)
 }
 
+// TestPageSymbol locks the source-path-to-symbol convention used by the
+// generated SSRPage mapping.
+func TestPageSymbol(t *testing.T) {
+	cases := []struct {
+		src  string
+		want string
+	}{
+		{"page.templ", "Page"},
+		{"about/page.templ", "About"},
+		{"dashboard/settings/page.svelte", "DashboardSettings"},
+	}
+	for _, tc := range cases {
+		r := routing.Route{SourceFile: tc.src}
+		if got := pageSymbol(r); got != tc.want {
+			t.Errorf("pageSymbol(%q) = %q, want %q", tc.src, got, tc.want)
+		}
+	}
+}
+
+// TestRoutesFileSSRPageMapping: each SSR route maps to its own compiled
+// symbol from its own package alias; CSR routes never appear there.
+func TestRoutesFileSSRPageMapping(t *testing.T) {
+	srcB, err := RoutesFile(fixtureManifest(t))
+	if err != nil {
+		t.Fatalf("RoutesFile: %v", err)
+	}
+	src := string(srcB)
+	for _, want := range []string{
+		`if r.ID == "page.templ" {`,
+		"return page0.Page()",
+		`if r.ID == "about/page.templ" {`,
+		"return page1.About()",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("generated source missing %q:\n%s", want, src)
+		}
+	}
+	if strings.Contains(src, "Dashboard") && strings.Contains(src, "page2.") {
+		t.Error("CSR route leaked into SSRPage mapping")
+	}
+}
+
 // TestRoutesFileParses is the C02 acceptance criterion: the generated file
 // parses with go/parser.
 func TestRoutesFileParses(t *testing.T) {
@@ -56,10 +98,12 @@ func TestRoutesFileContent(t *testing.T) {
 		`{ID: "dashboard/page.svelte", Path: "/dashboard", SourceFile: "dashboard/page.svelte", Mode: "csr"`,
 		`{ID: "layout.templ", SourceFile: "layout.templ", Mode: "ssr"}`,
 		`{ID: "dashboard/layout.svelte", SourceFile: "dashboard/layout.svelte", Mode: "csr"}`,
-		// C04: templ-generated package import and symbol wiring.
-		`"go-meta/app"`,
+		// C05: per-route symbol mapping with deterministic aliases.
+		"page0 \"go-meta/app\"",
+		"page1 \"go-meta/app/about\"",
 		"templ.Component",
-		"return app.Page()",
+		"return page0.Page()",
+		"return page1.About()",
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("generated source missing %q:\n%s", want, src)
