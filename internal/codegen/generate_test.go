@@ -56,6 +56,10 @@ func TestRoutesFileContent(t *testing.T) {
 		`{ID: "dashboard/page.svelte", Path: "/dashboard", SourceFile: "dashboard/page.svelte", Mode: "csr"`,
 		`{ID: "layout.templ", SourceFile: "layout.templ", Mode: "ssr"}`,
 		`{ID: "dashboard/layout.svelte", SourceFile: "dashboard/layout.svelte", Mode: "csr"}`,
+		// C04: templ-generated package import and symbol wiring.
+		`"go-meta/app"`,
+		"templ.Component",
+		"return app.Page()",
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("generated source missing %q:\n%s", want, src)
