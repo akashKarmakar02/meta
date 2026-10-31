@@ -29,29 +29,29 @@ func (m RenderMode) Valid() bool {
 type Layout struct {
 	// ID is a deterministic stable identifier shared with generated code
 	// and the client navigation protocol.
-	ID string
+	ID string `json:"id"`
 	// SourceFile is the slash-normalized path of the layout file relative
 	// to the app root, e.g. "dashboard/layout.svelte".
-	SourceFile string
+	SourceFile string `json:"sourceFile"`
 	// Mode is the rendering technology of the layout.
-	Mode RenderMode
+	Mode RenderMode `json:"mode"`
 }
 
 // Route is one discovered page route.
 type Route struct {
-	// Path is the normalized URL path, e.g. "/dashboard/settings".
-	Path string
-	// SourceFile is the slash-normalized page file path relative to the
-	// app root, e.g. "dashboard/settings/page.svelte".
-	SourceFile string
-	// Mode is the rendering mode of the page.
-	Mode RenderMode
-	// Layouts is the wrapping chain, outermost first (root layout at
-	// index 0, the innermost layout last).
-	Layouts []Layout
 	// ID is a deterministic stable identifier, shared with generated code
 	// and the client navigation protocol.
-	ID string
+	ID string `json:"id"`
+	// Path is the normalized URL path, e.g. "/dashboard/settings".
+	Path string `json:"path"`
+	// SourceFile is the slash-normalized page file path relative to the
+	// app root, e.g. "dashboard/settings/page.svelte".
+	SourceFile string `json:"sourceFile"`
+	// Mode is the rendering mode of the page.
+	Mode RenderMode `json:"mode"`
+	// Layouts is the wrapping chain, outermost first (root layout at
+	// index 0, the innermost layout last).
+	Layouts []Layout `json:"layouts"`
 }
 
 // NewLayout constructs a layout descriptor after basic validation.
@@ -69,8 +69,9 @@ func NewLayout(id, sourceFile string, mode RenderMode) (Layout, error) {
 }
 
 // NewRoute constructs a route descriptor after basic validation. It does
-// not normalize paths (URL normalization is a separate concern) nor derive
-// stable IDs; both belong to discovery and generation.
+// not normalize paths (URL normalization is a separate concern). The route
+// ID is the stable identifier shared with the client navigation protocol
+// and is derived from the source file path relative to the app root.
 func NewRoute(path, sourceFile string, mode RenderMode, layouts []Layout) (Route, error) {
 	if path == "" || path[0] != '/' {
 		return Route{}, fmt.Errorf("routing: route %q: path must be absolute and start with %q", sourceFile, "/")
@@ -87,6 +88,7 @@ func NewRoute(path, sourceFile string, mode RenderMode, layouts []Layout) (Route
 		}
 	}
 	return Route{
+		ID:         sourceFile,
 		Path:       path,
 		SourceFile: sourceFile,
 		Mode:       mode,
