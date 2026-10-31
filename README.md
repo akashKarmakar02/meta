@@ -28,7 +28,7 @@ The implementation plan lives in [`phase1-implementation-blueprint.md`](phase1-i
 
 ## Status
 
-Task A01 of the Phase 1 task board (repository bootstrap) is complete.
-Subsequent tasks (Go module init, Fiber v3 health endpoint, frontend tooling,
-templ, route generation) are implemented sequentially per the blueprint's
-gates.
+Tasks A01–A02 of the Phase 1 task board are complete: repository bootstrapped
+and the Go module initialized (`go mod tidy` passes). Subsequent tasks (Fiber
+v3 health endpoint, middleware, frontend tooling, templ, route generation) are
+implemented sequentially per the blueprint's gates.
