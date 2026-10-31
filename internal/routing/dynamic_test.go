@@ -87,18 +87,38 @@ func TestAmbiguousDynamicSegmentsRejected(t *testing.T) {
 	}
 }
 
+// Phase 1 dynamic-route contract: at most one dynamic segment per route, so
+// /products/[id]/edit/[step] (two parameters) must be rejected at discovery,
+// while the same parameter name in different routes stays valid.
 func TestSameParameterNameDifferentPositionsValid(t *testing.T) {
 	fsys := fstest.MapFS{
-		"products/[id]/page.svelte":             {Data: []byte("x")},
-		"categories/[id]/page.svelte":           {Data: []byte("x")},
-		"products/[id]/edit/[step]/page.svelte": {Data: []byte("x")},
+		"products/[id]/page.svelte":   {Data: []byte("x")},
+		"categories/[id]/page.svelte": {Data: []byte("x")},
 	}
 	routes, err := Discover(fsys)
 	if err != nil {
 		t.Fatalf("Discover() error = %v", err)
 	}
-	if len(routes) != 3 {
-		t.Fatalf("route count = %d, want 3", len(routes))
+	if len(routes) != 2 {
+		t.Fatalf("route count = %d, want 2", len(routes))
+	}
+
+	twoParams := fstest.MapFS{
+		"products/[id]/edit/[step]/page.svelte": {Data: []byte("x")},
+	}
+	if _, err := Discover(twoParams); err == nil {
+		t.Fatal("two dynamic segments should be rejected")
+	} else if !strings.Contains(err.Error(), "2 dynamic segments") || !strings.Contains(err.Error(), "products/[id]/edit/[step]") {
+		t.Errorf("error should name the source file and segment count, got: %v", err)
+	}
+
+	yearSlashSlug := fstest.MapFS{
+		"blog/[year]/[slug]/page.svelte": {Data: []byte("x")},
+	}
+	if _, err := Discover(yearSlashSlug); err == nil {
+		t.Fatal("/blog/:year/:slug should be rejected as two dynamic segments")
+	} else if !strings.Contains(err.Error(), "year, slug") {
+		t.Errorf("error should list both parameter names, got: %v", err)
 	}
 }
 

@@ -28,10 +28,13 @@ func ValidateRoutes(routes []Route) error {
 	return validateDynamicAmbiguity(routes)
 }
 
-// validateDynamicAmbiguity rejects sibling dynamic segments that bind to the
-// same Fiber parameter slot with different names, e.g. "/products/[id]" and
-// "/products/[slug]": both normalize to a parameter at the same position, so
-// Fiber cannot route between them deterministically.
+// validateDynamicAmbiguity enforces the Phase 1 dynamic-route contract:
+//
+//   - A route may contain at most one dynamic segment: /blog/[year]/[slug]
+//     (two parameters) is out of scope for Phase 1.
+//   - No two routes may bind different parameter names to the same position
+//     (e.g. [id] and [slug] under the same parent), because both normalize
+//     to the same URL shape and Fiber could not route between them.
 func validateDynamicAmbiguity(routes []Route) error {
 	type dynamicKey struct {
 		prefix string // static segments before the parameter
@@ -40,6 +43,18 @@ func validateDynamicAmbiguity(routes []Route) error {
 	slots := make(map[dynamicKey]string)
 	for _, r := range routes {
 		segs := strings.Split(strings.TrimPrefix(r.Path, "/"), "/")
+		var names []string
+		for _, seg := range segs {
+			if strings.HasPrefix(seg, ":") {
+				names = append(names, seg[1:])
+			}
+		}
+		if len(names) > 1 {
+			return fmt.Errorf(
+				"routing: %s: route %q has %d dynamic segments (%s): Phase 1 supports at most one per route",
+				r.SourceFile, r.Path, len(names), strings.Join(names, ", "),
+			)
+		}
 		for i, seg := range segs {
 			if !strings.HasPrefix(seg, ":") {
 				continue
