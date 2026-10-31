@@ -16,7 +16,10 @@ import (
 
 // newApp constructs the Fiber application with its middleware and routes.
 func newApp() *fiber.App {
-	fapp := fiber.New()
+	fapp := fiber.New(fiber.Config{
+		// D07: centralized HTML error pages; no stack traces or internals leak.
+		ErrorHandler: render.HTTPErrorHandler,
+	})
 
 	// Recover converts panics into 500 responses instead of killing the server.
 	fapp.Use(recover.New())

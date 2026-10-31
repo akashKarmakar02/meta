@@ -145,8 +145,11 @@ func TestUnknownRoute404Body(t *testing.T) {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
 	b, _ := io.ReadAll(resp.Body)
-	if strings.Contains(string(b), "<html") || strings.Contains(string(b), "<main") {
-		t.Fatalf("404 leaked page markup: %q", b)
+	if !strings.Contains(string(b), "data-go-error=\"404\"") {
+		t.Fatalf("404 body missing centralized error page: %q", b)
+	}
+	if strings.Contains(string(b), "goroutine") || strings.Contains(string(b), ".go:") {
+		t.Fatalf("404 leaked stack trace: %q", b)
 	}
 }
 
