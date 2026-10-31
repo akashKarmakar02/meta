@@ -126,6 +126,32 @@ func TestSSRStillRender(t *testing.T) {
 	}
 }
 
+// TestAboutTextPresentWithoutJS is D03's acceptance: /about serves its
+// heading and body text server-side with no JavaScript — zero <script>
+// tags and no on* handler attributes anywhere in the response.
+func TestAboutTextPresentWithoutJS(t *testing.T) {
+	app := newApp()
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/about", nil))
+	if err != nil {
+		t.Fatalf("test request: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	html := string(body)
+	for _, want := range []string{"<h1>About</h1>", "renders templ pages server-side"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("/about missing %q in:\n%s", want, html)
+		}
+	}
+	for _, banned := range []string{"<script", "javascript:", "onload=", "onclick="} {
+		if strings.Contains(html, banned) {
+			t.Errorf("/about contains %q: page must render without JavaScript", banned)
+		}
+	}
+}
+
 // TestRoutesRegisteredExactlyOnce: registration cannot duplicate routes.
 // Duplicates would require duplicate paths in the generated descriptor set
 // (B08 rejects those at discovery), and the registration loop is a single
