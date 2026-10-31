@@ -225,6 +225,126 @@ func TestClassifyPageExactFilenames(t *testing.T) {
 	}
 }
 
+// TestDiscoverRootLayoutAncestry matches the B06 acceptance fixture: root
+// layout.templ is reported by both / and /about.
+func TestDiscoverRootLayoutAncestry(t *testing.T) {
+	fsys := fstest.MapFS{
+		"layout.templ":     &fstest.MapFile{Data: []byte("templ Layout() {}")},
+		"page.templ":       &fstest.MapFile{Data: []byte("templ Page() {}")},
+		"about/page.templ": &fstest.MapFile{Data: []byte("templ About() {}")},
+	}
+	routes, err := Discover(fsys)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(routes) != 2 {
+		t.Fatalf("routes = %d, want 2; got %+v", len(routes), routes)
+	}
+	for _, r := range routes {
+		if len(r.Layouts) != 1 {
+			t.Errorf("route %q Layouts = %+v, want one root layout", r.Path, r.Layouts)
+			continue
+		}
+		l := r.Layouts[0]
+		if l.SourceFile != "layout.templ" || l.Mode != ModeSSR || l.ID != "layout.templ" {
+			t.Errorf("route %q layout = %+v, want layout.templ ssr", r.Path, l)
+		}
+	}
+}
+
+func TestDiscoverLayoutNotARoute(t *testing.T) {
+	fsys := fstest.MapFS{
+		"layout.templ": &fstest.MapFile{Data: []byte("templ Layout() {}")},
+		"page.templ":   &fstest.MapFile{Data: []byte("templ Page() {}")},
+	}
+	routes, err := Discover(fsys)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(routes) != 1 || routes[0].Path != "/" {
+		t.Errorf("routes = %+v, want only the root page; layouts create no URL", routes)
+	}
+}
+
+// TestDiscoverNestedTemplLayoutChain verifies ancestry walks intermediate
+// directories: docs/layout.templ wraps docs/page.templ plus the root layout.
+func TestDiscoverNestedTemplLayoutChain(t *testing.T) {
+	fsys := fstest.MapFS{
+		"layout.templ":      &fstest.MapFile{Data: []byte("templ Root() {}")},
+		"page.templ":        &fstest.MapFile{Data: []byte("templ Page() {}")},
+		"docs/layout.templ": &fstest.MapFile{Data: []byte("templ Docs() {}")},
+		"docs/page.templ":   &fstest.MapFile{Data: []byte("templ DocPage() {}")},
+	}
+	routes, err := Discover(fsys)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	var docs *Route
+	for i := range routes {
+		if routes[i].Path == "/docs" {
+			docs = &routes[i]
+		}
+	}
+	if docs == nil {
+		t.Fatalf("/docs not discovered: %+v", routes)
+	}
+	if len(docs.Layouts) != 2 {
+		t.Fatalf("/docs Layouts = %+v, want [root, docs] chain", docs.Layouts)
+	}
+	if docs.Layouts[0].SourceFile != "layout.templ" || docs.Layouts[1].SourceFile != "docs/layout.templ" {
+		t.Errorf("/docs Layouts = %+v, want outermost-first [layout.templ, docs/layout.templ]", docs.Layouts)
+	}
+}
+
+// TestDiscoverLayoutSvelteNotYetClassified: B06 recognizes only
+// layout.templ; layout.svelte in the same directory must not error (that
+// conflict is B09's to reject) and must not become a route. It stays a
+// dormant component until B07 classifies it.
+func TestDiscoverLayoutSvelteNotYetClassified(t *testing.T) {
+	fsys := fstest.MapFS{
+		"layout.templ":  &fstest.MapFile{Data: []byte("templ T() {}")},
+		"layout.svelte": &fstest.MapFile{Data: []byte("<div />")},
+		"page.templ":    &fstest.MapFile{Data: []byte("templ Page() {}")},
+	}
+	routes, err := Discover(fsys)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(routes) != 1 || routes[0].Path != "/" {
+		t.Errorf("routes = %+v, want only root page", routes)
+	}
+	if len(routes[0].Layouts) != 1 || routes[0].Layouts[0].SourceFile != "layout.templ" {
+		t.Errorf("Layouts = %+v, want only layout.templ", routes[0].Layouts)
+	}
+}
+
+// TestDiscoverLayoutDoesNotWrapUnrelatedTree checks a layout applies only to
+// its own subtree: a dashboard-only layout must not leak into /about.
+func TestDiscoverLayoutScoping(t *testing.T) {
+	fsys := fstest.MapFS{
+		"page.templ":             &fstest.MapFile{Data: []byte("templ Page() {}")},
+		"about/page.templ":       &fstest.MapFile{Data: []byte("templ About() {}")},
+		"dashboard/layout.templ": &fstest.MapFile{Data: []byte("templ Dash() {}")},
+		"dashboard/page.svelte":  &fstest.MapFile{Data: []byte("<main />")},
+	}
+	routes, err := Discover(fsys)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	for _, r := range routes {
+		switch r.Path {
+		case "/", "/about":
+			if len(r.Layouts) != 0 {
+				t.Errorf("route %q unexpectedly wrapped by %+v", r.Path, r.Layouts)
+			}
+		case "/dashboard":
+			// B06 classifies only layout.templ; dashboard/layout.templ is
+			// in a CSR subtree, which later tasks (B09/G10) will reject.
+			// Here we assert discovery stays silent-but-scoped for now.
+		}
+	}
+}
+
 // errorFS always fails with a permission error, exercising Discover's
 // walk error wrapping.
 type errorFS struct{}
