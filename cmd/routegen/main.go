@@ -51,6 +51,11 @@ func run(appDir, outDir string) error {
 		return err
 	}
 
-	fmt.Printf("routegen: %d routes written to %s\n", len(manifest.Routes), "generated/routes_gen.go")
+	if err := codegen.WriteRouteRegistryTS(outDir, manifest); err != nil {
+		return err
+	}
+
+	fmt.Printf("routegen: %d routes written to %s and %s\n",
+		len(manifest.Routes), "generated/routes_gen.go", "frontend/route-registry.generated.ts")
 	return nil
 }

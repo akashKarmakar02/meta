@@ -32,5 +32,13 @@ describe('route import map (E05)', () => {
       expect(typeof comp).toBe('function');
     }
   });
+
+  it('serves every CSR route from the generated registry, not just E05’s manual two', async () => {
+    // Since E06 the map is generated from discovery: all four CSR routes
+    // (including the products placeholders) must resolve.
+    const comp = await loadPage('products/new/page.svelte');
+    expect(comp).toBeTruthy();
+    expect(await loadPage('no/such/page.svelte')).toBeNull();
+  });
 });
 

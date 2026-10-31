@@ -1,19 +1,17 @@
-// Manually-coded client route import map (E05).
+// Client route resolution façade (E05→E06): exposes hasPage()/loadPage()
+// over the route import map. Since E06 the map itself is generated from
+// the Go route discovery manifest (frontend/route-registry.generated.ts,
+// written by routegen at build time) — this file is hand-written logic
+// only: lookup, explicit-missing semantics, and type narrowing.
 //
-// Maps stable, source-derived route IDs (e.g. 'dashboard/page.svelte',
-// matching the Go manifest's Route.ID) to lazy component loaders. Keys are
-// logical identifiers — never evaluated paths — so a server response can
-// only select an entry that exists here (blueprint §5: no arbitrary path
-// import).
-//
-// E06 replaces this hand-written map with route-registry.generated.ts built
-// from the same discovery manifest; the exported interface stays identical
-// so consumers migrate without changes. Route selection (which ID belongs
-// on the page) stays in the bootstrap/navigation runtime, not here: this
-// module is pure data plus lookup, with no DOM or server coupling.
+// Keys are stable source-derived route IDs shared with the Go manifest;
+// import() loaders are static per-route calls Vite analyzes at build
+// time, so a server response can only select an entry that exists here
+// (blueprint §5: no arbitrary path import).
 import type { Component } from 'svelte';
+import { pageLoaders } from './route-registry.generated';
 
-/** A lazily-loaded client-rendered page component. */
+/** A client-rendered page component. */
 export type PageComponent = Component<any, any, any>;
 
 /** Module namespace produced by a dynamic page import. */
@@ -24,19 +22,12 @@ export interface PageModule {
 /** Lazy loader for one client-rendered page. */
 export type PageLoader = () => Promise<PageModule>;
 
-// Manual import map for Phase 1's two CSR routes. Import() keeps each page
-// out of the entry bundle until its route actually renders.
-const pages: Readonly<Record<string, PageLoader>> = {
-  'dashboard/page.svelte': () => import('../app/dashboard/page.svelte'),
-  'dashboard/settings/page.svelte': () => import('../app/dashboard/settings/page.svelte'),
-};
-
 /**
- * Whether the import map knows a route ID. Loaders exist only for IDs the
- * discovery manifest produced; unknown IDs are never guessed.
+ * Whether the route import map knows a route ID. Loaders exist only for
+ * IDs the discovery manifest produced; unknown IDs are never guessed.
  */
 export function hasPage(routeId: string): boolean {
-  return Object.hasOwn(pages, routeId);
+  return Object.hasOwn(pageLoaders, routeId);
 }
 
 /**
@@ -48,10 +39,9 @@ export function hasPage(routeId: string): boolean {
  * nothing).
  */
 export async function loadPage(routeId: string): Promise<PageComponent | null> {
-  const loader = Object.hasOwn(pages, routeId) ? pages[routeId] : undefined;
-  if (!loader) {
+  if (!Object.hasOwn(pageLoaders, routeId)) {
     return null;
   }
-  const mod = await loader();
-  return mod.default;
+  const mod = await pageLoaders[routeId]();
+  return (mod as PageModule).default;
 }

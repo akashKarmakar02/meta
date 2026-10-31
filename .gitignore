@@ -7,6 +7,9 @@ bin/
 # Generated code — always produced by the generator, never edited by hand
 generated/
 
+# Generated client route import map (routegen, E06)
+frontend/route-registry.generated.ts
+
 # Go build artifacts
 *.exe
 *.test
