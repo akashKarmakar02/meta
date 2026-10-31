@@ -7,6 +7,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
+	"go-meta/internal/httpserver"
 	"go-meta/internal/routing"
 )
 
@@ -16,32 +17,48 @@ import (
 // the requested page. The shape of this document is a stable contract:
 // later phases add script/style tags (Vite assets) without changing the
 // mount element or metadata attributes.
-func Shell(route routing.Route) string {
+//
+// E08: when assets are supplied, the Vite entry module script (and entry
+// CSS, if any) is injected from the production manifest. Hashed names
+// come from the manifest via httpserver.Assets — never hardcoded. The
+// E09 static middleware serves them under the same /assets prefix.
+func Shell(route routing.Route, assets *httpserver.Assets) string {
 	// Route ID and path come from our own generated manifest (already
 	// validated, slash-normalized paths), but escape anyway so no route
 	// naming choice can ever inject markup into the document.
 	id := html.EscapeString(route.ID)
 	path := html.EscapeString(route.Path)
 
-	return "<!DOCTYPE html>\n" +
+	head := "<!DOCTYPE html>\n" +
 		"<html lang=\"en\">\n" +
 		"<head>\n" +
 		"<meta charset=\"utf-8\">\n" +
 		"<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n" +
-		"<title>" + id + "</title>\n" +
-		"</head>\n" +
+		"<title>" + id + "</title>\n"
+	if assets != nil {
+		for _, css := range assets.EntryCSSURLs {
+			head += "<link rel=\"stylesheet\" href=\"" + html.EscapeString(css) + "\">\n"
+		}
+	}
+	head += "</head>\n" +
 		"<body>\n" +
-		"<div id=\"app\" data-go-route=\"" + path + "\" data-go-route-id=\"" + id + "\"></div>\n" +
-		"</body>\n" +
+		"<div id=\"app\" data-go-route=\"" + path + "\" data-go-route-id=\"" + id + "\"></div>\n"
+	if assets != nil {
+		head += "<script type=\"module\" src=\"" + html.EscapeString(assets.EntryScriptURL) + "\"></script>\n"
+	}
+	head += "</body>\n" +
 		"</html>\n"
+	return head
 }
 
 // ShellHandler returns a Fiber handler that responds with the rendered
 // shell for a fixed route — keeping HTTP details out of the renderer.
-func ShellHandler(route routing.Route) func(c fiber.Ctx) error {
+// A nil assets value renders the bare mount-point shell (used by tests;
+// production wiring supplies manifest-resolved assets).
+func ShellHandler(route routing.Route, assets *httpserver.Assets) func(c fiber.Ctx) error {
 	return func(c fiber.Ctx) error {
 		c.Set(fiber.HeaderContentType, "text/html; charset=utf-8")
-		return c.SendString(Shell(route))
+		return c.SendString(Shell(route, assets))
 	}
 }
 

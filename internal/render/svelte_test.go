@@ -26,10 +26,11 @@ func fixtureRoute() routing.Route {
 	return r
 }
 
-// TestShellDocument: the shell is a valid HTML5 document with the mount
-// element and route metadata attributes.
+// TestShellDocument: without assets (pre-E08 test mode) the shell is a
+// valid HTML5 document with the mount element and route metadata
+// attributes.
 func TestShellDocument(t *testing.T) {
-	got := Shell(fixtureRoute())
+	got := Shell(fixtureRoute(), nil)
 	for _, want := range []string{
 		"<!DOCTYPE html>",
 		`<div id="app" data-go-route="/dashboard" data-go-route-id="dashboard/page.svelte">`,
@@ -51,7 +52,7 @@ func TestShellEscapesRouteMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRoute: %v", err)
 	}
-	got := Shell(r)
+	got := Shell(r, nil)
 	if strings.Contains(got, "<script>") {
 		t.Errorf("unescaped route data in shell:\n%s", got)
 	}
@@ -64,7 +65,7 @@ func TestShellEscapesRouteMetadata(t *testing.T) {
 
 // TestShellHandlerResponse: the handler returns 200 HTML with the shell.
 func TestShellHandlerResponse(t *testing.T) {
-	app := newTestApp(ShellHandler(fixtureRoute()))
+	app := newTestApp(ShellHandler(fixtureRoute(), nil))
 	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/dashboard", nil))
 	if err != nil {
 		t.Fatalf("test request: %v", err)

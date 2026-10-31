@@ -10,12 +10,17 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/recover"
 
 	routes "go-meta/generated"
+	"go-meta/internal/httpserver"
 	"go-meta/internal/render"
 	"go-meta/internal/routing"
 )
 
 // newApp constructs the Fiber application with its middleware and routes.
-func newApp() *fiber.App {
+// assets carries the Vite-manifest-resolved client entry URLs; nil renders
+// bare CSR shells without scripts (test/fixture mode). Production main
+// loads the manifest and fails explicitly on missing/invalid manifests
+// rather than serving shells that cannot boot (E08 contract).
+func newApp(assets *httpserver.Assets) *fiber.App {
 	fapp := fiber.New(fiber.Config{
 		// D07: centralized HTML error pages; no stack traces or internals leak.
 		ErrorHandler: render.HTTPErrorHandler,
@@ -49,7 +54,7 @@ func newApp() *fiber.App {
 				return render.SSRHandler(route.Path, component)(c)
 			})
 		case routing.ModeCSR:
-			fapp.Get(route.Path, render.ShellHandler(route))
+			fapp.Get(route.Path, render.ShellHandler(route, assets))
 		}
 	}
 
@@ -57,5 +62,9 @@ func newApp() *fiber.App {
 }
 
 func main() {
-	log.Fatal(newApp().Listen(":3000"))
+	assets, err := httpserver.LoadAssets("dist/client")
+	if err != nil {
+		log.Fatalf("load client assets: %v", err)
+	}
+	log.Fatal(newApp(&assets).Listen(":3000"))
 }

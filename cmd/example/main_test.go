@@ -8,12 +8,13 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"go-meta/generated"
+	"go-meta/internal/httpserver"
 )
 
 // --- existing tests (restored) ---
 
 func TestHealthz(t *testing.T) {
-	app := newApp()
+	app := newApp(nil)
 	resp, err := app.Test(httptest.NewRequest("GET", "/healthz", nil))
 	if err != nil {
 		t.Fatal(err)
@@ -28,7 +29,7 @@ func TestHealthz(t *testing.T) {
 }
 
 func TestUnknownRoute404(t *testing.T) {
-	app := newApp()
+	app := newApp(nil)
 	resp, err := app.Test(httptest.NewRequest("GET", "/nope", nil))
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +40,7 @@ func TestUnknownRoute404(t *testing.T) {
 }
 
 func TestPanicReturns500(t *testing.T) {
-	app := newApp()
+	app := newApp(nil)
 	app.Get("/boom", func(c fiber.Ctx) error {
 		panic("boom")
 	})
@@ -53,7 +54,7 @@ func TestPanicReturns500(t *testing.T) {
 }
 
 func TestSSRStillRender(t *testing.T) {
-	app := newApp()
+	app := newApp(nil)
 	for path, marker := range map[string]string{
 		"/":      "go-meta",
 		"/about": "About",
@@ -75,8 +76,28 @@ func TestSSRStillRender(t *testing.T) {
 	}
 }
 
+// E08: SSR routes are unaffected by asset injection — assets supplied,
+// but SSR pages never embed the client entry.
+func TestSSRUnaffectedByAssets(t *testing.T) {
+	assets := httpserver.Assets{EntryScriptURL: "/assets/entry-TEST.js"}
+	app := newApp(&assets)
+	for _, path := range []string{"/", "/about", "/docs"} {
+		resp, err := app.Test(httptest.NewRequest("GET", path, nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != 200 {
+			t.Fatalf("%s: status = %d", path, resp.StatusCode)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		if strings.Contains(string(b), "entry-TEST") {
+			t.Fatalf("%s: SSR page must not embed client entry:\n%s", path, b)
+		}
+	}
+}
+
 func TestAboutTextPresentWithoutJS(t *testing.T) {
-	app := newApp()
+	app := newApp(nil)
 	resp, err := app.Test(httptest.NewRequest("GET", "/about", nil))
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +115,7 @@ func TestAboutTextPresentWithoutJS(t *testing.T) {
 }
 
 func TestCSRShellServed(t *testing.T) {
-	app := newApp()
+	app := newApp(nil)
 	resp, err := app.Test(httptest.NewRequest("GET", "/dashboard", nil))
 	if err != nil {
 		t.Fatal(err)
@@ -117,12 +138,65 @@ func TestCSRShellServed(t *testing.T) {
 		}
 	}
 	if strings.Contains(body, "<script") {
-		t.Fatalf("C06 shell must not embed scripts yet: %q", body)
+		t.Fatalf("shell without assets must not embed scripts: %q", body)
+	}
+}
+
+// E08: with manifest-resolved assets, the CSR shell injects the entry
+// module script; Dashboard and Settings shells both reference it.
+func TestCSRShellInjectsEntryScript(t *testing.T) {
+	assets := httpserver.Assets{
+		EntryScriptURL: "/assets/entry-TESTHASH.js",
+	}
+	app := newApp(&assets)
+	for _, path := range []string{"/dashboard", "/dashboard/settings"} {
+		resp, err := app.Test(httptest.NewRequest("GET", path, nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != 200 {
+			t.Fatalf("%s: status = %d", path, resp.StatusCode)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		body := string(b)
+		want := `<script type="module" src="/assets/entry-TESTHASH.js"></script>`
+		if !strings.Contains(body, want) {
+			t.Fatalf("%s: shell missing entry script %q:\n%s", path, want, body)
+		}
+		// Mount element and route metadata unchanged by injection.
+		id := "dashboard/page.svelte"
+		if path == "/dashboard/settings" {
+			id = "dashboard/settings/page.svelte"
+		}
+		if !strings.Contains(body, `data-go-route-id="`+id+`"`) {
+			t.Fatalf("%s: route id metadata changed:\n%s", path, body)
+		}
+		if !strings.Contains(body, `<div id="app"`) {
+			t.Fatalf("%s: mount element missing:\n%s", path, body)
+		}
+	}
+}
+
+// E08: entry CSS from the manifest is injected as a stylesheet link.
+func TestCSRShellInjectsEntryCSS(t *testing.T) {
+	assets := httpserver.Assets{
+		EntryScriptURL: "/assets/entry-X.js",
+		EntryCSSURLs:   []string{"/assets/entry-X.css"},
+	}
+	app := newApp(&assets)
+	resp, err := app.Test(httptest.NewRequest("GET", "/dashboard", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	body := string(b)
+	if !strings.Contains(body, `<link rel="stylesheet" href="/assets/entry-X.css">`) {
+		t.Fatalf("shell missing CSS link:\n%s", body)
 	}
 }
 
 func TestNonGETMethodsRejectPageRoutes(t *testing.T) {
-	app := newApp()
+	app := newApp(nil)
 	for _, method := range []string{"POST", "PUT", "DELETE", "PATCH"} {
 		req := httptest.NewRequest(method, "/about", nil)
 		resp, err := app.Test(req)
@@ -136,7 +210,7 @@ func TestNonGETMethodsRejectPageRoutes(t *testing.T) {
 }
 
 func TestUnknownRoute404Body(t *testing.T) {
-	app := newApp()
+	app := newApp(nil)
 	resp, err := app.Test(httptest.NewRequest("GET", "/missing", nil))
 	if err != nil {
 		t.Fatal(err)
@@ -154,7 +228,7 @@ func TestUnknownRoute404Body(t *testing.T) {
 }
 
 func TestPageRoutesKeepServingAfterNotFound(t *testing.T) {
-	app := newApp()
+	app := newApp(nil)
 	if _, err := app.Test(httptest.NewRequest("GET", "/nope", nil)); err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +264,7 @@ func TestGeneratedRouteCount(t *testing.T) {
 // --- D06 layout composition tests ---
 
 func TestRootPageInsideRootLayout(t *testing.T) {
-	app := newApp()
+	app := newApp(nil)
 	resp, err := app.Test(httptest.NewRequest("GET", "/", nil))
 	if err != nil {
 		t.Fatal(err)
@@ -209,7 +283,7 @@ func TestRootPageInsideRootLayout(t *testing.T) {
 }
 
 func TestAboutInsideRootLayout(t *testing.T) {
-	app := newApp()
+	app := newApp(nil)
 	resp, err := app.Test(httptest.NewRequest("GET", "/about", nil))
 	if err != nil {
 		t.Fatal(err)
@@ -225,7 +299,7 @@ func TestAboutInsideRootLayout(t *testing.T) {
 }
 
 func TestExactlyOneDocumentRoot(t *testing.T) {
-	app := newApp()
+	app := newApp(nil)
 	for _, path := range []string{"/", "/about", "/docs"} {
 		resp, err := app.Test(httptest.NewRequest("GET", path, nil))
 		if err != nil {
@@ -243,7 +317,7 @@ func TestExactlyOneDocumentRoot(t *testing.T) {
 }
 
 func TestNestedLayoutComposition(t *testing.T) {
-	app := newApp()
+	app := newApp(nil)
 	resp, err := app.Test(httptest.NewRequest("GET", "/docs", nil))
 	if err != nil {
 		t.Fatal(err)
@@ -274,7 +348,7 @@ func TestNestedLayoutComposition(t *testing.T) {
 // TestDocsWrapperOrder is D08's acceptance fixture: the composed
 // wrapper order must be root > docs > page, each exactly once.
 func TestDocsWrapperOrder(t *testing.T) {
-	app := newApp()
+	app := newApp(nil)
 	resp, err := app.Test(httptest.NewRequest("GET", "/docs", nil))
 	if err != nil {
 		t.Fatal(err)
@@ -311,7 +385,7 @@ func TestDocsWrapperOrder(t *testing.T) {
 }
 
 func TestSiblingLayoutsDoNotLeak(t *testing.T) {
-	app := newApp()
+	app := newApp(nil)
 	resp, err := app.Test(httptest.NewRequest("GET", "/about", nil))
 	if err != nil {
 		t.Fatal(err)
@@ -323,7 +397,7 @@ func TestSiblingLayoutsDoNotLeak(t *testing.T) {
 }
 
 func TestLayoutAppliedOnce(t *testing.T) {
-	app := newApp()
+	app := newApp(nil)
 	resp, err := app.Test(httptest.NewRequest("GET", "/docs", nil))
 	if err != nil {
 		t.Fatal(err)
