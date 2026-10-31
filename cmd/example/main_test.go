@@ -119,6 +119,9 @@ func TestSSRStillRender(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("%s: status = %d, want 200", path, resp.StatusCode)
 		}
+		if ct := resp.Header.Get("Content-Type"); ct != "text/html; charset=utf-8" {
+			t.Errorf("%s: content-type = %q, want text/html; charset=utf-8", path, ct)
+		}
 		body, _ := io.ReadAll(resp.Body)
 		if !strings.Contains(string(body), want) {
 			t.Errorf("%s: missing %q in:\n%s", path, want, body)

@@ -43,7 +43,12 @@ func newApp() *fiber.App {
 					// the typed error keeps the handler safe if descriptors diverge.
 					return fmt.Errorf("routes: SSRPage: %w", err)
 				}
-				return component.Render(c.RequestCtx(), c)
+				html, err := render.RenderComponent(c.RequestCtx(), component)
+				if err != nil {
+					return fmt.Errorf("render %s: %w", route.Path, err)
+				}
+				c.Set(fiber.HeaderContentType, "text/html; charset=utf-8")
+				return c.Send(html)
 			})
 		case routing.ModeCSR:
 			fapp.Get(route.Path, render.ShellHandler(route))
