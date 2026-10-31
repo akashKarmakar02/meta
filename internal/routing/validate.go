@@ -1,12 +1,14 @@
 package routing
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // ValidateRoutes applies post-discovery collision rules to the discovered
 // route set. B08 scope: duplicate normalized routes, which arise when one
 // directory holds more than one kind of page file (page.templ and
-// page.svelte). Layout conflicts and other validation rules arrive with
-// later tasks.
+// page.svelte). C08 adds ambiguous dynamic-parameter collision detection.
 func ValidateRoutes(routes []Route) error {
 	byPath := map[string]Route{}
 	for _, r := range routes {
@@ -21,6 +23,38 @@ func ValidateRoutes(routes []Route) error {
 	for _, r := range routes {
 		if err := validateLayoutChain(r); err != nil {
 			return err
+		}
+	}
+	return validateDynamicAmbiguity(routes)
+}
+
+// validateDynamicAmbiguity rejects sibling dynamic segments that bind to the
+// same Fiber parameter slot with different names, e.g. "/products/[id]" and
+// "/products/[slug]": both normalize to a parameter at the same position, so
+// Fiber cannot route between them deterministically.
+func validateDynamicAmbiguity(routes []Route) error {
+	type dynamicKey struct {
+		prefix string // static segments before the parameter
+		suffix string // static segments after the parameter
+	}
+	slots := make(map[dynamicKey]string)
+	for _, r := range routes {
+		segs := strings.Split(strings.TrimPrefix(r.Path, "/"), "/")
+		for i, seg := range segs {
+			if !strings.HasPrefix(seg, ":") {
+				continue
+			}
+			key := dynamicKey{
+				prefix: strings.Join(segs[:i], "/"),
+				suffix: strings.Join(segs[i+1:], "/"),
+			}
+			if prevName, ok := slots[key]; ok && prevName != seg[1:] {
+				return fmt.Errorf(
+					"routing: ambiguous dynamic segments %q and %q: both match the same URL shape under %q: use one parameter name per position",
+					prevName, seg[1:], "/"+key.prefix,
+				)
+			}
+			slots[key] = seg[1:]
 		}
 	}
 	return nil

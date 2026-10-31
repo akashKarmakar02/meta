@@ -155,10 +155,10 @@ func TestRoutesRegisteredExactlyOnce(t *testing.T) {
 }
 
 // TestGeneratedRouteCount: the app registers exactly the routes the
-// generator emitted (3 in this tree) — deterministic, no drift.
+// generator emitted (5 in this tree) — deterministic, no drift.
 func TestGeneratedRouteCount(t *testing.T) {
-	if got := len(routes.RegisterRoutes()); got != 3 {
-		t.Errorf("RegisterRoutes() = %d routes, want 3", got)
+	if got := len(routes.RegisterRoutes()); got != 5 {
+		t.Errorf("RegisterRoutes() = %d routes, want 5", got)
 	}
 }
 

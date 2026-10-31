@@ -60,6 +60,9 @@ func Discover(fsys fs.FS) ([]Route, error) {
 		if !ok {
 			return nil
 		}
+		if mode == ModeSSR && pathHasParamSegment(path.Dir(p)) {
+			return fmt.Errorf("routing: SSR page %q is inside a dynamic segment directory: Go import paths cannot contain %q; use page.svelte (CSR) for dynamic routes in Phase 1", p, path.Dir(p))
+		}
 		route, rerr := NewRoute(normalizeDirToPath(dir), p, mode, nil)
 		if rerr != nil {
 			return rerr
@@ -136,22 +139,79 @@ func classifyLayout(base string) (RenderMode, bool) {
 }
 
 // normalizeDirToPath converts a slash directory path like "about/" into a
-// URL path like "/about". The root directory "" maps to "/".
+// URL path like "/about". The root directory "" maps to "/". Bracketed
+// segments translate to Fiber parameter syntax: "products/[id]" becomes
+// "/products/:id".
 func normalizeDirToPath(dir string) string {
 	trimmed := strings.TrimSuffix(dir, "/")
 	if trimmed == "" || trimmed == "." {
 		return "/"
 	}
-	return "/" + trimmed
+	segments := strings.Split(trimmed, "/")
+	var b strings.Builder
+	b.WriteString("/")
+	for _, seg := range segments {
+		if seg == "" {
+			continue
+		}
+		if b.Len() > 1 {
+			b.WriteString("/")
+		}
+		if param, ok := trimParamBrackets(seg); ok {
+			b.WriteString(":")
+			b.WriteString(param)
+			continue
+		}
+		b.WriteString(seg)
+	}
+	return b.String()
+}
+
+// trimParamBrackets reports whether seg is a dynamic parameter segment of the
+// form "[name]" and returns the bare parameter name.
+func trimParamBrackets(seg string) (string, bool) {
+	if !strings.HasPrefix(seg, "[") || !strings.HasSuffix(seg, "]") {
+		return "", false
+	}
+	name := strings.TrimSuffix(strings.TrimPrefix(seg, "["), "]")
+	if name == "" || strings.ContainsAny(name, "[]/") {
+		return "", false
+	}
+	return name, true
+}
+
+// pathHasParamSegment reports whether any segment of dir (a slash-separated
+// directory relative to the app root) is a dynamic [param] segment.
+func pathHasParamSegment(dir string) bool {
+	for _, seg := range strings.Split(dir, "/") {
+		if _, ok := trimParamBrackets(seg); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // sortRoutes orders routes deterministically by path. Duplicate paths (an
 // error in later validation tasks) sort stably by source file as tie-break.
+// Dynamic routes sort after static ones at the same position so that static
+// paths register first and take priority in the router.
 func sortRoutes(routes []Route) {
 	sort.Slice(routes, func(i, j int) bool {
 		if routes[i].Path != routes[j].Path {
-			return routes[i].Path < routes[j].Path
+			return routeSortKey(routes[i].Path) < routeSortKey(routes[j].Path)
 		}
 		return routes[i].SourceFile < routes[j].SourceFile
 	})
+}
+
+// routeSortKey rewrites ":param" segments to sort after any static segment
+// ("\x7f" is above all printable ASCII used in real path segments).
+func routeSortKey(p string) string {
+	segs := strings.Split(strings.TrimPrefix(p, "/"), "/")
+	for i, s := range segs {
+		if strings.HasPrefix(s, ":") {
+			segs[i] = "\x7f" + s[1:]
+		}
+	}
+	return "/" + strings.Join(segs, "/")
 }
