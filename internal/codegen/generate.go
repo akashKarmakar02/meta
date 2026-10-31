@@ -12,6 +12,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"go-meta/internal/routing"
@@ -58,6 +59,10 @@ func RoutesFile(m routing.Manifest) ([]byte, error) {
 		}
 		fmt.Fprintf(&b, "\tpage%d %q\n", ssrIndex(r, m), templImportPath(r))
 	}
+	layouts := layoutSources(m)
+	for _, l := range layouts {
+		fmt.Fprintf(&b, "\tlayout%d %q\n", layoutIndex(layouts, l), layoutImportPath(l))
+	}
 	b.WriteString(")\n\n")
 
 	b.WriteString("// RegisterRoutes is generated from the app tree at build time.\n")
@@ -78,13 +83,24 @@ func RoutesFile(m routing.Manifest) ([]byte, error) {
 	// time as an actionable error naming the source file (C09), and the
 	// generated fallback returns a typed error instead of panicking —
 	// no runtime nil-pointer or panic path exists for missing bindings.
-	b.WriteString("// SSRPage returns the templ-generated page component for an SSR route.\n")
+	b.WriteString("// SSRPage returns the templ-generated page component for an SSR route,\n")
+	b.WriteString("// composed with its layout chain (D06). Route.Layouts is ordered\n")
+	b.WriteString("// outermost to innermost; composition wraps from the innermost\n")
+	b.WriteString("// layout outward, so the outermost layout owns the HTML document.\n")
 	b.WriteString("func SSRPage(r routing.Route) (templ.Component, error) {\n")
 	for _, r := range m.Routes {
 		if r.Mode != routing.ModeSSR {
 			continue
 		}
-		fmt.Fprintf(&b, "\tif r.ID == %q {\n\t\treturn page%d.%s(), nil\n\t}\n", r.ID, ssrIndex(r, m), pageSymbol(r))
+		fmt.Fprintf(&b, "\tif r.ID == %q {\n", r.ID)
+		// Compose layouts innermost-first so the outermost layout owns the
+		// document: Layouts is [outermost..innermost], so wrap in reverse.
+		expr := fmt.Sprintf("page%d.%s()", ssrIndex(r, m), pageSymbol(r))
+		for i := len(r.Layouts) - 1; i >= 0; i-- {
+			l := r.Layouts[i]
+			expr = fmt.Sprintf("layout%d.%s(%s)", layoutIndex(layouts, l.SourceFile), layoutSymbol(l.SourceFile), expr)
+		}
+		fmt.Fprintf(&b, "\t\treturn %s, nil\n\t}\n", expr)
 	}
 	fmt.Fprintf(&b, "\treturn nil, fmt.Errorf(%q, r.ID)\n", "routes: SSRPage: no component mapped for route %s (check that the page file exists and exports the expected templ component)")
 	b.WriteString("}\n")
@@ -110,8 +126,29 @@ func templImportPath(r routing.Route) string {
 	return "go-meta/app/" + dir
 }
 
+// layoutImportPath returns the Go import path of the package containing a
+// layout's templ-generated component. Like pages, each app-tree directory
+// is its own package: root layout.templ lives in go-meta/app, a nested
+// docs/layout.templ in go-meta/app/docs.
+func layoutImportPath(sourceFile string) string {
+	return templImportPath(routing.Route{SourceFile: sourceFile})
+}
+
 // ssrIndex is the manifest-order index of an SSR route, used for its
 // deterministic generated alias.
+// layoutIndex returns the import alias index for a layout source file in the
+// sorted layout list. Layout aliases are deterministic: the layout list is
+// sorted by source path, and the alias index is its position.
+func layoutIndex(layoutSources []string, sourceFile string) int {
+	for i, s := range layoutSources {
+		if s == sourceFile {
+			return i
+		}
+	}
+	// Unreachable: layoutSources always comes from the manifest's own routes.
+	return 0
+}
+
 func ssrIndex(r routing.Route, m routing.Manifest) int {
 	n := 0
 	for _, c := range m.Routes {
@@ -146,7 +183,59 @@ func VerifySymbols(fsys fs.FS, m routing.Manifest) error {
 			return fmt.Errorf("routes: %s: no templ component named %s found; declare `templ %s()` in the page file", r.SourceFile, pageSymbol(r), pageSymbol(r))
 		}
 	}
+	for _, l := range layoutSources(m) {
+		src, err := fs.ReadFile(fsys, l)
+		if err != nil {
+			return fmt.Errorf("routes: read %s: %w", l, err)
+		}
+		if !strings.Contains(string(src), "templ "+layoutSymbol(l)+"(") {
+			return fmt.Errorf("routes: %s: no templ component named %s found; declare `templ %s(templ.Component)` in the layout file", l, layoutSymbol(l), layoutSymbol(l))
+		}
+	}
 	return nil
+}
+
+// layoutSources returns every SSR layout source file in the manifest,
+// deduplicated.
+func layoutSources(m routing.Manifest) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, r := range m.Routes {
+		if r.Mode != routing.ModeSSR {
+			continue
+		}
+		for _, l := range r.Layouts {
+			if l.Mode != routing.ModeSSR {
+				continue
+			}
+			if seen[l.SourceFile] {
+				continue
+			}
+			seen[l.SourceFile] = true
+			out = append(out, l.SourceFile)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// layoutSymbol derives the templ component symbol for a layout source
+// file: the root layout.templ -> Layout, nested docs/layout.templ ->
+// DocsLayout.
+func layoutSymbol(sourceFile string) string {
+	dir := path.Dir(sourceFile)
+	if dir == "." || dir == "/" {
+		return "Layout"
+	}
+	parts := strings.Split(dir, "/")
+	name := ""
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		name += strings.ToUpper(p[:1]) + p[1:]
+	}
+	return name + "Layout"
 }
 
 // pageSymbol derives the templ component symbol name for a page source

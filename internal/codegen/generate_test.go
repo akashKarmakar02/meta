@@ -15,7 +15,7 @@ import (
 func fixtureManifest(t *testing.T) routing.Manifest {
 	t.Helper()
 	fsys := fstest.MapFS{
-		"layout.templ":                   &fstest.MapFile{Data: []byte("templ Root() {}")},
+		"layout.templ":                   &fstest.MapFile{Data: []byte("templ Layout(templ.Component) {}")},
 		"page.templ":                     &fstest.MapFile{Data: []byte("templ Page() {}")},
 		"about/page.templ":               &fstest.MapFile{Data: []byte("templ About() {}")},
 		"dashboard/layout.svelte":        &fstest.MapFile{Data: []byte("<div />")},
@@ -34,7 +34,7 @@ func fixtureManifest(t *testing.T) routing.Manifest {
 // with an error naming the source file, before any code is emitted.
 func TestVerifySymbolsRejection(t *testing.T) {
 	fsys := fstest.MapFS{
-		"layout.templ":          &fstest.MapFile{Data: []byte("templ Root() {}")},
+		"layout.templ":          &fstest.MapFile{Data: []byte("templ Layout(templ.Component) {}")},
 		"page.templ":            &fstest.MapFile{Data: []byte("templ Page() {}")},
 		"about/page.templ":      &fstest.MapFile{Data: []byte("templ Hello() {}")}, // wrong name
 		"dashboard/page.svelte": &fstest.MapFile{Data: []byte("<main />")},
@@ -61,7 +61,7 @@ func TestVerifySymbolsRejection(t *testing.T) {
 // component imports are demanded.
 func TestVerifySymbolsAccepts(t *testing.T) {
 	valid := fstest.MapFS{
-		"layout.templ":          &fstest.MapFile{Data: []byte("templ Root() {}")},
+		"layout.templ":          &fstest.MapFile{Data: []byte("templ Layout(templ.Component) {}")},
 		"page.templ":            &fstest.MapFile{Data: []byte("templ Page() {}")},
 		"dashboard/page.svelte": &fstest.MapFile{Data: []byte("<main />")},
 	}
@@ -114,9 +114,9 @@ func TestRoutesFileSSRPageMapping(t *testing.T) {
 	src := string(srcB)
 	for _, want := range []string{
 		`if r.ID == "page.templ" {`,
-		"return page0.Page()",
+		"return layout0.Layout(page0.Page())",
 		`if r.ID == "about/page.templ" {`,
-		"return page1.About()",
+		"return layout0.Layout(page1.About())",
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("generated source missing %q:\n%s", want, src)
@@ -158,8 +158,12 @@ func TestRoutesFileContent(t *testing.T) {
 		"page0 \"go-meta/app\"",
 		"page1 \"go-meta/app/about\"",
 		"templ.Component",
-		"return page0.Page()",
-		"return page1.About()",
+		// D06: layouts compose around pages at generation time, innermost
+		// wrap first so the final nesting matches the manifest's
+		// outermost-first chain order.
+		"layout0 \"go-meta/app\"",
+		"return layout0.Layout(page0.Page())",
+		"return layout0.Layout(page1.About())",
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("generated source missing %q:\n%s", want, src)

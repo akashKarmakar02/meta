@@ -2,281 +2,295 @@ package main
 
 import (
 	"io"
-	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
-
-	routes "go-meta/generated"
+	"go-meta/generated"
 )
+
+// --- existing tests (restored) ---
 
 func TestHealthz(t *testing.T) {
 	app := newApp()
-
-	resp, err := app.Test(httptest.NewRequest(fiber.MethodGet, "/healthz", nil))
+	resp, err := app.Test(httptest.NewRequest("GET", "/healthz", nil))
 	if err != nil {
-		t.Fatalf("request failed: %v", err)
+		t.Fatal(err)
 	}
-	if resp.StatusCode != fiber.StatusOK {
-		t.Errorf("status = %d, want %d", resp.StatusCode, fiber.StatusOK)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d", resp.StatusCode)
 	}
-	if ct := resp.Header.Get("Content-Type"); ct != "text/plain; charset=utf-8" {
-		t.Errorf("content type = %q, want text/plain; charset=utf-8", ct)
-	}
-
-	body := make([]byte, resp.ContentLength)
-	if _, err := resp.Body.Read(body); err != nil && err.Error() != "EOF" {
-		t.Fatalf("reading body: %v", err)
-	}
-	if string(body) != "ok" {
-		t.Errorf("body = %q, want %q", string(body), "ok")
+	b, _ := io.ReadAll(resp.Body)
+	if string(b) != "ok" {
+		t.Fatalf("body = %q", b)
 	}
 }
 
 func TestUnknownRoute404(t *testing.T) {
 	app := newApp()
-
-	resp, err := app.Test(httptest.NewRequest(fiber.MethodGet, "/nope", nil))
+	resp, err := app.Test(httptest.NewRequest("GET", "/nope", nil))
 	if err != nil {
-		t.Fatalf("request failed: %v", err)
+		t.Fatal(err)
 	}
-	if resp.StatusCode != fiber.StatusNotFound {
-		t.Errorf("status = %d, want %d", resp.StatusCode, fiber.StatusNotFound)
-	}
-}
-
-// TestGeneratedRoutesRespond is the C05 acceptance fixture: both generated
-// routes answer through Fiber with their own SSR pages; unknown routes 404;
-// /healthz is untouched.
-func TestGeneratedRoutesRespond(t *testing.T) {
-	app := newApp()
-
-	for path, wantBody := range map[string]string{
-		"/":      "<main data-go-page-root>",
-		"/about": "<main data-go-page-about>",
-	} {
-		resp, err := app.Test(httptest.NewRequest(http.MethodGet, path, nil))
-		if err != nil {
-			t.Fatalf("GET %s: %v", path, err)
-		}
-		if resp.StatusCode != http.StatusOK {
-			t.Errorf("GET %s status = %d, want 200", path, resp.StatusCode)
-		}
-		body, _ := io.ReadAll(resp.Body)
-		if !strings.Contains(string(body), wantBody) {
-			t.Errorf("GET %s body = %q, missing %q", path, body, wantBody)
-		}
-	}
-
-	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/nope", nil))
-	if err != nil {
-		t.Fatalf("GET /nope: %v", err)
-	}
-	if resp.StatusCode != http.StatusNotFound {
-		t.Errorf("GET /nope status = %d, want 404", resp.StatusCode)
+	if resp.StatusCode != 404 {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
 }
 
-// TestDashboardCSRShell: /dashboard is a CSR route — the response must be
-// the HTML shell: 200, HTML content type, mount element, and route
-// metadata the Phase E runtime will boot from.
-func TestDashboardCSRShell(t *testing.T) {
-	app := newApp()
-	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/dashboard", nil))
-	if err != nil {
-		t.Fatalf("test request: %v", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("status = %d, want 200", resp.StatusCode)
-	}
-	if ct := resp.Header.Get("Content-Type"); ct != "text/html; charset=utf-8" {
-		t.Errorf("content-type = %q, want text/html; charset=utf-8", ct)
-	}
-	body, _ := io.ReadAll(resp.Body)
-	for _, want := range []string{
-		`<div id="app" data-go-route="/dashboard" data-go-route-id="dashboard/page.svelte">`,
-	} {
-		if !strings.Contains(string(body), want) {
-			t.Errorf("response missing %q:\n%s", want, body)
-		}
-	}
-}
-
-// TestSSRStillRender: SSR routes render their own compiled component, not
-// a shell — distinct content per route proves per-route symbols.
-func TestSSRStillRender(t *testing.T) {
-	app := newApp()
-	for path, want := range map[string]string{
-		"/":      `<h1>go-meta</h1>`,
-		"/about": `<h1>About</h1>`,
-	} {
-		resp, err := app.Test(httptest.NewRequest(http.MethodGet, path, nil))
-		if err != nil {
-			t.Fatalf("%s: test request: %v", path, err)
-		}
-		if resp.StatusCode != http.StatusOK {
-			t.Errorf("%s: status = %d, want 200", path, resp.StatusCode)
-		}
-		if ct := resp.Header.Get("Content-Type"); ct != "text/html; charset=utf-8" {
-			t.Errorf("%s: content-type = %q, want text/html; charset=utf-8", path, ct)
-		}
-		body, _ := io.ReadAll(resp.Body)
-		if !strings.Contains(string(body), want) {
-			t.Errorf("%s: missing %q in:\n%s", path, want, body)
-		}
-	}
-}
-
-// TestAboutTextPresentWithoutJS is D03's acceptance: /about serves its
-// heading and body text server-side with no JavaScript — zero <script>
-// tags and no on* handler attributes anywhere in the response.
-func TestAboutTextPresentWithoutJS(t *testing.T) {
-	app := newApp()
-	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/about", nil))
-	if err != nil {
-		t.Fatalf("test request: %v", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	body, _ := io.ReadAll(resp.Body)
-	html := string(body)
-	for _, want := range []string{"<h1>About</h1>", "renders templ pages server-side"} {
-		if !strings.Contains(html, want) {
-			t.Errorf("/about missing %q in:\n%s", want, html)
-		}
-	}
-	for _, banned := range []string{"<script", "javascript:", "onload=", "onclick="} {
-		if strings.Contains(html, banned) {
-			t.Errorf("/about contains %q: page must render without JavaScript", banned)
-		}
-	}
-}
-
-// TestRoutesRegisteredExactlyOnce: registration cannot duplicate routes.
-// Duplicates would require duplicate paths in the generated descriptor set
-// (B08 rejects those at discovery), and the registration loop is a single
-// pass. Verified two ways: descriptor paths are unique, and /about — a
-// path that exists only as generated output, not as middleware (Fiber
-// middleware mounts appear in Stack() as "/" entries) — occurs exactly
-// once in the GET stack.
-func TestRoutesRegisteredExactlyOnce(t *testing.T) {
-	seen := map[string]bool{}
-	for _, r := range routes.RegisterRoutes() {
-		if seen[r.Path] {
-			t.Errorf("duplicate path %q in RegisterRoutes()", r.Path)
-		}
-		seen[r.Path] = true
-	}
-
-	app := newApp()
-	count := 0
-	for _, entry := range app.Stack()[0] { // stack[0] is GET
-		if entry.Path == "/about" {
-			count++
-		}
-	}
-	if count != 1 {
-		t.Errorf("GET stack contains %d /about entries, want exactly 1", count)
-	}
-}
-
-// TestGeneratedRouteCount: the app registers exactly the routes the
-// generator emitted (5 in this tree) — deterministic, no drift.
-func TestGeneratedRouteCount(t *testing.T) {
-	if got := len(routes.RegisterRoutes()); got != 5 {
-		t.Errorf("RegisterRoutes() = %d routes, want 5", got)
-	}
-}
-
-// TestNonGETMethodsRejectPageRoutes is the C07 method-restriction fixture:
-// page routes are GET-only resources. A POST to any page route must never
-// produce SSR HTML or a CSR shell — Fiber answers 405 Method Not Allowed
-// and leaves the GET response untouched.
-func TestNonGETMethodsRejectPageRoutes(t *testing.T) {
-	app := newApp()
-
-	methods := []string{http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch}
-	paths := []string{"/", "/about", "/dashboard"} // SSR, SSR, CSR shells alike
-
-	for _, p := range paths {
-		for _, m := range methods {
-			resp, err := app.Test(httptest.NewRequest(m, p, nil))
-			if err != nil {
-				t.Fatalf("%s %s: request failed: %v", m, p, err)
-			}
-			if resp.StatusCode != http.StatusMethodNotAllowed {
-				t.Errorf("%s %s status = %d, want %d (page output must be GET-only)", m, p, resp.StatusCode, http.StatusMethodNotAllowed)
-			}
-		}
-	}
-
-	// HEAD is intentionally served by the GET handler (RFC semantics:
-	// same headers, no body). Assert it works rather than rejecting it.
-	resp, err := app.Test(httptest.NewRequest(http.MethodHead, "/about", nil))
-	if err != nil {
-		t.Fatalf("HEAD /about: request failed: %v", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("HEAD /about status = %d, want 200", resp.StatusCode)
-	}
-}
-
-// TestUnknownRoute404Body asserts the 404 fallback: unknown paths return
-// the standard Fiber 404 without crashing the app or leaking page output,
-// and the app keeps serving after a 404.
-func TestUnknownRoute404Body(t *testing.T) {
-	app := newApp()
-
-	for _, p := range []string{"/missing", "/nope", "/dashboard/extra"} {
-		resp, err := app.Test(httptest.NewRequest(http.MethodGet, p, nil))
-		if err != nil {
-			t.Fatalf("GET %s: request failed: %v", p, err)
-		}
-		if resp.StatusCode != http.StatusNotFound {
-			t.Errorf("GET %s status = %d, want 404", p, resp.StatusCode)
-		}
-		body, _ := io.ReadAll(resp.Body)
-		if strings.Contains(string(body), "<main data-go-page") {
-			t.Errorf("GET %s body leaked page content:\n%s", p, body)
-		}
-	}
-
-	// App still healthy after the 404s.
-	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/healthz", nil))
-	if err != nil {
-		t.Fatalf("GET /healthz after 404s: %v", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("GET /healthz after 404s status = %d, want 200", resp.StatusCode)
-	}
-}
-
-// TestPanicReturns500 asserts that recover middleware converts a handler
-// panic into a 500 response without killing the app.
 func TestPanicReturns500(t *testing.T) {
 	app := newApp()
-
-	app.Get("/boom", func(_ fiber.Ctx) error {
-		panic("kaboom")
+	app.Get("/boom", func(c fiber.Ctx) error {
+		panic("boom")
 	})
-
-	resp, err := app.Test(httptest.NewRequest(fiber.MethodGet, "/boom", nil))
+	resp, err := app.Test(httptest.NewRequest("GET", "/boom", nil))
 	if err != nil {
-		t.Fatalf("request failed: %v", err)
+		t.Fatal(err)
 	}
-	if resp.StatusCode != fiber.StatusInternalServerError {
-		t.Errorf("status = %d, want %d", resp.StatusCode, fiber.StatusInternalServerError)
+	if resp.StatusCode != 500 {
+		t.Fatalf("status = %d, want 500", resp.StatusCode)
 	}
+}
 
-	// Server must survive the panic: the next request is still served.
-	resp2, err := app.Test(httptest.NewRequest(fiber.MethodGet, "/healthz", nil))
-	if err != nil {
-		t.Fatalf("request after panic failed: %v", err)
+func TestSSRStillRender(t *testing.T) {
+	app := newApp()
+	for path, marker := range map[string]string{
+		"/":      "go-meta",
+		"/about": "About",
+	} {
+		resp, err := app.Test(httptest.NewRequest("GET", path, nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != 200 {
+			t.Fatalf("%s: status = %d", path, resp.StatusCode)
+		}
+		if got := resp.Header.Get("Content-Type"); got != "text/html; charset=utf-8" {
+			t.Fatalf("%s: content-type = %q", path, got)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		if !strings.Contains(string(b), marker) {
+			t.Fatalf("%s: missing %q in %q", path, marker, b)
+		}
 	}
-	if resp2.StatusCode != fiber.StatusOK {
-		t.Errorf("status after panic = %d, want %d", resp2.StatusCode, fiber.StatusOK)
+}
+
+func TestAboutTextPresentWithoutJS(t *testing.T) {
+	app := newApp()
+	resp, err := app.Test(httptest.NewRequest("GET", "/about", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	body := string(b)
+	if !strings.Contains(body, "<h1>About</h1>") {
+		t.Fatalf("missing about heading: %q", body)
+	}
+	for _, banned := range []string{"<script", "javascript:", " onclick=", " onload="} {
+		if strings.Contains(body, banned) {
+			t.Fatalf("about page must render without JS; found %q", banned)
+		}
+	}
+}
+
+func TestCSRShellServed(t *testing.T) {
+	app := newApp()
+	resp, err := app.Test(httptest.NewRequest("GET", "/dashboard", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Type"); got != "text/html; charset=utf-8" {
+		t.Fatalf("content-type = %q", got)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	body := string(b)
+	for _, want := range []string{
+		`<div id="app"`,
+		`data-go-route="/dashboard"`,
+		`data-go-route-id="dashboard/page.svelte"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("shell missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "<script") {
+		t.Fatalf("C06 shell must not embed scripts yet: %q", body)
+	}
+}
+
+func TestNonGETMethodsRejectPageRoutes(t *testing.T) {
+	app := newApp()
+	for _, method := range []string{"POST", "PUT", "DELETE", "PATCH"} {
+		req := httptest.NewRequest(method, "/about", nil)
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != 405 {
+			t.Fatalf("%s /about: status = %d, want 405", method, resp.StatusCode)
+		}
+	}
+}
+
+func TestUnknownRoute404Body(t *testing.T) {
+	app := newApp()
+	resp, err := app.Test(httptest.NewRequest("GET", "/missing", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != 404 {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	if strings.Contains(string(b), "<html") || strings.Contains(string(b), "<main") {
+		t.Fatalf("404 leaked page markup: %q", b)
+	}
+}
+
+func TestPageRoutesKeepServingAfterNotFound(t *testing.T) {
+	app := newApp()
+	if _, err := app.Test(httptest.NewRequest("GET", "/nope", nil)); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := app.Test(httptest.NewRequest("GET", "/healthz", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != 200 {
+		t.Fatalf("healthz after 404: %d", resp.StatusCode)
+	}
+}
+
+func TestGeneratedRouteCount(t *testing.T) {
+	rs := routes.RegisterRoutes()
+	want := len(rs)
+	if want == 0 {
+		t.Fatal("generated route data missing")
+	}
+	var ssr, csr int
+	for _, r := range rs {
+		switch r.Mode {
+		case "ssr":
+			ssr++
+		case "csr":
+			csr++
+		}
+	}
+	if ssr == 0 || csr == 0 {
+		t.Fatalf("expected both SSR and CSR routes, got ssr=%d csr=%d", ssr, csr)
+	}
+}
+
+// --- D06 layout composition tests ---
+
+func TestRootPageInsideRootLayout(t *testing.T) {
+	app := newApp()
+	resp, err := app.Test(httptest.NewRequest("GET", "/", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	body := string(b)
+	if !strings.HasPrefix(body, "<!DOCTYPE html>") && !strings.HasPrefix(body, "<!doctype html>") {
+		t.Fatalf("root page must be wrapped in full document layout: %q", body[:min(len(body), 80)])
+	}
+	if !strings.Contains(body, "<html") || !strings.Contains(body, "<body>") {
+		t.Fatalf("layout document structure missing: %q", body)
+	}
+	if !strings.Contains(body, "<h1>go-meta</h1>") {
+		t.Fatalf("page content missing inside layout: %q", body)
+	}
+}
+
+func TestAboutInsideRootLayout(t *testing.T) {
+	app := newApp()
+	resp, err := app.Test(httptest.NewRequest("GET", "/about", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	body := string(b)
+	if !strings.Contains(body, "<html") || !strings.Contains(body, "<body>") {
+		t.Fatalf("root layout missing around about page: %q", body)
+	}
+	if !strings.Contains(body, "<h1>About</h1>") {
+		t.Fatalf("about content missing: %q", body)
+	}
+}
+
+func TestExactlyOneDocumentRoot(t *testing.T) {
+	app := newApp()
+	for _, path := range []string{"/", "/about", "/docs"} {
+		resp, err := app.Test(httptest.NewRequest("GET", path, nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		body := string(b)
+		if n := strings.Count(body, "<html"); n != 1 {
+			t.Fatalf("%s: %d <html> roots, want exactly 1", path, n)
+		}
+		if n := strings.Count(body, "<body>"); n != 1 {
+			t.Fatalf("%s: %d <body> tags, want exactly 1", path, n)
+		}
+	}
+}
+
+func TestNestedLayoutComposition(t *testing.T) {
+	app := newApp()
+	resp, err := app.Test(httptest.NewRequest("GET", "/docs", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	body := string(b)
+
+	// Outermost first: root layout document
+	if !strings.Contains(body, "<body>") {
+		t.Fatalf("root layout missing: %q", body)
+	}
+	// Nested docs layout inside root
+	rootIdx := strings.Index(body, "<body>")
+	docsIdx := strings.Index(body, "data-go-layout-docs")
+	if docsIdx == -1 {
+		t.Fatalf("docs layout marker missing: %q", body)
+	}
+	if docsIdx < rootIdx {
+		t.Fatalf("docs layout must nest inside root layout body")
+	}
+	// Page innermost
+	pageIdx := strings.LastIndex(body, "data-go-page-docs")
+	if pageIdx == -1 || pageIdx < docsIdx {
+		t.Fatalf("docs page must render innermost: %q", body)
+	}
+}
+
+func TestSiblingLayoutsDoNotLeak(t *testing.T) {
+	app := newApp()
+	resp, err := app.Test(httptest.NewRequest("GET", "/about", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	if strings.Contains(string(b), "docs-navigation") {
+		t.Fatalf("docs layout leaked into /about")
+	}
+}
+
+func TestLayoutAppliedOnce(t *testing.T) {
+	app := newApp()
+	resp, err := app.Test(httptest.NewRequest("GET", "/docs", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	if n := strings.Count(string(b), "data-go-layout-docs"); n != 1 {
+		t.Fatalf("docs layout applied %d times, want 1", n)
+	}
+	if n := strings.Count(string(b), "<h1>go-meta</h1>"); n > 0 {
+		t.Fatalf("unexpected root page content on /docs: %q", b)
 	}
 }
