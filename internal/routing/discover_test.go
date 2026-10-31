@@ -493,6 +493,91 @@ func TestValidateRoutesNoDuplicateOnDistinctPaths(t *testing.T) {
 	}
 }
 
+// TestDiscoverSSRLayoutUnderCSRLayoutRejected matches the B09 rule: an SSR
+// layout nested beneath a CSR layout is an unsupported mixed-mode chain.
+func TestDiscoverSSRLayoutUnderCSRLayoutRejected(t *testing.T) {
+	fsys := fstest.MapFS{
+		"page.templ":                      &fstest.MapFile{Data: []byte("templ Page() {}")},
+		"dashboard/layout.svelte":         &fstest.MapFile{Data: []byte("<div />")},
+		"dashboard/settings/layout.templ": &fstest.MapFile{Data: []byte("templ S() {}")},
+		"dashboard/settings/page.svelte":  &fstest.MapFile{Data: []byte("<main />")},
+	}
+	_, err := Discover(fsys)
+	if err == nil {
+		t.Fatal("Discover succeeded with SSR layout beneath CSR layout, want error")
+	}
+	for _, want := range []string{"settings/layout.templ", "layout.svelte", "SSR layout"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err.Error(), want)
+		}
+	}
+}
+
+// TestDiscoverSSRPageUnderCSRLayoutRejected covers the page-side case of
+// the same rule: page.templ directly inside a layout.svelte directory.
+func TestDiscoverSSRPageUnderCSRLayoutRejected(t *testing.T) {
+	fsys := fstest.MapFS{
+		"page.templ":              &fstest.MapFile{Data: []byte("templ Page() {}")},
+		"dashboard/layout.svelte": &fstest.MapFile{Data: []byte("<div />")},
+		"dashboard/page.templ":    &fstest.MapFile{Data: []byte("templ Dash() {}")},
+	}
+	_, err := Discover(fsys)
+	if err == nil {
+		t.Fatal("Discover succeeded with SSR page beneath CSR layout, want error")
+	}
+	for _, want := range []string{"dashboard/page.templ", "dashboard/layout.svelte"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err.Error(), want)
+		}
+	}
+}
+
+// TestDiscoverRootSSRWrappingCSLSupported locks the supported mixed-mode
+// direction (critical architecture requirement): layout.templ above
+// layout.svelte and CSR pages is valid.
+func TestDiscoverRootSSRWrappingCSLSupported(t *testing.T) {
+	fsys := fstest.MapFS{
+		"layout.templ":                   &fstest.MapFile{Data: []byte("templ Root() {}")},
+		"page.templ":                     &fstest.MapFile{Data: []byte("templ Page() {}")},
+		"about/page.templ":               &fstest.MapFile{Data: []byte("templ About() {}")},
+		"dashboard/layout.svelte":        &fstest.MapFile{Data: []byte("<div />")},
+		"dashboard/page.svelte":          &fstest.MapFile{Data: []byte("<main />")},
+		"dashboard/settings/page.svelte": &fstest.MapFile{Data: []byte("<main />")},
+	}
+	routes, err := Discover(fsys)
+	if err != nil {
+		t.Fatalf("Discover on the blueprint's target app tree failed: %v", err)
+	}
+	if len(routes) != 4 {
+		t.Fatalf("routes = %d, want 4; got %+v", len(routes), routes)
+	}
+	var dash *Route
+	for i := range routes {
+		if routes[i].Path == "/dashboard" {
+			dash = &routes[i]
+		}
+	}
+	if dash == nil {
+		t.Fatal("/dashboard missing")
+	}
+	if len(dash.Layouts) != 2 || dash.Layouts[0].Mode != ModeSSR || dash.Layouts[1].Mode != ModeCSR {
+		t.Errorf("/dashboard Layouts = %+v, want [ssr root, csr dashboard]", dash.Layouts)
+	}
+}
+
+// TestValidateRoutesPureCSRTree validates a fully client-side tree passes.
+func TestValidateRoutesPureCSRTree(t *testing.T) {
+	fsys := fstest.MapFS{
+		"layout.svelte":         &fstest.MapFile{Data: []byte("<div />")},
+		"page.svelte":           &fstest.MapFile{Data: []byte("<main />")},
+		"shop/layout.svelte":    &fstest.MapFile{Data: []byte("<div />")},
+		"shop/cart/page.svelte": &fstest.MapFile{Data: []byte("<main />")},
+	}
+	if _, err := Discover(fsys); err != nil {
+		t.Errorf("Discover on pure CSR tree failed: %v", err)
+	}
+}
+
 // errorFS always fails with a permission error, exercising Discover's
 // walk error wrapping.
 type errorFS struct{}
