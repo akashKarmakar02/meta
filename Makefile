@@ -13,8 +13,9 @@ NPM ?= npm
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-10s %s\n", $$1, $$2}'
 
-generate: ## Run templ codegen (must precede go build)
+generate: ## Run templ + route codegen (must precede go build)
 	$(GO) tool templ generate
+	$(GO) run ./cmd/routegen
 
 build: generate ## Full production build: templ + Go binary + client assets
 	$(GO) build -o bin/example ./cmd/example
