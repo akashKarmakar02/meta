@@ -22,11 +22,12 @@ build: generate ## Full production build: templ + Go binary + client assets
 	$(NPM) ci
 	$(NPM) run build
 
-test: generate ## Run all checks: Go tests/vet, svelte-check, tsc
+test: generate ## Run all checks: Go tests/vet, svelte-check, tsc, vitest
 	$(GO) vet ./...
 	$(GO) test ./...
 	$(NPM) run check
 	$(NPM) exec tsc -- --noEmit
+	$(NPM) run test
 
 clean: ## Remove build outputs (bin, dist)
 	rm -rf bin dist
