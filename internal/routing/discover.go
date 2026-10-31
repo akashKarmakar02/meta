@@ -74,6 +74,10 @@ func Discover(fsys fs.FS) ([]Route, error) {
 	}
 
 	sortRoutes(routes)
+
+	if err := ValidateRoutes(routes); err != nil {
+		return nil, err
+	}
 	return routes, nil
 }
 

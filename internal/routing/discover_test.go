@@ -447,6 +447,52 @@ func TestDiscoverLayoutScoping(t *testing.T) {
 	}
 }
 
+// TestDiscoverDuplicatePageFiles is the B08 acceptance fixture: page.templ
+// and page.svelte in the same folder fail discovery with both paths.
+func TestDiscoverDuplicatePageFiles(t *testing.T) {
+	fsys := fstest.MapFS{
+		"page.templ":       &fstest.MapFile{Data: []byte("templ Page() {}")},
+		"about/page.templ": &fstest.MapFile{Data: []byte("templ About() {}")},
+	}
+	fsys["about/page.svelte"] = &fstest.MapFile{Data: []byte("<main />")}
+
+	_, err := Discover(fsys)
+	if err == nil {
+		t.Fatal("Discover succeeded with page.templ + page.svelte in about/, want error")
+	}
+	for _, want := range []string{`"/about"`, "about/page.templ", "about/page.svelte"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err.Error(), want)
+		}
+	}
+}
+
+func TestDiscoverDuplicatePageFilesAtRoot(t *testing.T) {
+	fsys := fstest.MapFS{
+		"page.templ":  &fstest.MapFile{Data: []byte("templ Page() {}")},
+		"page.svelte": &fstest.MapFile{Data: []byte("<main />")},
+	}
+	_, err := Discover(fsys)
+	if err == nil {
+		t.Fatal("Discover succeeded with page.templ + page.svelte at root, want error")
+	}
+	for _, want := range []string{`"/"`, "page.templ", "page.svelte"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err.Error(), want)
+		}
+	}
+}
+
+// TestValidateRoutesNoDuplicateOnDistinctPaths is a direct unit check that
+// distinct routes validate cleanly.
+func TestValidateRoutesNoDuplicateOnDistinctPaths(t *testing.T) {
+	r1, _ := NewRoute("/", "page.templ", ModeSSR, nil)
+	r2, _ := NewRoute("/dashboard", "dashboard/page.svelte", ModeCSR, nil)
+	if err := ValidateRoutes([]Route{r1, r2}); err != nil {
+		t.Errorf("ValidateRoutes on distinct routes = %v, want nil", err)
+	}
+}
+
 // errorFS always fails with a permission error, exercising Discover's
 // walk error wrapping.
 type errorFS struct{}
