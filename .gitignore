@@ -1,0 +1,30 @@
+# Build output (Vite client bundle and manifest)
+dist/
+
+# Generated code — always produced by the generator, never edited by hand
+generated/
+
+# Go build artifacts
+*.exe
+*.test
+*.out
+
+# Go workspace files
+go.work
+go.work.sum
+
+# templ-generated Go sources (*_templ.go) are build artifacts of `templ generate`
+*_templ.go
+
+# Node / npm
+node_modules/
+npm-debug.log*
+
+# Environment and editor noise
+.env
+.env.*
+!.env.example
+.DS_Store
+.idea/
+.vscode/
+*.swp
