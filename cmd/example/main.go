@@ -9,6 +9,8 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/recover"
 
 	routes "go-meta/generated"
+	"go-meta/internal/render"
+	"go-meta/internal/routing"
 )
 
 // newApp constructs the Fiber application with its middleware and routes.
@@ -31,9 +33,14 @@ func newApp() *fiber.App {
 	// (B08), so no route can be registered twice.
 	for _, r := range routes.RegisterRoutes() {
 		route := r
-		fapp.Get(route.Path, func(c fiber.Ctx) error {
-			return routes.SSRPage(route).Render(c.RequestCtx(), c)
-		})
+		switch route.Mode {
+		case routing.ModeSSR:
+			fapp.Get(route.Path, func(c fiber.Ctx) error {
+				return routes.SSRPage(route).Render(c.RequestCtx(), c)
+			})
+		case routing.ModeCSR:
+			fapp.Get(route.Path, render.ShellHandler(route))
+		}
 	}
 
 	return fapp

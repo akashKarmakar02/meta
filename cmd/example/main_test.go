@@ -79,6 +79,53 @@ func TestGeneratedRoutesRespond(t *testing.T) {
 	}
 }
 
+// TestDashboardCSRShell: /dashboard is a CSR route — the response must be
+// the HTML shell: 200, HTML content type, mount element, and route
+// metadata the Phase E runtime will boot from.
+func TestDashboardCSRShell(t *testing.T) {
+	app := newApp()
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/dashboard", nil))
+	if err != nil {
+		t.Fatalf("test request: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Errorf("content-type = %q, want text/html; charset=utf-8", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	for _, want := range []string{
+		`<div id="app" data-go-route="/dashboard" data-go-route-id="dashboard/page.svelte">`,
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("response missing %q:\n%s", want, body)
+		}
+	}
+}
+
+// TestSSRStillRender: SSR routes render their own compiled component, not
+// a shell — distinct content per route proves per-route symbols.
+func TestSSRStillRender(t *testing.T) {
+	app := newApp()
+	for path, want := range map[string]string{
+		"/":      `<main data-go-page-root>Welcome</main>`,
+		"/about": `<main data-go-page-about>About</main>`,
+	} {
+		resp, err := app.Test(httptest.NewRequest(http.MethodGet, path, nil))
+		if err != nil {
+			t.Fatalf("%s: test request: %v", path, err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("%s: status = %d, want 200", path, resp.StatusCode)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		if !strings.Contains(string(body), want) {
+			t.Errorf("%s: missing %q in:\n%s", path, want, body)
+		}
+	}
+}
+
 // TestRoutesRegisteredExactlyOnce: registration cannot duplicate routes.
 // Duplicates would require duplicate paths in the generated descriptor set
 // (B08 rejects those at discovery), and the registration loop is a single
@@ -108,10 +155,10 @@ func TestRoutesRegisteredExactlyOnce(t *testing.T) {
 }
 
 // TestGeneratedRouteCount: the app registers exactly the routes the
-// generator emitted (2 in this tree) — deterministic, no drift.
+// generator emitted (3 in this tree) — deterministic, no drift.
 func TestGeneratedRouteCount(t *testing.T) {
-	if got := len(routes.RegisterRoutes()); got != 2 {
-		t.Errorf("RegisterRoutes() = %d routes, want 2", got)
+	if got := len(routes.RegisterRoutes()); got != 3 {
+		t.Errorf("RegisterRoutes() = %d routes, want 3", got)
 	}
 }
 
