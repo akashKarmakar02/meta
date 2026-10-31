@@ -111,6 +111,69 @@ func TestDiscoverIgnoresNonRootPageFiles(t *testing.T) {
 	}
 }
 
+// TestDiscoverSvelteClassification matches the B04 acceptance fixture:
+// dashboard/page.svelte => CSR mode.
+func TestDiscoverSvelteClassification(t *testing.T) {
+	fsys := fstest.MapFS{
+		"page.templ":            &fstest.MapFile{Data: []byte("templ Page() {}")},
+		"about/page.templ":      &fstest.MapFile{Data: []byte("templ About() {}")},
+		"dashboard/page.svelte": &fstest.MapFile{Data: []byte("<main />")},
+	}
+	routes, err := Discover(fsys)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(routes) != 3 {
+		t.Fatalf("routes = %d, want 3; got %+v", len(routes), routes)
+	}
+	var dash *Route
+	for i := range routes {
+		if routes[i].Path == "/dashboard" {
+			dash = &routes[i]
+		}
+	}
+	if dash == nil {
+		t.Fatalf("/dashboard not discovered; got %+v", routes)
+	}
+	if dash.Mode != ModeCSR {
+		t.Errorf("/dashboard Mode = %q, want csr", dash.Mode)
+	}
+	if dash.SourceFile != "dashboard/page.svelte" {
+		t.Errorf("SourceFile = %q, want dashboard/page.svelte", dash.SourceFile)
+	}
+}
+
+func TestDiscoverSvelteOnlyTree(t *testing.T) {
+	fsys := fstest.MapFS{
+		"dashboard/settings/page.svelte": &fstest.MapFile{Data: []byte("<main />")},
+	}
+	routes, err := Discover(fsys)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("routes = %d, want 1", len(routes))
+	}
+	r := routes[0]
+	if r.Path != "/dashboard/settings" || r.Mode != ModeCSR {
+		t.Errorf("route = %+v, want /dashboard/settings csr", r)
+	}
+}
+
+func TestDiscoverIgnoresOtherSvelteFiles(t *testing.T) {
+	fsys := fstest.MapFS{
+		"page.templ":            &fstest.MapFile{Data: []byte("templ Page() {}")},
+		"dashboard/card.svelte": &fstest.MapFile{Data: []byte("<div>card</div>")},
+	}
+	routes, err := Discover(fsys)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(routes) != 1 || routes[0].Path != "/" {
+		t.Errorf("routes = %+v, want only root route; .svelte components are not pages", routes)
+	}
+}
+
 // errorFS always fails with a permission error, exercising Discover's
 // walk error wrapping.
 type errorFS struct{}

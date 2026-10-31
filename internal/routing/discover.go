@@ -9,9 +9,8 @@ import (
 )
 
 // Discover walks an fs.FS rooted at the app directory and describes every
-// page route it finds. B03 scope: recursive traversal of nested
-// directories for page.templ files; .svelte classification, layouts, ignore
-// rules, and collision validation arrive in later tasks.
+// page route it finds. B04 scope: page.templ => SSR and page.svelte => CSR;
+// layouts, ignore rules, and collision validation arrive in later tasks.
 //
 // Route output is deterministic: sorted by normalized path.
 //
@@ -26,23 +25,16 @@ func Discover(fsys fs.FS) ([]Route, error) {
 		if d.IsDir() {
 			return nil
 		}
-		if p == "page.templ" {
-			route, rerr := NewRoute("/", "page.templ", ModeSSR, nil)
-			if rerr != nil {
-				return rerr
-			}
-			routes = append(routes, route)
+		dir, base := path.Split(p)
+		mode, ok := classifyPage(base)
+		if !ok {
 			return nil
 		}
-		dir, base := path.Split(p)
-		if base == "page.templ" && dir != "" {
-			urlPath := normalizeDirToPath(dir)
-			route, rerr := NewRoute(urlPath, p, ModeSSR, nil)
-			if rerr != nil {
-				return rerr
-			}
-			routes = append(routes, route)
+		route, rerr := NewRoute(normalizeDirToPath(dir), p, mode, nil)
+		if rerr != nil {
+			return rerr
 		}
+		routes = append(routes, route)
 		return nil
 	})
 	if err != nil {
@@ -50,11 +42,25 @@ func Discover(fsys fs.FS) ([]Route, error) {
 	}
 
 	if len(routes) == 0 {
-		return nil, fmt.Errorf("routing: no routes found: app tree contains no page.templ")
+		return nil, fmt.Errorf("routing: no routes found: app tree contains no page.templ or page.svelte")
 	}
 
 	sortRoutes(routes)
 	return routes, nil
+}
+
+// classifyPage maps a filename to its render mode. Only exact page
+// filenames count (binding decision #4); anything else — including other
+// .templ/.svelte files — is a component, not a route.
+func classifyPage(base string) (RenderMode, bool) {
+	switch base {
+	case "page.templ":
+		return ModeSSR, true
+	case "page.svelte":
+		return ModeCSR, true
+	default:
+		return "", false
+	}
 }
 
 // normalizeDirToPath converts a slash directory path like "about/" into a
