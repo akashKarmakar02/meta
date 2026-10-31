@@ -162,6 +162,69 @@ func TestGeneratedRouteCount(t *testing.T) {
 	}
 }
 
+// TestNonGETMethodsRejectPageRoutes is the C07 method-restriction fixture:
+// page routes are GET-only resources. A POST to any page route must never
+// produce SSR HTML or a CSR shell — Fiber answers 405 Method Not Allowed
+// and leaves the GET response untouched.
+func TestNonGETMethodsRejectPageRoutes(t *testing.T) {
+	app := newApp()
+
+	methods := []string{http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch}
+	paths := []string{"/", "/about", "/dashboard"} // SSR, SSR, CSR shells alike
+
+	for _, p := range paths {
+		for _, m := range methods {
+			resp, err := app.Test(httptest.NewRequest(m, p, nil))
+			if err != nil {
+				t.Fatalf("%s %s: request failed: %v", m, p, err)
+			}
+			if resp.StatusCode != http.StatusMethodNotAllowed {
+				t.Errorf("%s %s status = %d, want %d (page output must be GET-only)", m, p, resp.StatusCode, http.StatusMethodNotAllowed)
+			}
+		}
+	}
+
+	// HEAD is intentionally served by the GET handler (RFC semantics:
+	// same headers, no body). Assert it works rather than rejecting it.
+	resp, err := app.Test(httptest.NewRequest(http.MethodHead, "/about", nil))
+	if err != nil {
+		t.Fatalf("HEAD /about: request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("HEAD /about status = %d, want 200", resp.StatusCode)
+	}
+}
+
+// TestUnknownRoute404Body asserts the 404 fallback: unknown paths return
+// the standard Fiber 404 without crashing the app or leaking page output,
+// and the app keeps serving after a 404.
+func TestUnknownRoute404Body(t *testing.T) {
+	app := newApp()
+
+	for _, p := range []string{"/missing", "/nope", "/dashboard/extra"} {
+		resp, err := app.Test(httptest.NewRequest(http.MethodGet, p, nil))
+		if err != nil {
+			t.Fatalf("GET %s: request failed: %v", p, err)
+		}
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("GET %s status = %d, want 404", p, resp.StatusCode)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		if strings.Contains(string(body), "<main data-go-page") {
+			t.Errorf("GET %s body leaked page content:\n%s", p, body)
+		}
+	}
+
+	// App still healthy after the 404s.
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if err != nil {
+		t.Fatalf("GET /healthz after 404s: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("GET /healthz after 404s status = %d, want 200", resp.StatusCode)
+	}
+}
+
 // TestPanicReturns500 asserts that recover middleware converts a handler
 // panic into a 500 response without killing the app.
 func TestPanicReturns500(t *testing.T) {
