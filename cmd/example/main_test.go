@@ -41,3 +41,30 @@ func TestUnknownRoute404(t *testing.T) {
 		t.Errorf("status = %d, want %d", resp.StatusCode, fiber.StatusNotFound)
 	}
 }
+
+// TestPanicReturns500 asserts that recover middleware converts a handler
+// panic into a 500 response without killing the app.
+func TestPanicReturns500(t *testing.T) {
+	app := newApp()
+
+	app.Get("/boom", func(_ fiber.Ctx) error {
+		panic("kaboom")
+	})
+
+	resp, err := app.Test(httptest.NewRequest(fiber.MethodGet, "/boom", nil))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", resp.StatusCode, fiber.StatusInternalServerError)
+	}
+
+	// Server must survive the panic: the next request is still served.
+	resp2, err := app.Test(httptest.NewRequest(fiber.MethodGet, "/healthz", nil))
+	if err != nil {
+		t.Fatalf("request after panic failed: %v", err)
+	}
+	if resp2.StatusCode != fiber.StatusOK {
+		t.Errorf("status after panic = %d, want %d", resp2.StatusCode, fiber.StatusOK)
+	}
+}

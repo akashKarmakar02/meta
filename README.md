@@ -28,8 +28,8 @@ The implementation plan lives in [`phase1-implementation-blueprint.md`](phase1-i
 
 ## Status
 
-Tasks A01–A03 of the Phase 1 task board are complete: repository bootstrapped,
-the Go module initialized, and Fiber v3 (pinned at v3.6.1) added with a
-`GET /healthz` endpoint in `cmd/example`. Subsequent tasks (middleware,
-frontend tooling, templ, route generation) are implemented sequentially per
-the blueprint's gates.
+Tasks A01–A04 of the Phase 1 task board are complete: repository bootstrapped,
+the Go module initialized, Fiber v3 (pinned at v3.6.1) added with a
+`GET /healthz` endpoint in `cmd/example`, and recovery + request-logging
+middleware installed. Subsequent tasks (frontend toolchain, templ, route
+generation) are implemented sequentially per the blueprint's gates.
