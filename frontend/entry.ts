@@ -10,17 +10,33 @@
 // F12: after mounting the initial page, activate the soft-navigation
 // pipeline (link interception → fetch → apply → history; §5.2). Its
 // pipeline module owns navigation-time page handles from here on.
+//
+// G04: when the booted route's declared ancestry contains CLIENT
+// (layout.svelte) layouts — a direct /dashboard or /dashboard/settings
+// load, where the bare boot shell contains no layout markup at all —
+// mount them once here, then host the page inside the innermost layout's
+// [data-go-layout-outlet]. The shell's #app element stops being the page
+// root and becomes the region hosting the mounted layout subtree; exactly
+// one [data-go-page-root] exists afterward, inside the layout outlet.
 import { mountComponent } from './svelte-mounter';
 import type { MountHandle } from './svelte-mounter';
-import { loadPage } from './route-import-map';
+import { loadPage, declaredLayoutsFor, hasLayout, loadLayout } from './route-import-map';
+import {
+  mountPersistentLayout,
+  createLayoutPageRoot,
+  LayoutHostAttr,
+  type LayoutInstanceHandle,
+} from './layout-mount';
 import { startSoftNavigation } from './navigation-pipeline';
+import type { NavigationResponse } from './types';
 
 const PageRootSelector = '[data-go-page-root]';
 const RouteIDAttr = 'data-go-route-id';
 
-// Handle for the live page instance; later phases' navigation runtime
-// unmounts this before mounting the next route.
+// Handles for the live instances; later phases' navigation runtime
+// unmounts these before mounting the next route.
 let currentPage: MountHandle | null = null;
+let currentLayout: LayoutInstanceHandle | null = null;
 
 async function boot(): Promise<void> {
   const target = document.querySelector(PageRootSelector);
@@ -38,7 +54,50 @@ async function boot(): Promise<void> {
     // page; the navigation runtime (later phase) will hard-navigate.
     return;
   }
-  currentPage = mountComponent(component, { target });
+
+  // G04 direct-load layout entry: mount every CLIENT layout in the
+  // declared chain (outermost first — one per chain position today),
+  // then host the page inside the innermost one's outlet. SSR (.templ)
+  // ancestry entries are server-mounted markup; on the bare boot shell
+  // none exists, and that is fine: the shell document is the root region.
+  const clientChain = declaredLayoutsFor(routeId).filter((id) => hasLayout(id));
+  let pageTarget: HTMLElement = target as HTMLElement;
+  let routeAttrs: { url: string; routeId: string };
+  routeAttrs = {
+    url: target.getAttribute('data-go-route') ?? window.location.pathname,
+    routeId,
+  };
+
+  if (clientChain.length > 0) {
+    // The shell root becomes the region hosting the layout subtree. It
+    // stops being the page root (the page root moves inside the layout
+    // outlet); nothing else about the shell contract changes.
+    const region = target as HTMLElement;
+    region.removeAttribute('data-go-page-root');
+    region.replaceChildren();
+    let outletRegion: ParentNode = region;
+    for (const layoutId of clientChain) {
+      currentLayout = await mountPersistentLayout(layoutId, outletRegion);
+      outletRegion = currentLayout.outlet;
+    }
+    // Minimal envelope describing this document for createLayoutPageRoot's
+    // metadata attributes.
+    const env = {
+      version: 1,
+      url: routeAttrs.url,
+      routeId,
+      mode: 'csr' as const,
+      title: '',
+      layouts: [],
+      html: '',
+      clientEntry: routeId,
+    } satisfies NavigationResponse;
+    pageTarget = createLayoutPageRoot(currentLayout!.outlet, env);
+    currentPage = mountComponent(component, { target: pageTarget });
+    return;
+  }
+
+  currentPage = mountComponent(component, { target: pageTarget });
 }
 
 void boot().finally(() => {
@@ -46,3 +105,6 @@ void boot().finally(() => {
   // takes over page ownership for all subsequent navigations.
   startSoftNavigation();
 });
+
+// LayoutHostAttr re-exported for test discovery of the host element.
+void LayoutHostAttr;

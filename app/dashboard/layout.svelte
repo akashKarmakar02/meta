@@ -26,11 +26,12 @@
   // swaps, the count survives because it lives here, not in a page or
   // module scope.
   //
-  // NOTE: this wrapper deliberately does NOT carry the data-go-layout
-  // marker. Those markers mean "a layout INSTANCE the navigation runtime
-  // mounted" (G01's mounted-vs-declared distinction); until G04 owns
-  // mounting, the layout renders per-page as ordinary composition and
-  // must not be mistaken for a mounted persistent layout instance.
+  // G04: the shell carries this layout's stable ID in data-go-layout —
+  // the same marker templ layouts stamp. It becomes TRUTHFUL only through
+  // the runtime: mountPersistentLayout mounts this component inside a
+  // [data-go-layout-shell-host] target and validates this marker exists
+  // exactly once before treating the layout as mounted (G01's
+  // mounted-vs-declared distinction; env.layouts alone proves nothing).
   import type { Snippet } from 'svelte';
 
   let { children }: { children?: Snippet } = $props();
@@ -38,7 +39,7 @@
   let count = $state(0);
 </script>
 
-<div data-go-layout-shell class="dashboard-layout">
+<div data-go-layout-shell data-go-layout="app/dashboard/layout.svelte" class="dashboard-layout">
   <aside data-go-dashboard-sidebar>
     <h2>Dashboard</h2>
     <nav data-go-dashboard-side-nav>

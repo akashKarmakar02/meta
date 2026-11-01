@@ -11,13 +11,15 @@ import (
 )
 
 // fixtureCSRManifest discovers routes from a minimal CSR+SSR tree so tests
-// exercise the same discovery pipeline as production generation.
+// exercise the same discovery pipeline as production generation. The
+// dashboard subtree carries a client layout (G04).
 func fixtureCSRManifest(t *testing.T) routing.Manifest {
 	t.Helper()
 	fsys := fstest.MapFS{
 		"layout.templ":                   &fstest.MapFile{Data: []byte("templ Layout(templ.Component) {}")},
 		"page.templ":                     &fstest.MapFile{Data: []byte("templ Page() {}")},
 		"about/page.templ":               &fstest.MapFile{Data: []byte("templ About() {}")},
+		"dashboard/layout.svelte":        &fstest.MapFile{Data: []byte("<aside />")},
 		"dashboard/page.svelte":          &fstest.MapFile{Data: []byte("<main />")},
 		"dashboard/settings/page.svelte": &fstest.MapFile{Data: []byte("<main />")},
 	}
@@ -42,30 +44,62 @@ func TestRouteRegistryTSIncludesCSRRouteIDs(t *testing.T) {
 	}
 }
 
-// TestRouteRegistryTSExcludesSSR verifies SSR .templ routes are excluded:
-// only .svelte pages receive client component loaders.
+// TestRouteRegistryTSExcludesSSR verifies SSR .templ routes are excluded
+// from client loading: no import() loader ever references a .templ file.
+// (G04's routeLayouts map may still carry .templ layout IDs as declared
+// ancestry DATA — mirroring the navigation envelope — but never as loaders.)
 func TestRouteRegistryTSExcludesSSR(t *testing.T) {
 	src := RouteRegistryTS(fixtureCSRManifest(t))
-	for _, banned := range []string{".templ", "page.templ", "about/page"} {
-		if strings.Contains(src, banned) {
-			t.Errorf("registry contains SSR content %q:\n%s", banned, src)
+	for _, line := range strings.Split(src, "\n") {
+		if !strings.Contains(line, "import(") {
+			continue
+		}
+		if strings.Contains(line, ".templ") {
+			t.Errorf("SSR file receives a client loader: %s", line)
 		}
 	}
 }
 
 // TestRouteRegistryTSStaticImports verifies each entry is a static
 // import() call on a fixed path — Vite-analyzable, no dynamic arbitrary
-// imports (E06 contract).
+// imports (E06 contract). Page loaders and layout loaders both count.
 func TestRouteRegistryTSStaticImports(t *testing.T) {
 	src := RouteRegistryTS(fixtureCSRManifest(t))
 	if !strings.Contains(src, `"dashboard/page.svelte": () => import("../app/dashboard/page.svelte"),`) {
 		t.Errorf("missing static loader for dashboard:\n%s", src)
 	}
-	if strings.Count(src, "() => import(") != 2 {
-		t.Errorf("want 2 loaders, got %d:\n%s", strings.Count(src, "() => import("), src)
+	if strings.Count(src, "() => import(") != 3 {
+		t.Errorf("want 3 loaders (2 pages + 1 layout), got %d:\n%s", strings.Count(src, "() => import("), src)
 	}
 	if strings.Contains(src, "import("+"\" +") {
 		t.Error("dynamic/concatenated import expression present")
+	}
+}
+
+// TestRouteRegistryTSIncludesLayoutLoader is G04 acceptance: the client
+// layout component is addressable by its stable layout ID through a static
+// loader Vite can analyze.
+func TestRouteRegistryTSIncludesLayoutLoader(t *testing.T) {
+	src := RouteRegistryTS(fixtureCSRManifest(t))
+	if !strings.Contains(src,
+		`"app/dashboard/layout.svelte": () => import("../app/dashboard/layout.svelte"),`) {
+		t.Errorf("missing static layout loader for app/dashboard/layout.svelte:\n%s", src)
+	}
+}
+
+// TestRouteRegistryTSIncludesRouteLayouts verifies routeLayouts carries
+// each route's declared ancestry outermost -> innermost, including SSR
+// layout IDs as data.
+func TestRouteRegistryTSIncludesRouteLayouts(t *testing.T) {
+	src := RouteRegistryTS(fixtureCSRManifest(t))
+	for _, want := range []string{
+		`"dashboard/page.svelte": ["app/layout.templ", "app/dashboard/layout.svelte"],`,
+		`"dashboard/settings/page.svelte": ["app/layout.templ", "app/dashboard/layout.svelte"],`,
+		`"about/page.templ": ["app/layout.templ"],`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("missing routeLayouts entry %s:\n%s", want, src)
+		}
 	}
 }
 

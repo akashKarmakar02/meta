@@ -24,14 +24,13 @@
 //   * Hard-navigation fallback runs only for the current navigation: stale
 //     or intentionally aborted transitions exit as no-ops.
 //
-// Layout limitation (documented per F12 requirements): `env.layouts` describes
-// desired ancestry and does not prove DOM instances exist.  The pipeline reads
-// the actually-mounted layout stack from layout element markers and soft-
-// navigates only when the destination's desired stack keeps every mounted
-// layout in place; any other shape change (adding or removing a nested
-// layout, e.g. / → /docs) uses the safe full-document fallback rather than
-// producing a mismatched DOM.  Full client-side layout reconciliation is
-// Phase G (G01/G02).
+// Layout handling (G04): `env.layouts` describes desired ancestry and does
+// not prove DOM instances exist.  The pipeline reads the actually-mounted
+// layout stack from layout element markers; entering a CLIENT (.svelte)
+// layout subtree mounts it once through frontend/layout-mount.ts and
+// hosts the page inside its [data-go-layout-outlet].  Any transition that
+// would DISCARD a mounted layout still takes the safe full-document
+// fallback — teardown on subtree exit arrives with G07.
 
 import { installLinkInterceptor, uninstallLinkInterceptor } from './router';
 import { fetchNavigation, NavigationError } from './navigation';
@@ -43,10 +42,18 @@ import {
 } from './navigation-coordinator';
 import { replacePageOutlet, PageOutletSelector } from './ssr-outlet';
 import { mountCsrPage, type CsrPageHandle } from './csr-mount';
+import { mountComponent } from './svelte-mounter';
 import {
   mountedLayoutStack,
   layoutStackTransition,
 } from './layout-stack';
+import {
+  clientLayouts,
+  mountPersistentLayout,
+  createLayoutPageRoot,
+  LayoutMountError,
+  type LayoutInstanceHandle,
+} from './layout-mount';
 import {
   pushNavigationState,
   installPopstateNavigation,
@@ -60,6 +67,14 @@ let installedPopstate = false;
 
 /** Current CSR page mount handle, owned exclusively by the pipeline. */
 let currentPage: CsrPageHandle | null = null;
+
+/**
+ * Mounted persistent client layout instance (G04), owned exclusively by
+ * the pipeline. Present only when a layout subtree entry has actually
+ * completed; the truthful data-go-layout marker in the DOM is what
+ * layout-stack's reader sees.
+ */
+let currentLayout: LayoutInstanceHandle | null = null;
 
 /** Serializes destructive DOM commits (unmount / outlet replace / mount). */
 let commitTail: Promise<unknown> = Promise.resolve();
@@ -80,21 +95,8 @@ function restoreScroll(scroll: { x: number; y: number } | null): void {
 type Envelope = Awaited<ReturnType<typeof fetchNavigation>>;
 
 /**
- * True when every currently-mounted layout also appears at the same position
- * in the target's desired ancestry — i.e. the soft transition only swaps page
- * content inside already-mounted layout shells.  Anything else (a nested
- * layout the current document lacks, or one it must lose) requires the full
- * document.  The positional comparison itself is G01's formal model in
- * frontend/layout-stack.ts; until G02+ wire real instance retention, this
- * guard conservatively maps "not fully retained" to a hard navigation.
+ * Full-document fallback: browser loads the intended destination fresh.
  */
-function mountedStackWithinDesired(mounted: readonly string[], desired: readonly string[]): boolean {
-  return (
-    layoutStackTransition(mounted, desired).discard.length === 0
-  );
-}
-
-/** Full-document fallback: browser loads the intended destination fresh. */
 function hardNavigate(url: string): void {
   if (seams.hardNavigate) {
     seams.hardNavigate(url);
@@ -103,10 +105,31 @@ function hardNavigate(url: string): void {
   window.location.assign(url);
 }
 
-/** Resolve the generated registry component for a CSR envelope. */
-async function importComponentFor(env: Envelope): Promise<void> {
+/**
+ * Resolve the generated-registry page component for a CSR envelope.
+ * Returns null for unknown entries — callers treat that as a failure and
+ * take the hard-navigation fallback.
+ */
+async function importComponentFor(env: Envelope): Promise<unknown | null> {
   const { loadPage } = await import('./route-import-map');
-  await loadPage(env.clientEntry ?? '');
+  return loadPage(env.clientEntry ?? '');
+}
+
+/**
+ * Mount a CSR page whose envelope just entered a persistent layout (G04):
+ * create the runtime-owned page root inside the layout's outlet and mount
+ * the already-resolved component there. The caller owns error handling —
+ * any throw propagates to the hard-navigation fallback after
+ * mountPersistentLayout cleaned up its own partial mount.
+ */
+async function mountPageInLayout(
+  env: Envelope,
+  layout: LayoutInstanceHandle,
+  component: unknown
+): Promise<CsrPageHandle> {
+  const pageRoot = createLayoutPageRoot(layout.outlet, env);
+  const handle = mountComponent(component as Parameters<typeof mountComponent>[0], { target: pageRoot });
+  return { ...handle, pageRoot };
 }
 
 /** Focus the primary content region without scrolling (§5.4). */
@@ -136,14 +159,23 @@ async function applyEnvelope(
   const run = async (): Promise<void> => {
     if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
 
-    // Layout-shape guard: if this document mounts nested SSR layouts that the
-    // destination does not keep identical, only a full navigation preserves
-    // correct DOM. env.layouts is desired state; DOM markers are actual state.
+    // Layout-shape guard: if this document mounts layouts the destination
+    // discards, only a full navigation preserves correct DOM — teardown of
+    // persistent layouts on exit is G07, not G04. env.layouts is desired
+    // state; DOM markers are actual state.
     const mounted = mountedLayoutStack(document);
-    if (!mountedStackWithinDesired(mounted, env.layouts)) {
+    const transition = layoutStackTransition(mounted, env.layouts);
+    if (transition.discard.length > 0) {
       hardNavigate(env.url);
       return;
     }
+
+    // G04: client (.svelte) layouts that must ENTER with this navigation.
+    // SSR (.templ) enter-list entries belong to documents the server
+    // composed — a soft navigation never enters one client-side (the guard
+    // above already hard-navigated anything that would need to lose or gain
+    // server markup, because direct loads start with it already mounted).
+    const enteringLayouts = clientLayouts(transition.enter);
 
     // Capture the leaving page's scroll BEFORE any teardown: unmounting the
     // outgoing content scrolls the document to the top by itself, so a read
@@ -162,9 +194,61 @@ async function applyEnvelope(
 
     if (env.mode === 'csr') {
       // Import resolved (or failed — caught by the caller's fallback).
-      await componentPromise;
+      const component = await componentPromise;
       if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
-      currentPage = await (seams.mountCsr ?? mountCsrPage)(env, outgoing ?? undefined);
+
+      if (enteringLayouts.length > 0) {
+        // G04 subtree entry: mount the entering client layouts (outermost
+        // first — one per chain position today), then host this page inside
+        // the innermost layout's outlet. Any failure propagates to the
+        // caller's hard-navigation fallback; mountPersistentLayout cleans up
+        // its own partial mount first.
+        await outgoing?.unmount();
+        if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
+        let region: ParentNode;
+        if (currentLayout !== null) {
+          region = currentLayout.outlet;
+        } else {
+          const outlets = document.querySelectorAll(PageOutletSelector);
+          if (outlets.length !== 1) {
+            throw new LayoutMountError(
+              `expected exactly one ${PageOutletSelector} to enter a layout subtree, found ${outlets.length}`
+            );
+          }
+          region = outlets[0];
+          // Fresh entry from a non-layout document: drop any outgoing SSR
+          // page content — the layout subtree replaces the outlet's
+          // contents entirely (mountCsrPage does the same for bare pages).
+          region.replaceChildren();
+        }
+        let layoutHandle: LayoutInstanceHandle | null = null;
+        for (const layoutId of enteringLayouts) {
+          layoutHandle = await mountPersistentLayout(layoutId, region);
+          if (!token.isCurrent()) {
+            // Superseded mid-entry: tear down what we just mounted so the
+            // newer navigation starts from a clean document.
+            await layoutHandle.dispose();
+            throw new StaleNavigationError(token.id, currentNavigationId());
+          }
+          region = layoutHandle.outlet;
+        }
+        currentLayout = layoutHandle;
+        if (!currentLayout || !component) {
+          // Unknown page component or empty chain: undo the layout entry —
+          // the hard fallback reloads the destination fresh anyway.
+          const failedLayout = currentLayout;
+          currentLayout = null;
+          await failedLayout?.dispose();
+          throw new LayoutMountError(
+            !component
+              ? `unknown clientEntry ${JSON.stringify(env.clientEntry)} — not in the generated route registry`
+              : 'layout chain produced no mounted instance'
+          );
+        }
+        currentPage = await mountPageInLayout(env, currentLayout, component);
+      } else {
+        currentPage = await (seams.mountCsr ?? mountCsrPage)(env, outgoing ?? undefined);
+      }
     } else {
       if (outgoing !== null) await outgoing.unmount();
       if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
@@ -306,6 +390,14 @@ export async function __resetPipelineForTesting(): Promise<void> {
       /* already gone */
     }
     currentPage = null;
+  }
+  if (currentLayout) {
+    try {
+      await currentLayout.dispose();
+    } catch {
+      /* already gone */
+    }
+    currentLayout = null;
   }
 }
 
