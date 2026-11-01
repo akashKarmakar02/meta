@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "url": "/about",
+  "routeId": "about/page.templ",
+  "mode": "ssr",
+  "title": "About",
+  "layouts": ["app/layout.templ"],
+  "html": "<main data-go-page=\"about\"><h1>About</h1><p>Learn more about go-meta.</p></main>",
+  "clientEntry": null
+}
