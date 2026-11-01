@@ -34,6 +34,41 @@ export type LayoutId = string;
 /** Marker attribute templ layouts carry on their wrapper element. */
 const LAYOUT_MARKER = 'data-go-layout';
 
+// G05: file extension decides who can mount a layout instance. A .svelte
+// layout is a CLIENT component the runtime mounts/unmounts; a .templ
+// layout is SERVER markup that arrives composed inside a document (or is
+// simply absent — the bare CSR boot shell contains no templ markup at
+// all). Retention planning compares CLIENT layouts only (G10 rejects
+// mixed hierarchies, so in every valid stack the client entries form a
+// contiguous suffix of the chain); server wrappers around them can never
+// be unmounted client-side, so they prove nothing about retention.
+const CLIENT_LAYOUT_EXT = '.svelte';
+
+/**
+ * True when the layout ID names a CLIENT (layout.svelte) component — the
+ * only kind the navigation runtime can mount, retain, or unmount.
+ * Purely structural (the ID's extension); no registry lookup here.
+ */
+export function isClientLayoutId(id: LayoutId): boolean {
+  return id.endsWith(CLIENT_LAYOUT_EXT);
+}
+
+/**
+ * The CLIENT (layout.svelte) subsequence of a stack, order preserved.
+ *
+ * G05's retention comparison base: layoutStackTransition over these
+ * subsequences plans mount/retain/unmount of exactly the instances the
+ * runtime owns. Server (.templ) entries are dropped because the bare
+ * CSR boot shell never mounts them, yet its client layouts are as
+ * mounted as any other — comparing unfiltered stacks against such a
+ * document would plan phantom discards of layouts that are alive and
+ * should be retained (the positional shift the missing server prefix
+ * causes is not a real hierarchy change).
+ */
+export function clientLayoutSequence(stack: readonly LayoutId[]): LayoutId[] {
+  return stack.filter(isClientLayoutId);
+}
+
 /** Invalid layout-chain input (malformed stack, duplicate IDs). */
 export class LayoutStackError extends Error {
   constructor(message: string) {

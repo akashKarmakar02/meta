@@ -27,7 +27,7 @@ import {
   LayoutHostAttr,
   type LayoutInstanceHandle,
 } from './layout-mount';
-import { startSoftNavigation } from './navigation-pipeline';
+import { startSoftNavigation, adoptMountedInstances } from './navigation-pipeline';
 import type { NavigationResponse } from './types';
 
 const PageRootSelector = '[data-go-page-root]';
@@ -37,6 +37,9 @@ const RouteIDAttr = 'data-go-route-id';
 // unmounts these before mounting the next route.
 let currentPage: MountHandle | null = null;
 let currentLayout: LayoutInstanceHandle | null = null;
+
+/** The boot page handle plus its mount root, for G05 handover below. */
+let bootPage: { target: Element; mounted: boolean; unmount(o?: { outro?: boolean }): Promise<void>; pageRoot: HTMLElement } | null = null;
 
 async function boot(): Promise<void> {
   const target = document.querySelector(PageRootSelector);
@@ -93,14 +96,36 @@ async function boot(): Promise<void> {
       clientEntry: routeId,
     } satisfies NavigationResponse;
     pageTarget = createLayoutPageRoot(currentLayout!.outlet, env);
-    currentPage = mountComponent(component, { target: pageTarget });
+    const handle = mountComponent(component, { target: pageTarget });
+    bootPage = { ...handle, pageRoot: pageTarget };
     return;
   }
 
   currentPage = mountComponent(component, { target: pageTarget });
+  if (clientChain.length === 0) {
+    bootPage = { ...currentPage, pageRoot: pageTarget };
+  }
 }
 
 void boot().finally(() => {
+  // G05: when the bootstrap mounted a persistent layout subtree, hand its
+  // instances — layout and first page — to the pipeline BEFORE activating
+  // it. Ownership passes completely; from here the pipeline is the only
+  // owner, so its first soft navigation can retain the layout (a child-only
+  // swap /dashboard → /dashboard/settings keeps counter state even after a
+  // direct load of the shell).
+  if (currentLayout && bootPage) {
+    try {
+      adoptMountedInstances({ layout: currentLayout, page: bootPage });
+    } catch {
+      // Adoption only fails when the mounted instance is not verifiably
+      // live (see adoptMountedInstances). The pipeline then starts with no
+      // tracked layout: its first navigation mounts a fresh one — safe,
+      // just not state-preserving. Never block activation on handover.
+    }
+    currentLayout = null;
+    currentPage = null;
+  }
   // Activate SPA navigation once the initial mount is underway. The pipeline
   // takes over page ownership for all subsequent navigations.
   startSoftNavigation();

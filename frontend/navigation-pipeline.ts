@@ -24,13 +24,24 @@
 //   * Hard-navigation fallback runs only for the current navigation: stale
 //     or intentionally aborted transitions exit as no-ops.
 //
-// Layout handling (G04): `env.layouts` describes desired ancestry and does
-// not prove DOM instances exist.  The pipeline reads the actually-mounted
-// layout stack from layout element markers; entering a CLIENT (.svelte)
-// layout subtree mounts it once through frontend/layout-mount.ts and
-// hosts the page inside its [data-go-layout-outlet].  Any transition that
-// would DISCARD a mounted layout still takes the safe full-document
-// fallback — teardown on subtree exit arrives with G07.
+// Layout handling (G04+G05): `env.layouts` describes desired ancestry and
+// does not prove DOM instances exist.  The pipeline reads the actually-
+// mounted layout stack from layout element markers; entering a CLIENT
+// (.svelte) layout subtree mounts it once through frontend/layout-mount.ts
+// and hosts the page inside its [data-go-layout-outlet].
+//
+// G05 child-only swaps: when a CSR navigation's destination keeps every
+// MOUNTED client layout (planned via client-layout sequences — the bare
+// boot shell mounts no server wrappers, so retention compares only what
+// the runtime can own), the retained layout instance keeps its component,
+// host, marker, and outlet; only the page inside the outlet is swapped
+// (frontend/layout-child-swap.ts).  Any transition that would DISCARD a
+// mounted layout still takes the safe full-document fallback — teardown on
+// subtree exit arrives with G07.
+//
+// The pipeline also ADOPTS the bootstrap's mounted instances (entry.ts)
+// so a direct load's layout survives its first soft navigation too: both
+// halves of the runtime share one owner instead of two.
 
 import { installLinkInterceptor, uninstallLinkInterceptor } from './router';
 import { fetchNavigation, NavigationError } from './navigation';
@@ -42,10 +53,11 @@ import {
 } from './navigation-coordinator';
 import { replacePageOutlet, PageOutletSelector } from './ssr-outlet';
 import { mountCsrPage, type CsrPageHandle } from './csr-mount';
-import { mountComponent } from './svelte-mounter';
+import { mountComponent, type MountHandle } from './svelte-mounter';
 import {
   mountedLayoutStack,
   layoutStackTransition,
+  clientLayoutSequence,
 } from './layout-stack';
 import {
   clientLayouts,
@@ -54,6 +66,7 @@ import {
   LayoutMountError,
   type LayoutInstanceHandle,
 } from './layout-mount';
+import { swapLayoutChildPage } from './layout-child-swap';
 import {
   pushNavigationState,
   installPopstateNavigation,
@@ -75,6 +88,35 @@ let currentPage: CsrPageHandle | null = null;
  * layout-stack's reader sees.
  */
 let currentLayout: LayoutInstanceHandle | null = null;
+
+/**
+ * G05 handover: entry.ts mounts the direct-load document's persistent
+ * layout and first page BEFORE the pipeline activates; without handing
+ * those instances over, the pipeline's first soft navigation would not
+ * know the layout exists and could not retain it (G01: a declared
+ * ancestry proves nothing — only tracked instances do).
+ *
+ * Ownership passes completely: the caller must not use (or unmount) the
+ * adopted handles afterwards; adoptMountedInstances is the pipeline's
+ * sole initializer for documents whose layout was mounted outside it.
+ * The layout must still be live in the document (its marker present);
+ * a detached handover is rejected rather than guessed at.
+ */
+export function adoptMountedInstances(handles: {
+  layout: LayoutInstanceHandle;
+  page: MountHandle & { readonly pageRoot: HTMLElement };
+}): void {
+  const marked = document.querySelectorAll(
+    `[data-go-layout="${CSS.escape(handles.layout.layoutId)}"]`
+  );
+  if (marked.length !== 1 || !marked[0].isConnected) {
+    throw new LayoutMountError(
+      `cannot adopt layout ${JSON.stringify(handles.layout.layoutId)}: no single connected mounted instance in the document`
+    );
+  }
+  currentLayout = handles.layout;
+  currentPage = { ...handles.page };
+}
 
 /** Serializes destructive DOM commits (unmount / outlet replace / mount). */
 let commitTail: Promise<unknown> = Promise.resolve();
@@ -159,23 +201,38 @@ async function applyEnvelope(
   const run = async (): Promise<void> => {
     if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
 
-    // Layout-shape guard: if this document mounts layouts the destination
-    // discards, only a full navigation preserves correct DOM — teardown of
-    // persistent layouts on exit is G07, not G04. env.layouts is desired
-    // state; DOM markers are actual state.
-    const mounted = mountedLayoutStack(document);
-    const transition = layoutStackTransition(mounted, env.layouts);
+    // Retention planning on CLIENT (layout.svelte) sequences only (G05).
+    // env.layouts is desired state; DOM markers are actual state. Server
+    // (.templ) wrappers are dropped from BOTH sides before comparing: the
+    // bare CSR boot shell mounts none of them (a direct /dashboard load
+    // contains no templ markup), yet its client layouts are as mounted as
+    // any other — comparing raw stacks would plan phantom discards and
+    // break child-only swaps on direct-loaded shells. Server wrappers the
+    // runtime could never unmount anyway are not its to plan.
+    const mountedClients = clientLayoutSequence(mountedLayoutStack(document));
+    const desiredClients = clientLayoutSequence(env.layouts);
+    const transition = layoutStackTransition(mountedClients, desiredClients);
     if (transition.discard.length > 0) {
+      // Layout-shape guard: this navigation would discard a mounted client
+      // layout — only a full navigation preserves correct DOM (teardown on
+      // subtree exit is G07, not G05).
       hardNavigate(env.url);
       return;
     }
 
     // G04: client (.svelte) layouts that must ENTER with this navigation.
     // SSR (.templ) enter-list entries belong to documents the server
-    // composed — a soft navigation never enters one client-side (the guard
-    // above already hard-navigated anything that would need to lose or gain
-    // server markup, because direct loads start with it already mounted).
+    // composed — a soft navigation never enters one client-side.
     const enteringLayouts = clientLayouts(transition.enter);
+
+    // G05: a mounted, retained client layout hosting the outgoing page —
+    // the destination keeps every mounted client layout, and one is
+    // currently live (tracked by the pipeline or adopted from bootstrap).
+    // This is the mounted-vs-declared distinction made concrete: a layout
+    // ID in env.layouts alone never reaches this branch without a real,
+    // tracked instance behind it.
+    const retainedLayout =
+      transition.enter.length === 0 && currentLayout !== null ? currentLayout : null;
 
     // Capture the leaving page's scroll BEFORE any teardown: unmounting the
     // outgoing content scrolls the document to the top by itself, so a read
@@ -197,7 +254,20 @@ async function applyEnvelope(
       const component = await componentPromise;
       if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
 
-      if (enteringLayouts.length > 0) {
+      if (retainedLayout !== null) {
+        // G05 child-only swap: destination keeps every mounted client
+        // layout, so the retained instance keeps its component, host,
+        // marker, and outlet; only the page inside the outlet changes.
+        // The outgoing page unmounts first, its teardown is awaited, the
+        // incoming page mounts into the SAME outlet interior.
+        currentPage = await swapLayoutChildPage(
+          retainedLayout,
+          env,
+          component,
+          outgoing
+        );
+        if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
+      } else if (enteringLayouts.length > 0) {
         // G04 subtree entry: mount the entering client layouts (outermost
         // first — one per chain position today), then host this page inside
         // the innermost layout's outlet. Any failure propagates to the
