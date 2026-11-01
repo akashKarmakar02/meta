@@ -44,15 +44,16 @@ import {
 import { replacePageOutlet, PageOutletSelector } from './ssr-outlet';
 import { mountCsrPage, type CsrPageHandle } from './csr-mount';
 import {
+  mountedLayoutStack,
+  layoutStackTransition,
+} from './layout-stack';
+import {
   pushNavigationState,
   installPopstateNavigation,
   uninstallPopstateNavigation,
 } from './navigation-history';
 
 export { startSoftNavigation, stopSoftNavigation };
-
-/** Element marking an SSR layout instance, carrying its layout ID. */
-const LAYOUT_ATTR = 'data-go-layout';
 
 let active = false;
 let installedPopstate = false;
@@ -79,32 +80,18 @@ function restoreScroll(scroll: { x: number; y: number } | null): void {
 type Envelope = Awaited<ReturnType<typeof fetchNavigation>>;
 
 /**
- * Layout IDs actually present in the document, outermost first.
- * Derived from DOM markers, never from env.layouts alone.
- */
-function mountedLayoutStack(doc: Document): string[] {
-  const stack: string[] = [];
-  for (const el of Array.from(doc.querySelectorAll(`[${LAYOUT_ATTR}]`))) {
-    const id = el.getAttribute(LAYOUT_ATTR);
-    if (id && id.trim() !== '') stack.push(id);
-  }
-  return stack;
-}
-
-/**
  * True when every currently-mounted layout also appears at the same position
  * in the target's desired ancestry — i.e. the soft transition only swaps page
  * content inside already-mounted layout shells.  Anything else (a nested
  * layout the current document lacks, or one it must lose) requires the full
- * document.
+ * document.  The positional comparison itself is G01's formal model in
+ * frontend/layout-stack.ts; until G02+ wire real instance retention, this
+ * guard conservatively maps "not fully retained" to a hard navigation.
  */
-function mountedStackWithinDesired(mounted: string[], desired: string[]): boolean {
-  if (mounted.length === 0) return true; // plain document: outlet swap / fresh mount
-  if (mounted.length > desired.length) return false;
-  for (let i = 0; i < mounted.length; i++) {
-    if (mounted[i] !== desired[i]) return false;
-  }
-  return true;
+function mountedStackWithinDesired(mounted: readonly string[], desired: readonly string[]): boolean {
+  return (
+    layoutStackTransition(mounted, desired).discard.length === 0
+  );
 }
 
 /** Full-document fallback: browser loads the intended destination fresh. */
