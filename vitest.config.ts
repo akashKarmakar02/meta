@@ -15,5 +15,18 @@ export default defineConfig({
   },
   test: {
     environment: 'happy-dom',
+    environmentOptions: {
+      happyDOM: {
+        settings: {
+          // The optional live-server integration check (F06) fetches a
+          // real local Go server from a different simulated origin; real
+          // browsers are always same-origin with their own pages, so
+          // this only relaxes the simulation, never production behavior.
+          fetch: {
+            disableSameOriginPolicy: true,
+          },
+        },
+      },
+    },
   },
 });
