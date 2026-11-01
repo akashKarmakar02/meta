@@ -3,17 +3,28 @@
   // internal counter plus the content area where the current page's
   // output is rendered.
   //
-  // Child-content contract: the layout takes one optional `children`
-  // snippet prop (Svelte 5 runes idiom) and renders it inside
-  // [data-go-layout-content]. Pages (and, from G03 on, the persistent
-  // outlet machinery) hand their content in through that snippet — the
-  // layout never knows which page is inside it, so it can eventually host
-  // different child pages without being remounted.
+  // G03: the content area contains an EXPLICIT child outlet element,
+  // [data-go-layout-outlet]. That element is the stable mount point for
+  // sub-pages: a child page mounts INSIDE it without replacing any layout
+  // DOM, so this component instance (sidebar + counter state) survives
+  // child-only navigation.
+  //
+  // Ownership boundary (G03):
+  // - SVELTE owns the outlet element itself and everything outside it
+  //   (sidebar, counter, content wrapper). Unmounting this component
+  //   removes the outlet element with the whole layout.
+  // - The NAVIGATION RUNTIME owns the outlet's INTERIOR: it creates the
+  //   page mount root inside the outlet (G04+) and must unmount that
+  //   instance before the layout unmounts. This component never touches
+  //   the outlet's children.
+  // - The optional children snippet renders inside the outlet for direct
+  //   component composition (tests, non-runtime embedding). Snippet use
+  //   and runtime mounts are mutually exclusive — never both at once.
   //
   // Counter state is owned by this component instance ($state rune, not a
-  // module-level global): when G04-G06 make the layout persist across
-  // child-only swaps, the count survives because it lives here, not in a
-  // page or module scope.
+  // module-level global): when the layout persists across child-only
+  // swaps, the count survives because it lives here, not in a page or
+  // module scope.
   //
   // NOTE: this wrapper deliberately does NOT carry the data-go-layout
   // marker. Those markers mean "a layout INSTANCE the navigation runtime
@@ -46,6 +57,10 @@
     </button>
   </aside>
   <div data-go-layout-content class="dashboard-content">
-    {@render children?.()}
+    <!-- Accessibility: the outlet is the layout's main region; pages land
+         inside it with their own landmark elements. -->
+    <div data-go-layout-outlet role="presentation">
+      {@render children?.()}
+    </div>
   </div>
 </div>

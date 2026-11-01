@@ -111,10 +111,13 @@ describe('G02: child-content contract', () => {
     expect(target.querySelector('[data-go-layout-counter]')?.textContent).toBe('Layout count: 0');
   });
 
-  it('renders an empty content region when no children are given', async () => {
+  it('renders an empty outlet when no children are given (G03)', async () => {
     const { target } = await mountLayout();
+    // G03: the content region contains exactly one, empty child outlet.
     expect(target.querySelector('[data-go-layout-content]')).toBeTruthy();
-    expect(target.querySelector('[data-go-layout-content]')?.children.length).toBe(0);
+    const outlets = target.querySelectorAll('[data-go-layout-outlet]');
+    expect(outlets.length).toBe(1);
+    expect(outlets[0].children.length).toBe(0);
   });
 });
 
