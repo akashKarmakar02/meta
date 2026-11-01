@@ -45,7 +45,7 @@ func newApp(assets *httpserver.Assets) *fiber.App {
 		case routing.ModeSSR:
 			fapp.Get(route.Path, render.SSRNavigationHandler(route, routes.SSRPage, routes.BarePage))
 		case routing.ModeCSR:
-			fapp.Get(route.Path, render.ShellHandler(route, assets))
+			fapp.Get(route.Path, render.CSRNavigationHandler(route, assets))
 		}
 	}
 

@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/a-h/templ"
@@ -16,9 +17,11 @@ import (
 type PageResolver func(routing.Route) (templ.Component, error)
 
 // IsNavigationRequest reports whether a GET asks for the soft-navigation
-// JSON envelope instead of a full document (blueprint 5.1).
+// JSON envelope instead of a full document (blueprint 5.1). Only the
+// supported protocol version counts: an unsupported version degrades to
+// a normal full-page response rather than an envelope (blueprint 5.1).
 func IsNavigationRequest(c fiber.Ctx) bool {
-	return c.Get(httpserver.NavigationHeader) != ""
+	return c.Get(httpserver.NavigationHeader) == strconv.Itoa(httpserver.NavigationVersion)
 }
 
 // layoutIDs returns the stable layout identifiers for a route,
@@ -69,6 +72,41 @@ func NavigationEnvelope(route routing.Route, bareHTML string) httpserver.Navigat
 	}
 }
 
+// csrTitle resolves the navigation title for a CSR route from its path:
+// the final non-empty segment, first letter capitalized ("/dashboard" =>
+// "Dashboard", "/dashboard/settings" => "Settings"). The server cannot
+// render Svelte components, so unlike SSR there is no markup to scan;
+// route identity carries the title instead. Empty for the bare root.
+func csrTitle(path string) string {
+	seg := strings.Trim(path, "/")
+	if i := strings.LastIndex(seg, "/"); i >= 0 {
+		seg = seg[i+1:]
+	}
+	if seg == "" {
+		return ""
+	}
+	return strings.ToUpper(seg[:1]) + seg[1:]
+}
+
+// CSRNavigationEnvelope builds the navigation response for a CSR route:
+// no server-rendered HTML — the browser mounts the page component — with
+// clientEntry set to the stable source-derived route ID the generated
+// import registry is keyed by (blueprint 5.1). Layouts report the
+// discovered ancestry as it exists today, never fabricated chains.
+func CSRNavigationEnvelope(route routing.Route) httpserver.NavigationResponse {
+	entry := route.ID
+	return httpserver.NavigationResponse{
+		Version:     httpserver.NavigationVersion,
+		URL:         route.Path,
+		RouteID:     route.ID,
+		Mode:        string(route.Mode),
+		Title:       csrTitle(route.Path),
+		Layouts:     layoutIDs(route),
+		HTML:        "",
+		ClientEntry: &entry,
+	}
+}
+
 // SendNavigation writes an envelope as JSON with the no-store cache
 // semantics the blueprint requires of navigation responses.
 func SendNavigation(c fiber.Ctx, resp httpserver.NavigationResponse) error {
@@ -103,5 +141,21 @@ func SSRNavigationHandler(route routing.Route, composed, bare PageResolver) fibe
 			return fmt.Errorf("render bare page %s: %w", route.Path, err)
 		}
 		return SendNavigation(c, NavigationEnvelope(route, string(bareHTML)))
+	}
+}
+
+// CSRNavigationHandler adapts a CSR route into a Fiber handler serving
+// either the boot shell (normal GET, E10 contract) or a navigation
+// envelope describing what the browser must mount (header present).
+// The server never renders Svelte components; html stays empty and
+// clientEntry carries the registry key for the browser to resolve
+// through the generated static import map.
+func CSRNavigationHandler(route routing.Route, assets *httpserver.Assets) fiber.Handler {
+	shell := ShellHandler(route, assets)
+	return func(c fiber.Ctx) error {
+		if !IsNavigationRequest(c) {
+			return shell(c)
+		}
+		return SendNavigation(c, CSRNavigationEnvelope(route))
 	}
 }
