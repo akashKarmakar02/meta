@@ -5,6 +5,6 @@
   "mode": "ssr",
   "title": "About",
   "layouts": ["app/layout.templ"],
-  "html": "<main data-go-page=\"about\"><h1>About</h1><p>Learn more about go-meta.</p></main>",
+  "html": "<main data-go-page-about><h1>About</h1><p>go-meta renders templ pages server-side; this one is distinct from the root page.</p></main>",
   "clientEntry": null
 }

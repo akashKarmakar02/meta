@@ -41,7 +41,10 @@ func Discover(fsys fs.FS) ([]Route, error) {
 		}
 
 		if mode, ok := classifyLayout(base); ok {
-			layout, lerr := NewLayout(p, p, mode)
+			// Prefix with the app root so layout IDs carry the
+			// repo-rooted form the navigation protocol documents
+			// (blueprint 5.1: "app/layout.templ").
+			layout, lerr := NewLayout("app/"+p, p, mode)
 			if lerr != nil {
 				return lerr
 			}

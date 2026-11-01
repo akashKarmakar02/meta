@@ -60,8 +60,8 @@ func TestManifestJSONSerialization(t *testing.T) {
 
 	// Layout metadata: IDs, source files, modes, chain order outermost-first.
 	for _, want := range []string{
-		`"id":"layout.templ"`,
-		`"id":"dashboard/layout.svelte"`,
+		`"id":"app/layout.templ"`,
+		`"id":"app/dashboard/layout.svelte"`,
 		`"sourceFile":"dashboard/layout.svelte"`,
 		`"mode":"csr"`,
 	} {
@@ -71,8 +71,8 @@ func TestManifestJSONSerialization(t *testing.T) {
 	}
 	dashIdx := strings.Index(s, `"path":"/dashboard"`)
 	settingsIdx := strings.Index(s, `"path":"/dashboard/settings"`)
-	rootLayoutIdx := strings.Index(s, `"id":"layout.templ"`)
-	dashLayoutIdx := strings.Index(s, `"id":"dashboard/layout.svelte"`)
+	rootLayoutIdx := strings.Index(s, `"id":"app/layout.templ"`)
+	dashLayoutIdx := strings.Index(s, `"id":"app/dashboard/layout.svelte"`)
 	if rootLayoutIdx == -1 || dashLayoutIdx == -1 || dashIdx == -1 || settingsIdx == -1 {
 		t.Fatalf("route or layout fields not found in manifest")
 	}
@@ -175,8 +175,8 @@ func TestRouteStableIDs(t *testing.T) {
 			t.Errorf("route %s ID = %q, want %q", path, r.ID, wantID)
 		}
 	}
-	if byPath["/dashboard"].Layouts[1].ID != "dashboard/layout.svelte" {
-		t.Errorf("nested layout ID = %q, want dashboard/layout.svelte",
+	if byPath["/dashboard"].Layouts[1].ID != "app/dashboard/layout.svelte" {
+		t.Errorf("nested layout ID = %q, want app/dashboard/layout.svelte",
 			byPath["/dashboard"].Layouts[1].ID)
 	}
 }

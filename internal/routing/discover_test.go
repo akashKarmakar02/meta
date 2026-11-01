@@ -247,8 +247,8 @@ func TestDiscoverRootLayoutAncestry(t *testing.T) {
 			continue
 		}
 		l := r.Layouts[0]
-		if l.SourceFile != "layout.templ" || l.Mode != ModeSSR || l.ID != "layout.templ" {
-			t.Errorf("route %q layout = %+v, want layout.templ ssr", r.Path, l)
+		if l.SourceFile != "layout.templ" || l.Mode != ModeSSR || l.ID != "app/layout.templ" {
+			t.Errorf("route %q layout = %+v, want app/layout.templ ssr", r.Path, l)
 		}
 	}
 }
@@ -353,8 +353,8 @@ func TestDiscoverNestedSvelteLayoutAncestry(t *testing.T) {
 			t.Errorf("/%s inner = %+v, want dashboard/layout.svelte csr", name, r.Layouts[1])
 		}
 		// Both dashboard routes report the same nested layout ID (B07 acceptance).
-		if r.Layouts[1].ID != "dashboard/layout.svelte" {
-			t.Errorf("/%s layout ID = %q, want dashboard/layout.svelte", name, r.Layouts[1].ID)
+		if r.Layouts[1].ID != "app/dashboard/layout.svelte" {
+			t.Errorf("/%s layout ID = %q, want app/dashboard/layout.svelte", name, r.Layouts[1].ID)
 		}
 	}
 }

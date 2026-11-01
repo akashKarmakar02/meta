@@ -152,8 +152,8 @@ func TestRoutesFileContent(t *testing.T) {
 		"func RegisterRoutes() []routing.Route {",
 		`{ID: "page.templ", Path: "/", SourceFile: "page.templ", Mode: "ssr"`,
 		`{ID: "dashboard/page.svelte", Path: "/dashboard", SourceFile: "dashboard/page.svelte", Mode: "csr"`,
-		`{ID: "layout.templ", SourceFile: "layout.templ", Mode: "ssr"}`,
-		`{ID: "dashboard/layout.svelte", SourceFile: "dashboard/layout.svelte", Mode: "csr"}`,
+		`{ID: "app/layout.templ", SourceFile: "layout.templ", Mode: "ssr"}`,
+		`{ID: "app/dashboard/layout.svelte", SourceFile: "dashboard/layout.svelte", Mode: "csr"}`,
 		// C05: per-route symbol mapping with deterministic aliases.
 		"page0 \"go-meta/app\"",
 		"page1 \"go-meta/app/about\"",

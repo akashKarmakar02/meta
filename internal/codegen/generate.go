@@ -103,6 +103,24 @@ func RoutesFile(m routing.Manifest) ([]byte, error) {
 		fmt.Fprintf(&b, "\t\treturn %s, nil\n\t}\n", expr)
 	}
 	fmt.Fprintf(&b, "\treturn nil, fmt.Errorf(%q, r.ID)\n", "routes: SSRPage: no component mapped for route %s (check that the page file exists and exports the expected templ component)")
+	b.WriteString("}\n\n")
+
+	// BarePage resolves the same page component WITHOUT layout composition.
+	// Soft navigation (F02) carries only the page outlet in the
+	// NavigationResponse html field — layouts persist on the client, so
+	// re-wrapping them would duplicate the document (blueprint 5.2 step 9).
+	b.WriteString("// BarePage returns the templ page component for an SSR route with NO\n")
+	b.WriteString("// layout composition: the bare page outlet used by soft navigation\n")
+	b.WriteString("// (F02+), where layouts persist client-side and only the page swaps.\n")
+	b.WriteString("func BarePage(r routing.Route) (templ.Component, error) {\n")
+	for _, r := range m.Routes {
+		if r.Mode != routing.ModeSSR {
+			continue
+		}
+		fmt.Fprintf(&b, "\tif r.ID == %q {\n", r.ID)
+		fmt.Fprintf(&b, "\t\treturn page%d.%s(), nil\n\t}\n", ssrIndex(r, m), pageSymbol(r))
+	}
+	fmt.Fprintf(&b, "\treturn nil, fmt.Errorf(%q, r.ID)\n", "routes: BarePage: no component mapped for route %s (check that the page file exists and exports the expected templ component)")
 	b.WriteString("}\n")
 
 	formatted, err := format.Source([]byte(b.String()))
