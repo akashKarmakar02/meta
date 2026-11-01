@@ -40,6 +40,54 @@ export interface MountHandle {
 // map never keeps detached elements alive.
 const occupiedTargets = new WeakSet<Element>();
 
+// ---------------------------------------------------------------------------
+// F09 lifecycle instrumentation: stable observability of mount/unmount.
+// Purely additive — the runtime behaves identically with zero listeners,
+// and listeners can never break a transition (their throws are contained).
+
+/** One observed lifecycle transition of a mounted instance. */
+export interface LifecycleEvent {
+  /** What happened. */
+  phase: 'mounted' | 'unmounted';
+  /** The target element the instance is (or was) mounted into. */
+  target: Element;
+}
+
+type LifecycleListener = (event: LifecycleEvent) => void;
+
+const lifecycleListeners = new Set<LifecycleListener>();
+
+/**
+ * Live instance count: incremented once per successful mount, decremented
+ * once per completed unmount. With correct usage (every mount eventually
+ * unmounted) it returns to 0 — the stability signal F09 pins in tests.
+ */
+let liveInstances = 0;
+
+/** Observe every mount/unmount. Returns an unsubscribe function. */
+export function onLifecycleEvent(listener: LifecycleListener): () => void {
+  lifecycleListeners.add(listener);
+  return () => {
+    lifecycleListeners.delete(listener);
+  };
+}
+
+/** Number of currently mounted (or still outroing) instances. */
+export function liveInstanceCount(): number {
+  return liveInstances;
+}
+
+function emitLifecycle(event: LifecycleEvent): void {
+  // Copy: a listener unsubscribing mid-emit must not skip the others.
+  for (const listener of [...lifecycleListeners]) {
+    try {
+      listener(event);
+    } catch {
+      // Instrumentation must never take down the navigation runtime.
+    }
+  }
+}
+
 /**
  * Mount a component into a target element.
  *
@@ -66,6 +114,8 @@ export function mountComponent(
     ...(options.props ? { props: options.props } : {}),
   });
   occupiedTargets.add(target);
+  liveInstances++;
+  emitLifecycle({ phase: 'mounted', target });
 
   let active = true;
   return {
@@ -85,6 +135,8 @@ export function mountComponent(
         // threw: a poisoned slot would break every later mount more than
         // reporting the original failure does.
         occupiedTargets.delete(target);
+        liveInstances--;
+        emitLifecycle({ phase: 'unmounted', target });
       }
     },
   };
