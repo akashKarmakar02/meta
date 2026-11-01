@@ -10,7 +10,7 @@ package app
 // (F12) instead of trusting envelope metadata — layout IDs in env.layouts
 // describe desired ancestry, never prove mounted instances.
 // Everything outside this wrapper — html, head, body — persists across
-// soft navigations.
+// soft navigations, including the Nav rendered above the outlet.
 templ Layout(pageContent templ.Component) {
 	<!DOCTYPE html>
 	<html lang="en">
@@ -21,6 +21,7 @@ templ Layout(pageContent templ.Component) {
 		</head>
 		<body>
 			<div data-go-layout="app/layout.templ">
+				@Nav()
 				<div data-go-page-outlet>
 					@pageContent
 				</div>

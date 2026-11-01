@@ -47,7 +47,7 @@ func TestLayoutContentIsComposable(t *testing.T) {
 		t.Fatalf("render: %v", err)
 	}
 	got := strings.TrimSpace(b.String())
-	wantSuffix := `<div data-go-layout="app/layout.templ"><div data-go-page-outlet>X</div></div></body></html>`
+	wantSuffix := `<nav data-go-site-nav><ul><li><a href="/">Home</a></li><li><a href="/about">About</a></li><li><a href="/docs">Docs</a></li><li><a href="/dashboard">Dashboard</a></li><li><a href="/dashboard/settings">Settings</a></li><li><a href="/products/new">New product</a></li></ul></nav><div data-go-page-outlet>X</div></div></body></html>`
 	if !strings.HasSuffix(got, wantSuffix) {
 		t.Errorf("content should render inside the page outlet, last before </body>, want suffix %q, got:\n%s", wantSuffix, got)
 	}

@@ -1,0 +1,19 @@
+package app
+
+// Nav is the shared site navigation for SSR documents. It lives outside
+// the page outlet in Layout, so it persists across soft navigations —
+// the go-meta demonstration of "everything outside the outlet survives".
+// Plain anchors only: the F05 interceptor soft-navigates same-origin
+// links automatically; data-no-spa would opt a link out.
+templ Nav() {
+	<nav data-go-site-nav>
+		<ul>
+			<li><a href="/">Home</a></li>
+			<li><a href="/about">About</a></li>
+			<li><a href="/docs">Docs</a></li>
+			<li><a href="/dashboard">Dashboard</a></li>
+			<li><a href="/dashboard/settings">Settings</a></li>
+			<li><a href="/products/new">New product</a></li>
+		</ul>
+	</nav>
+}

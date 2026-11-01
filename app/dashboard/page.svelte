@@ -2,9 +2,12 @@
      Mounted client-side into the #app shell element by Phase E mounting
      tasks; no router, no navigation, no fetching. -->
 <script lang="ts">
+  import SiteNav from '../components/SiteNav.svelte';
+  // (app/components — shared with the other CSR pages)
   let count = $state(0);
 </script>
 
+<SiteNav />
 <main data-go-page="dashboard">
   <h1>Dashboard</h1>
   <p>Count: {count}</p>
