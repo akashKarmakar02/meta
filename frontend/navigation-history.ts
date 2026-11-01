@@ -43,8 +43,8 @@ function currentDestination(): string {
   return destinationOf(new URL(window.location.href));
 }
 
-function rememberScroll(key: string): void {
-  scrollMemory.set(key, { x: window.scrollX, y: window.scrollY });
+function rememberScroll(key: string, pos: { x: number; y: number }): void {
+  scrollMemory.set(key, pos);
   if (scrollMemory.size > MAX_SCROLL_MEMORY) {
     // Evict the oldest remembered entry.
     const oldest = scrollMemory.keys().next().value;
@@ -52,6 +52,18 @@ function rememberScroll(key: string): void {
       scrollMemory.delete(oldest);
     }
   }
+}
+
+/** Options accepted by pushNavigationState. */
+export interface PushNavigationOptions {
+  /**
+   * Scroll position of the page being LEFT, when the caller captured it
+   * before tearing down the outgoing content. Removing page DOM scrolls
+   * the document to the top by itself, so remembering at push time reads
+   * 0; the pipeline captures the real position before unmount and hands
+   * it over here (step 11 restores what the user actually saw).
+   */
+  leavingScroll?: { x: number; y: number };
 }
 
 /**
@@ -72,7 +84,10 @@ function rememberScroll(key: string): void {
  * - The scroll position of the page being left is remembered first, so
  *   a later back/forward can restore it.
  */
-export function pushNavigationState(env: NavigationResponse): void {
+export function pushNavigationState(
+  env: NavigationResponse,
+  options?: PushNavigationOptions
+): void {
   if (env == null || typeof env.url !== 'string' || env.url === '') {
     throw new HistoryError(
       'cannot commit navigation: envelope has no url'
@@ -94,8 +109,14 @@ export function pushNavigationState(env: NavigationResponse): void {
 
   const destination = destinationOf(target);
 
-  // Remember the scroll of the page being left, under its own key.
-  rememberScroll(currentDestination());
+  // Remember the scroll of the page being left, under its own key. The
+  // caller's pre-teardown capture wins; a fallback read here would see 0
+  // whenever the outgoing page was already unmounted (DOM removal scrolls
+  // the document to the top on its own).
+  rememberScroll(currentDestination(), options?.leavingScroll ?? {
+    x: window.scrollX,
+    y: window.scrollY,
+  });
 
   const state = { [NAV_STATE_KEY]: true, url: destination };
   if (destination === currentDestination()) {

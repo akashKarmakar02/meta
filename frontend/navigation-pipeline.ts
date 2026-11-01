@@ -63,6 +63,18 @@ let currentPage: CsrPageHandle | null = null;
 /** Serializes destructive DOM commits (unmount / outlet replace / mount). */
 let commitTail: Promise<unknown> = Promise.resolve();
 
+/**
+ * Scroll position the pending popstate restoration must apply after its
+ * page renders (navigation-history remembers it per destination, F10).
+ * Set when popstate fires, consumed (and cleared) inside applyEnvelope.
+ */
+let popstateScroll: { x: number; y: number } | null = null;
+
+/** Apply a remembered popstate scroll position, if any (§5.2 step 11). */
+function restoreScroll(scroll: { x: number; y: number } | null): void {
+  if (scroll) window.scrollTo(scroll.x, scroll.y);
+}
+
 /** A validated navigation envelope as returned by fetchNavigation. */
 type Envelope = Awaited<ReturnType<typeof fetchNavigation>>;
 
@@ -146,6 +158,11 @@ async function applyEnvelope(
       return;
     }
 
+    // Capture the leaving page's scroll BEFORE any teardown: unmounting the
+    // outgoing content scrolls the document to the top by itself, so a read
+    // taken after would record 0 and back could never restore (step 11).
+    const leavingScroll = { x: window.scrollX, y: window.scrollY };
+
     // Resolve the CSR component (dynamic import) BEFORE unmounting anything:
     // a failed import must leave the current page intact for fallback.
     const componentPromise =
@@ -172,9 +189,11 @@ async function applyEnvelope(
     if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
 
     if (push) {
-      (seams.pushState ?? pushNavigationState)(env); // URL + title + scroll reset — post-apply only
+      (seams.pushState ?? pushNavigationState)(env, { leavingScroll }); // URL + title + scroll reset — post-apply only
     } else {
       document.title = env.title; // popstate owns the history entry already
+      restoreScroll(popstateScroll); // step 11: "restore stored scroll positions"
+      popstateScroll = null;
     }
 
     focusMainRegion();
@@ -237,6 +256,11 @@ function startSoftNavigation(_opts?: SoftNavigationOptions): void {
   if (!installedPopstate) {
     installedPopstate = true;
     installPopstateNavigation((ctx) => {
+      // The restored entry's remembered scroll (from the popstate context)
+      // is applied by applyEnvelope once the page content it belongs to is
+      // actually rendered — never before, or the browser would clamp it
+      // against the outgoing page's geometry.
+      popstateScroll = ctx.scroll;
       void navigateTo(ctx.url.toString(), { push: false });
     });
   }
