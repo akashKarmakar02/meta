@@ -37,3 +37,7 @@ npm-debug.log*
 
 # Compiled binaries from local go build verification
 /example
+
+# Playwright E2E output (screenshots, traces on failure)
+/test-results/
+/playwright-report/

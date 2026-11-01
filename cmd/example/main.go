@@ -3,6 +3,7 @@ package main
 
 import (
 	"log"
+	"os"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/logger"
@@ -64,5 +65,11 @@ func main() {
 	if err := httpserver.MountAssets(app, "dist/client"); err != nil {
 		log.Fatalf("mount client assets: %v", err)
 	}
-	log.Fatal(app.Listen(":3000"))
+	// PORT overrides the default :3000 (E2E runs the same binary on a
+	// scratch port; production picks its own through the environment).
+	addr := ":3000"
+	if p := os.Getenv("PORT"); p != "" {
+		addr = ":" + p
+	}
+	log.Fatal(app.Listen(addr))
 }
