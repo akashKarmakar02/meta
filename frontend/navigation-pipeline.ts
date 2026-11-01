@@ -67,6 +67,7 @@ import {
   type LayoutInstanceHandle,
 } from './layout-mount';
 import { swapLayoutChildPage } from './layout-child-swap';
+import { logNavDecision } from './navigation-debug';
 import {
   pushNavigationState,
   installPopstateNavigation,
@@ -216,6 +217,7 @@ async function applyEnvelope(
       // Layout-shape guard: this navigation would discard a mounted client
       // layout — only a full navigation preserves correct DOM (teardown on
       // subtree exit is G07, not G05).
+      logNavDecision(env.url, 'hard-navigate-discard', mountedClients, desiredClients);
       hardNavigate(env.url);
       return;
     }
@@ -260,6 +262,7 @@ async function applyEnvelope(
         // marker, and outlet; only the page inside the outlet changes.
         // The outgoing page unmounts first, its teardown is awaited, the
         // incoming page mounts into the SAME outlet interior.
+        logNavDecision(env.url, 'retained-child-swap', mountedClients, desiredClients);
         currentPage = await swapLayoutChildPage(
           retainedLayout,
           env,
@@ -268,6 +271,7 @@ async function applyEnvelope(
         );
         if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
       } else if (enteringLayouts.length > 0) {
+        logNavDecision(env.url, 'layout-subtree-entry', mountedClients, desiredClients);
         // G04 subtree entry: mount the entering client layouts (outermost
         // first — one per chain position today), then host this page inside
         // the innermost layout's outlet. Any failure propagates to the
@@ -320,6 +324,7 @@ async function applyEnvelope(
         currentPage = await (seams.mountCsr ?? mountCsrPage)(env, outgoing ?? undefined);
       }
     } else {
+      logNavDecision(env.url, 'ssr-outlet-replace', mountedClients, desiredClients);
       if (outgoing !== null) await outgoing.unmount();
       if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
       replacePageOutlet(env);
@@ -361,7 +366,10 @@ export async function navigateTo(url: string, opts?: { push?: boolean }): Promis
     if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
     await applyEnvelope(token, env, push);
   } catch (err) {
-    if (err instanceof StaleNavigationError) return; // superseded: no-op
+    if (err instanceof StaleNavigationError) { // superseded: no-op
+      logNavDecision(String(url), 'stale-navigation', [], []);
+      return;
+    }
     if (isAbortError(err)) return; // aborted by newer navigation: no-op
     if (!token.isCurrent()) return; // late failure of a stale request: no fallback
     // Current navigation failed (network error, invalid protocol response,
