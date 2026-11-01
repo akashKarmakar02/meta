@@ -5,6 +5,10 @@ package app
 // document, metadata in head, and a single content slot in body.
 // F07 wraps the page slot in data-go-page-outlet: the server-owned page
 // region soft navigation replaces client-side (blueprint 5.2 step 9).
+// data-go-layout stamps this layout's stable routing ID on its element so
+// the client can derive the actually-mounted layout stack from the DOM
+// (F12) instead of trusting envelope metadata — layout IDs in env.layouts
+// describe desired ancestry, never prove mounted instances.
 // Everything outside this wrapper — html, head, body — persists across
 // soft navigations.
 templ Layout(pageContent templ.Component) {
@@ -16,8 +20,10 @@ templ Layout(pageContent templ.Component) {
 			<title>go-meta</title>
 		</head>
 		<body>
-			<div data-go-page-outlet>
-				@pageContent
+			<div data-go-layout="app/layout.templ">
+				<div data-go-page-outlet>
+					@pageContent
+				</div>
 			</div>
 		</body>
 	</html>

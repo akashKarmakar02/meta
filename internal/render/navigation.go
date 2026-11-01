@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"html"
 	"strconv"
 	"strings"
 
@@ -57,13 +58,27 @@ func extractTitle(html string) string {
 	return strings.TrimSpace(html[i : i+end])
 }
 
+// requestURL returns the URL the client actually requested: path plus
+// query. The blueprint's url field means "the address being navigated
+// to" — the client pushes it to history verbatim (blueprint 5.2 step
+// 10), so dynamic-route patterns like /products/:id must not leak into
+// envelopes; the concrete request path is used instead. The hash never
+// reaches the server and is re-attached client-side.
+func requestURL(c fiber.Ctx) string {
+	u := string(c.Request().URI().Path())
+	if q := string(c.Request().URI().QueryString()); q != "" {
+		u += "?" + q
+	}
+	return u
+}
+
 // NavigationEnvelope builds the navigation response for an SSR route:
 // bare page outlet HTML (layouts persist client-side, blueprint 5.2
 // step 9), route metadata, and layout chain by stable ID.
-func NavigationEnvelope(route routing.Route, bareHTML string) httpserver.NavigationResponse {
+func NavigationEnvelope(c fiber.Ctx, route routing.Route, bareHTML string) httpserver.NavigationResponse {
 	return httpserver.NavigationResponse{
 		Version: httpserver.NavigationVersion,
-		URL:     route.Path,
+		URL:     requestURL(c),
 		RouteID: route.ID,
 		Mode:    string(route.Mode),
 		Title:   extractTitle(bareHTML),
@@ -93,11 +108,11 @@ func csrTitle(path string) string {
 // clientEntry set to the stable source-derived route ID the generated
 // import registry is keyed by (blueprint 5.1). Layouts report the
 // discovered ancestry as it exists today, never fabricated chains.
-func CSRNavigationEnvelope(route routing.Route) httpserver.NavigationResponse {
+func CSRNavigationEnvelope(c fiber.Ctx, route routing.Route) httpserver.NavigationResponse {
 	entry := route.ID
 	return httpserver.NavigationResponse{
 		Version:     httpserver.NavigationVersion,
-		URL:         route.Path,
+		URL:         requestURL(c),
 		RouteID:     route.ID,
 		Mode:        string(route.Mode),
 		Title:       csrTitle(route.Path),
@@ -119,18 +134,60 @@ func SendNavigation(c fiber.Ctx, resp httpserver.NavigationResponse) error {
 	return c.Send(data)
 }
 
+// entryTags renders the client-entry asset tags (module script and any
+// entry CSS links) injected into served documents. Nil assets means the
+// fixture/test mode: no tags, no client runtime — matches the CSR shell.
+func entryTags(assets *httpserver.Assets) string {
+	if assets == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, css := range assets.EntryCSSURLs {
+		b.WriteString(`<link rel="stylesheet" href="`)
+		b.WriteString(html.EscapeString(css))
+		b.WriteString(`">`)
+	}
+	b.WriteString(`<script type="module" src="`)
+	b.WriteString(html.EscapeString(assets.EntryScriptURL))
+	b.WriteString(`"></script>`)
+	return b.String()
+}
+
+// InjectBeforeTag inserts tags immediately before the first closing tag
+// matching tag (e.g. </body>). Documents without the tag come back
+// unchanged — a malformed document is served as rendered, never mangled.
+func InjectBeforeTag(document, tag, tags string) string {
+	if tags == "" {
+		return document
+	}
+	i := strings.Index(document, tag)
+	if i < 0 {
+		return document
+	}
+	return document[:i] + tags + document[i:]
+}
+
 // SSRNavigationHandler adapts an SSR route into a Fiber handler serving
-// either the composed full document (normal GET) or the bare page outlet
-// inside a navigation envelope (header present). The resolvers come from
-// generated code; render stays decoupled from the routes package.
-func SSRNavigationHandler(route routing.Route, composed, bare PageResolver) fiber.Handler {
+// either the composed full document (normal GET, with the client entry
+// script so soft navigation boots on server-rendered pages too — blueprint
+// §6: the backend emits manifest-resolved asset URLs into HTML) or the
+// bare page outlet inside a navigation envelope (header present). The
+// resolvers come from generated code; render stays decoupled from the
+// routes package. Nil assets keeps the fixture/test mode scriptless.
+func SSRNavigationHandler(route routing.Route, assets *httpserver.Assets, composed, bare PageResolver) fiber.Handler {
+	tags := entryTags(assets)
 	return func(c fiber.Ctx) error {
 		if !IsNavigationRequest(c) {
 			component, err := composed(route)
 			if err != nil {
 				return fmt.Errorf("routes: SSRPage: %w", err)
 			}
-			return SSRHandler(route.Path, component)(c)
+			htmlDoc, err := RenderComponent(c.RequestCtx(), component)
+			if err != nil {
+				return fmt.Errorf("render %s: %w", route.Path, err)
+			}
+			c.Set(fiber.HeaderContentType, "text/html; charset=utf-8")
+			return c.SendString(InjectBeforeTag(string(htmlDoc), "</body>", tags))
 		}
 		bareComponent, err := bare(route)
 		if err != nil {
@@ -140,7 +197,7 @@ func SSRNavigationHandler(route routing.Route, composed, bare PageResolver) fibe
 		if err != nil {
 			return fmt.Errorf("render bare page %s: %w", route.Path, err)
 		}
-		return SendNavigation(c, NavigationEnvelope(route, string(bareHTML)))
+		return SendNavigation(c, NavigationEnvelope(c, route, string(bareHTML)))
 	}
 }
 
@@ -156,6 +213,6 @@ func CSRNavigationHandler(route routing.Route, assets *httpserver.Assets) fiber.
 		if !IsNavigationRequest(c) {
 			return shell(c)
 		}
-		return SendNavigation(c, CSRNavigationEnvelope(route))
+		return SendNavigation(c, CSRNavigationEnvelope(c, route))
 	}
 }

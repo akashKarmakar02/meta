@@ -76,9 +76,10 @@ func TestSSRStillRender(t *testing.T) {
 	}
 }
 
-// E08: SSR routes are unaffected by asset injection — assets supplied,
-// but SSR pages never embed the client entry.
-func TestSSRUnaffectedByAssets(t *testing.T) {
+// F12: with manifest-resolved assets, SSR pages embed the client entry
+// before </body> so the soft-navigation pipeline boots on server-rendered
+// documents too; without assets (fixture mode) they stay scriptless.
+func TestSSRInjectsEntryScriptWhenAssetsPresent(t *testing.T) {
 	assets := httpserver.Assets{EntryScriptURL: "/assets/entry-TEST.js"}
 	app := newApp(&assets)
 	for _, path := range []string{"/", "/about", "/docs"} {
@@ -90,9 +91,21 @@ func TestSSRUnaffectedByAssets(t *testing.T) {
 			t.Fatalf("%s: status = %d", path, resp.StatusCode)
 		}
 		b, _ := io.ReadAll(resp.Body)
-		if strings.Contains(string(b), "entry-TEST") {
-			t.Fatalf("%s: SSR page must not embed client entry:\n%s", path, b)
+		body := string(b)
+		want := `<script type="module" src="/assets/entry-TEST.js"></script></body>`
+		if !strings.Contains(body, want) {
+			t.Fatalf("%s: SSR page missing client entry before </body>:\n%s", path, body)
 		}
+	}
+
+	scriptless := newApp(nil)
+	resp, err := scriptless.Test(httptest.NewRequest("GET", "/about", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	if strings.Contains(string(b), "<script") {
+		t.Fatalf("about page without assets must stay scriptless:\n%s", b)
 	}
 }
 

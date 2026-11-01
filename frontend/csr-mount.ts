@@ -93,6 +93,10 @@ export async function mountCsrPage(
   let pageRoot: HTMLElement;
   if (existing.length === 1) {
     pageRoot = existing[0] as HTMLElement;
+    // Same target, new page: refresh the routing metadata so the root
+    // always names the page that is actually mounted.
+    pageRoot.setAttribute('data-go-route', env.url);
+    pageRoot.setAttribute('data-go-route-id', env.routeId);
   } else if (existing.length > 1) {
     throw new CsrMountError(
       `ambiguous mount target: ${existing.length} ${PageRootSelector} elements`
