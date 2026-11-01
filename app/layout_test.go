@@ -37,14 +37,18 @@ func TestLayoutOutputsFullDocument(t *testing.T) {
 	}
 }
 
-// TestLayoutEscapesNothingByDefault documents that Layout itself adds no text
+// TestLayoutContentIsComposable documents that Layout itself adds no text
 // interpolation; content slots arrive pre-rendered from child components.
+// Since F07 the page slot lives inside the data-go-page-outlet wrapper —
+// the server-owned page region soft navigation replaces client-side.
 func TestLayoutContentIsComposable(t *testing.T) {
 	var b strings.Builder
 	if err := Layout(templ.Raw("X")).Render(context.Background(), &b); err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	if !strings.HasSuffix(strings.TrimSpace(b.String()), "X</body></html>") {
-		t.Errorf("content should be the last element before </body>, got:\n%s", b.String())
+	got := strings.TrimSpace(b.String())
+	wantSuffix := `<div data-go-page-outlet>X</div></body></html>`
+	if !strings.HasSuffix(got, wantSuffix) {
+		t.Errorf("content should render inside the page outlet, last before </body>, want suffix %q, got:\n%s", wantSuffix, got)
 	}
 }
