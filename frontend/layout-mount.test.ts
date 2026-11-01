@@ -417,19 +417,22 @@ describe('G04: pipeline integration — soft navigation into the subtree', () =>
     __setHandlesForTesting({ fetch: null, hardNavigate: null });
   });
 
-  it('9c. pipeline safe failure: a desired stack that would discard a mounted layout hard-navigates', async () => {
-    // Entering /docs (two SSR layouts) from a document that mounted the
-    // dashboard Svelte layout would DISCARD it: G04 must not tear the
-    // layout down (that is G07) — it takes the hard-navigation fallback.
+  it('9c. pipeline discard handling: a tracked layout exit unmounts it (G07); an untracked one hard-navigates', async () => {
+    // Case 1 (G07): leaving the subtree for /docs while the dashboard
+    // layout is TRACKED — the runtime owns the instance, so the exit runs
+    // soft-side instead of reloading the document.
     installSSRDocument();
     const { __setHandlesForTesting } = await import('./navigation-pipeline');
     let hardNav: string | null = null;
-    __setHandlesForTesting({
-      fetch: (() =>
-        Promise.resolve(csrDashboard)) as unknown as typeof import('./navigation').fetchNavigation,
-      hardNavigate: null,
-    });
-    await navigateTo('/dashboard'); // mount the dashboard layout
+    const stub = (env: NavigationResponse) =>
+      __setHandlesForTesting({
+        fetch: (() => Promise.resolve(env)) as unknown as typeof import('./navigation').fetchNavigation,
+        hardNavigate: (url: string) => {
+          hardNav = url;
+        },
+      });
+    stub(csrDashboard);
+    await navigateTo('/dashboard'); // mount the dashboard layout (tracked)
     const docsEnv: NavigationResponse = {
       ...csrDashboard,
       url: '/docs',
@@ -440,21 +443,28 @@ describe('G04: pipeline integration — soft navigation into the subtree', () =>
       html: '<h1>Docs</h1>',
       clientEntry: null,
     };
-    __setHandlesForTesting({
-      fetch: (() =>
-        Promise.resolve(docsEnv)) as unknown as typeof import('./navigation').fetchNavigation,
-      hardNavigate: (url: string) => {
-        hardNav = url;
-      },
-    });
+    stub(docsEnv);
     await navigateTo('/docs');
-    expect(hardNav).toBe('/docs');
-    // The mounted layout was NOT torn down by G04 code — it survives until
-    // the full-document fallback replaces the whole document (G07 will own
-    // graceful teardown later).
+    expect(hardNav).toBeNull(); // soft exit, no fallback
     expect(
       document.querySelectorAll(`[data-go-layout="${CSS.escape(DASHBOARD_LAYOUT_ID)}"]`).length
-    ).toBe(1);
+    ).toBe(0); // fully torn down
+    expect(document.querySelector('[data-go-page-docs], [data-go-page-about]')).toBeNull();
+    // The docs page html landed in the SSR outlet.
+    expect(document.querySelector('[data-go-page-outlet] h1')?.textContent).toBe('Docs');
+
+    // Case 2: a discard naming a layout the pipeline does NOT track (a
+    // bare marker with no handle) keeps the safe full-document fallback.
+    hardNav = null;
+    __resetPipelineForTesting; // case 1 already cleared the tracked handles
+    installSSRDocument();
+    // Forge a mounted marker WITHOUT tracking the instance (the shape a
+    // foreign document or a lost handle leaves behind).
+    const outlet = document.querySelector('[data-go-page-outlet]')!;
+    outlet.innerHTML = `<div data-go-layout="${DASHBOARD_LAYOUT_ID}"><p>alien subtree</p></div>`;
+    stub(docsEnv);
+    await navigateTo('/docs');
+    expect(hardNav).toBe('/docs'); // not ours to unmount: reload instead
     __setHandlesForTesting({ fetch: null, hardNavigate: null });
   });
 });

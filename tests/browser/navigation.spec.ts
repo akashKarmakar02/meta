@@ -238,3 +238,130 @@ test.describe('G06: remount-free return navigation /dashboard/settings → /dash
     expect(await page.locator('[data-go-page-root]').count()).toBe(1);
   });
 });
+
+test.describe('G07: graceful subtree exit /dashboard → /about', () => {
+  // The dashboard subtree links only within itself; the exit click comes
+  // from the PERSISTENT templ Nav (outside the page outlet), which is in
+  // the document because we entered the dashboard from the SSR /about
+  // page. Enter the subtree, then leave it through the site nav.
+
+  test('leaving the dashboard tears down page then layout, keeps About soft', async ({ page }) => {
+    await page.goto('/about');
+    await expect(page.locator('[data-go-page-about]')).toBeVisible();
+    await page.evaluate(() => {
+      (window as unknown as Record<string, unknown>).__e2eSoftNav = true;
+    });
+
+    // Soft entry into the subtree through the persistent nav.
+    await page.click('nav[data-go-site-nav] a[href="/dashboard"]');
+    await expect(page.locator('[data-go-page-root] h1')).toHaveText('Dashboard');
+    expect(await page.locator('[data-go-layout-shell-host]').count()).toBe(1);
+    // Accumulate state; its cleanup proves the destructor ran.
+    await page.click('[data-go-layout-counter-button]');
+    await expect(page.locator('[data-go-layout-counter]')).toHaveText('Layout count: 1');
+
+    // The exit under test — trusted click to a route outside the subtree.
+    await page.click('nav[data-go-site-nav] a[href="/about"]');
+    await expect(page.locator('[data-go-page-about]')).toBeVisible();
+
+    // Soft navigation, not a reload.
+    expect(
+      await page.evaluate(
+        () => (window as unknown as Record<string, unknown>).__e2eSoftNav === true
+      ),
+      'exit navigation was soft'
+    ).toBe(true);
+
+    // The layout is fully gone: no marker, no host, no outlet, no roots.
+    await expect(page.locator('[data-go-dashboard-sidebar]')).toHaveCount(0);
+    await expect(page.locator('[data-go-layout-shell-host]')).toHaveCount(0);
+    await expect(page.locator('[data-go-layout-outlet]')).toHaveCount(0);
+    await expect(page.locator('[data-go-page-root]')).toHaveCount(0);
+    expect(await page.locator('[data-go-page-about]').count()).toBe(1);
+    await expect(page).toHaveTitle('About');
+    expect(page.url()).toContain('/about');
+    // The root templ layout survived untouched — server-owned DOM.
+    expect(await page.locator('[data-go-layout="app/layout.templ"]').count()).toBe(1);
+
+    // Re-entering mounts a fresh layout (works; state assertions are G08).
+    await page.click('nav[data-go-site-nav] a[href="/dashboard"]');
+    await expect(page.locator('[data-go-page-root] h1')).toHaveText('Dashboard');
+    expect(await page.locator('[data-go-layout-shell-host]').count()).toBe(1);
+    expect(await page.locator('[data-go-page-root]').count()).toBe(1);
+    // Fresh instance: counter restarted at zero.
+    await expect(page.locator('[data-go-layout-counter]')).toHaveText('Layout count: 0');
+  });
+
+  test('exit from /dashboard/settings behaves identically', async ({ page }) => {
+    await page.goto('/about');
+    await expect(page.locator('[data-go-page-about]')).toBeVisible();
+    await page.evaluate(() => {
+      (window as unknown as Record<string, unknown>).__e2eSoftNav = true;
+    });
+
+    await page.click('nav[data-go-site-nav] a[href="/dashboard"]');
+    await expect(page.locator('[data-go-page-root] h1')).toHaveText('Dashboard');
+    // Deeper child, via the retained layout's own nav.
+    await page.click('[data-go-dashboard-side-nav] a[href="/dashboard/settings"]');
+    await expect(page.locator('[data-go-page-root] h1')).toHaveText('Settings');
+
+    await page.click('nav[data-go-site-nav] a[href="/about"]');
+    await expect(page.locator('[data-go-page-about]')).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => (window as unknown as Record<string, unknown>).__e2eSoftNav === true
+      ),
+      'exit navigation was soft'
+    ).toBe(true);
+    await expect(page.locator('[data-go-layout-shell-host]')).toHaveCount(0);
+    await expect(page.locator('[data-go-page-root]')).toHaveCount(0);
+  });
+
+  test('repeated entry/exit cycles never leak nodes or instances', async ({ page }) => {
+    await page.goto('/about');
+    await expect(page.locator('[data-go-page-about]')).toBeVisible();
+    for (let i = 0; i < 3; i++) {
+      await page.click('nav[data-go-site-nav] a[href="/dashboard"]');
+      await expect(page.locator('[data-go-page-root] h1')).toHaveText('Dashboard');
+      expect(await page.locator('[data-go-layout-shell-host]').count()).toBe(1);
+      await page.click('nav[data-go-site-nav] a[href="/about"]');
+      await expect(page.locator('[data-go-page-about]')).toBeVisible();
+      expect(await page.locator('[data-go-layout-shell-host]').count()).toBe(0);
+      expect(await page.locator('[data-go-page-root]').count()).toBe(0);
+    }
+    // Final state: only the templ layout marker remains, one About page.
+    expect(await page.locator('[data-go-layout]').count()).toBe(1); // templ only
+    expect(await page.locator('[data-go-dashboard-sidebar]').count()).toBe(0);
+  });
+
+  test('popstate Back after an entry exits the subtree softly too', async ({ page }) => {
+    await page.goto('/about');
+    await expect(page.locator('[data-go-page-about]')).toBeVisible();
+    await page.evaluate(() => {
+      (window as unknown as Record<string, unknown>).__e2eSoftNav = true;
+    });
+
+    await page.click('nav[data-go-site-nav] a[href="/dashboard"]');
+    await expect(page.locator('[data-go-page-root] h1')).toHaveText('Dashboard');
+
+    // History restoration Back out of the subtree: the push:false exit.
+    await page.goBack();
+    await expect(page.locator('[data-go-page-about]')).toBeVisible();
+    expect(page.url()).toContain('/about');
+    expect(
+      await page.evaluate(
+        () => (window as unknown as Record<string, unknown>).__e2eSoftNav === true
+      ),
+      'popstate exit stayed soft'
+    ).toBe(true);
+    expect(await page.locator('[data-go-layout-shell-host]').count()).toBe(0);
+    expect(await page.locator('[data-go-page-root]').count()).toBe(0);
+    expect(await page.locator('[data-go-layout="app/layout.templ"]').count()).toBe(1);
+
+    // Forward again into the subtree: fresh remount via history.
+    await page.goForward();
+    await expect(page.locator('[data-go-page-root] h1')).toHaveText('Dashboard');
+    expect(await page.locator('[data-go-layout-shell-host]').count()).toBe(1);
+    expect(await page.locator('[data-go-page-root]').count()).toBe(1);
+  });
+});

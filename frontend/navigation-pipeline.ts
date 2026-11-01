@@ -35,9 +35,16 @@
 // boot shell mounts no server wrappers, so retention compares only what
 // the runtime can own), the retained layout instance keeps its component,
 // host, marker, and outlet; only the page inside the outlet is swapped
-// (frontend/layout-child-swap.ts).  Any transition that would DISCARD a
-// mounted layout still takes the safe full-document fallback — teardown on
-// subtree exit arrives with G07.
+// (frontend/layout-child-swap.ts).
+//
+// G07 graceful subtree exit: when the transition DISCARDS the one layout
+// instance the pipeline TRACKS, the exit runs soft-side
+// (frontend/layout-subtree-exit.ts) — child page first, then the layout
+// component, then the host.  A discard naming anything the runtime does
+// track NOT (a bare marker, multiple layouts) keeps the safe full-document
+// fallback; likewise an SSR destination after exit when the document has
+// no [data-go-page-outlet] to render into (a direct-loaded shell — the
+// runtime never fabricates server layouts from env.layouts).
 //
 // The pipeline also ADOPTS the bootstrap's mounted instances (entry.ts)
 // so a direct load's layout survives its first soft navigation too: both
@@ -67,6 +74,7 @@ import {
   type LayoutInstanceHandle,
 } from './layout-mount';
 import { swapLayoutChildPage } from './layout-child-swap';
+import { unmountLayoutSubtree } from './layout-subtree-exit';
 import { logNavDecision } from './navigation-debug';
 import {
   pushNavigationState,
@@ -213,14 +221,36 @@ async function applyEnvelope(
     const mountedClients = clientLayoutSequence(mountedLayoutStack(document));
     const desiredClients = clientLayoutSequence(env.layouts);
     const transition = layoutStackTransition(mountedClients, desiredClients);
+
+    // G07 graceful subtree exit. discard lists OUTGOING client layouts,
+    // innermost first (children die before parents). The pipeline owns at
+    // most ONE tracked layout instance today (nested persistent client
+    // layouts arrive post-Phase 1), so a discard is executable soft-side
+    // only when it names exactly that instance: the mounted-vs-declared
+    // distinction made concrete — a marker or an env.layouts entry never
+    // proves an unmountable instance exists (requirement 11). Any other
+    // discard shape (an untracked marker, more than one layout) keeps the
+    // safe full-document fallback: the runtime will not tear down what it
+    // does not own.
+    let exitingLayout: LayoutInstanceHandle | null = null;
     if (transition.discard.length > 0) {
-      // Layout-shape guard: this navigation would discard a mounted client
-      // layout — only a full navigation preserves correct DOM (teardown on
-      // subtree exit is G07, not G05).
-      logNavDecision(env.url, 'hard-navigate-discard', mountedClients, desiredClients);
-      hardNavigate(env.url);
-      return;
+      const trackedId = currentLayout?.layoutId ?? null;
+      const discardMatchesTracked =
+        trackedId !== null &&
+        transition.discard.length === 1 &&
+        transition.discard[0] === trackedId;
+      if (discardMatchesTracked && currentLayout !== null) {
+        // The one layout the runtime tracks is leaving: execute the G07
+        // exit below, then apply the destination normally.
+        exitingLayout = currentLayout;
+        currentLayout = null; // stale handles never outlive their disposal
+      } else {
+        logNavDecision(env.url, 'hard-navigate-discard', mountedClients, desiredClients);
+        hardNavigate(env.url);
+        return;
+      }
     }
+    const exiting = exitingLayout;
 
     // G04: client (.svelte) layouts that must ENTER with this navigation.
     // SSR (.templ) enter-list entries belong to documents the server
@@ -248,6 +278,8 @@ async function applyEnvelope(
 
     // Tear down any outgoing CSR page first; mountCsrPage owns the unmount
     // (it awaits the outgoing handle's outro before mounting the new page).
+    // A G07 subtree exit takes this same handle as its CHILD — the layout
+    // teardown sequence below unmounts it before its parent.
     const outgoing = currentPage;
     currentPage = null;
 
@@ -256,7 +288,21 @@ async function applyEnvelope(
       const component = await componentPromise;
       if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
 
-      if (retainedLayout !== null) {
+      if (exiting !== null) {
+        // G07 graceful subtree exit, then bare-page CSR entry: child page
+        // unmounted and awaited first, then the layout component disposed
+        // (one destructor) and its host removed. The destination applies
+        // through mountCsrPage's normal path — it recreates a page root
+        // inside the surviving [data-go-page-outlet]. The import resolved
+        // BEFORE anything was torn down, so a failed load never stranded
+        // the document without its layout... but if teardown or mount
+        // throws anyway, the caller's hard-navigation fallback reloads.
+        logNavDecision(env.url, 'layout-subtree-exit', mountedClients, desiredClients);
+        const superseded = () => !token.isCurrent();
+        await unmountLayoutSubtree(exiting, outgoing, superseded);
+        if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
+        currentPage = await (seams.mountCsr ?? mountCsrPage)(env, undefined);
+      } else if (retainedLayout !== null) {
         // G05 child-only swap: destination keeps every mounted client
         // layout, so the retained instance keeps its component, host,
         // marker, and outlet; only the page inside the outlet changes.
@@ -325,10 +371,34 @@ async function applyEnvelope(
       }
     } else {
       logNavDecision(env.url, 'ssr-outlet-replace', mountedClients, desiredClients);
-      if (outgoing !== null) await outgoing.unmount();
-      if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
-      replacePageOutlet(env);
-      currentPage = null;
+      if (exiting !== null) {
+        // G07 graceful subtree exit, then SSR outlet replacement: the
+        // layout (child page first) tears down completely, and the server's
+        // bare page html lands in the document's [data-go-page-outlet].
+        // That outlet must exist for the SSR fragment to be renderable —
+        // a DIRECT-LOADED shell never mounts one, so this is exactly the
+        // case that must fall back to a full document (the server composes
+        // layouts; the runtime must never fabricate them from env.layouts).
+        const outlets = document.querySelectorAll(PageOutletSelector);
+        if (outlets.length !== 1) {
+          throw new LayoutMountError(
+            `cannot soft-render an SSR page with ${outlets.length} ${PageOutletSelector} elements after layout exit — falling back to full navigation`
+          );
+        }
+        const superseded = () => !token.isCurrent();
+        await unmountLayoutSubtree(exiting, outgoing, superseded);
+        if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
+        replacePageOutlet(env);
+        currentPage = null;
+      } else if (outgoing !== null) {
+        await outgoing.unmount();
+        if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
+        replacePageOutlet(env);
+        currentPage = null;
+      } else {
+        replacePageOutlet(env);
+        currentPage = null;
+      }
     }
     // Currency after the last await: a superseding navigation that began during
     // our mount/unmount makes us stale before history commits.

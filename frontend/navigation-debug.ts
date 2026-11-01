@@ -19,8 +19,9 @@ export interface NavDecision {
   action:
     | 'retained-child-swap' // G05: layout kept, page swapped
     | 'layout-subtree-entry' // G04: fresh layout mount(s)
+    | 'layout-subtree-exit' // G07: tracked layout unmounted on subtree exit
     | 'ssr-outlet-replace' // SSR mode: outlet HTML swap
-    | 'hard-navigate-discard' // guard: destination discards mounted layout
+    | 'hard-navigate-discard' // guard: destination discards a layout the runtime does not track
     | 'stale-navigation'; // superseded mid-flight
   /** Mounted client layouts before the transition. */
   mounted: string[];
