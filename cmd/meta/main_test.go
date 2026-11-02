@@ -72,11 +72,11 @@ func TestCLISmoke(t *testing.T) {
 			emptyErr: true,
 		},
 		{
-			name:     "dev inside project reports not implemented",
+			name:     "dev inside a bare fixture project reports missing Air configuration",
 			cwd:      nested,
 			args:     []string{"dev"},
 			wantCode: 1,
-			wantErr:  "not implemented yet",
+			wantErr:  "no Air configuration found",
 			emptyOut: true,
 		},
 		{

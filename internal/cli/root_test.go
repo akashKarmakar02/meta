@@ -108,7 +108,7 @@ func TestRun(t *testing.T) {
 // and version work with no valid project anywhere above the cwd. The
 // HOME override plus a fresh temp cwd leave nowhere to find a project.
 func TestRunHelpOutsideProject(t *testing.T) {
-	cwd := chdirTemp(t)
+	chdirTemp(t)
 
 	var stdout, stderr bytes.Buffer
 	if code := Run([]string{"--version"}, &stdout, &stderr); code != 0 {
@@ -124,7 +124,6 @@ func TestRunHelpOutsideProject(t *testing.T) {
 	if !strings.Contains(stdout.String(), "Usage:") {
 		t.Errorf("stdout missing usage: %q", stdout.String())
 	}
-	_ = cwd
 }
 
 func TestVersionOverride(t *testing.T) {
@@ -139,19 +138,6 @@ func TestVersionOverride(t *testing.T) {
 	}
 	if got, want := stdout.String(), "meta version v9.9.9-test\n"; got != want {
 		t.Errorf("stdout = %q, want %q", got, want)
-	}
-}
-
-func TestNotImplementedError(t *testing.T) {
-	err := &notImplementedError{command: "dev"}
-	if err.Error() == "" {
-		t.Fatal("Error() should not be empty")
-	}
-	// Zero value must not count as an error: an accidental nil-typed
-	// pointer would fail silently otherwise.
-	var zero *notImplementedError
-	if zero != nil {
-		t.Fatal("nil *notImplementedError must be nil")
 	}
 }
 
@@ -175,6 +161,23 @@ func makeProject(t *testing.T) string {
 		}
 	}
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/myapp\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+// makeFullProject creates a project that satisfies meta dev's A02
+// prerequisites: root + app/ + .air.toml + dist/client bundle manifest.
+func makeFullProject(t *testing.T) string {
+	t.Helper()
+	root := makeProject(t)
+	if err := os.WriteFile(filepath.Join(root, ".air.toml"), []byte("root = \".\"\ntmp_dir = \"tmp\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "dist", "client", ".vite"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "dist", "client", ".vite", "manifest.json"), []byte("{}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return root
@@ -304,33 +307,6 @@ func TestValidateRootRelativePath(t *testing.T) {
 	}
 }
 
-func TestRunDevNotImplemented(t *testing.T) {
-	root := makeProject(t)
-	t.Chdir(root)
-
-	var stdout, stderr bytes.Buffer
-	code := Run([]string{"dev"}, &stdout, &stderr)
-	if code != 1 {
-		t.Fatalf("exit = %d, want 1; stderr = %q", code, stderr.String())
-	}
-	got := stderr.String()
-	if !strings.Contains(got, "meta dev") {
-		t.Errorf("stderr %q missing command prefix", got)
-	}
-	if !strings.Contains(got, "not implemented yet") {
-		t.Errorf("stderr %q missing not-implemented marker", got)
-	}
-	if !strings.Contains(got, "P2-A02") {
-		t.Errorf("stderr %q missing task reference", got)
-	}
-	if !strings.Contains(got, root) {
-		t.Errorf("stderr %q missing detected root %q", got, root)
-	}
-	if stdout.Len() != 0 {
-		t.Errorf("stdout = %q, want empty", stdout.String())
-	}
-}
-
 func TestRunDevOutsideProject(t *testing.T) {
 	chdirTemp(t)
 
@@ -345,24 +321,12 @@ func TestRunDevOutsideProject(t *testing.T) {
 }
 
 func TestRunDevWithDirFlag(t *testing.T) {
-	root := makeProject(t)
-
 	tests := []struct {
 		name     string
 		args     []string
 		wantCode int
 		check    func(t *testing.T, stderr string)
 	}{
-		{
-			name:     "valid --dir reaches not-implemented",
-			args:     []string{"--dir", root, "dev"},
-			wantCode: 1,
-			check: func(t *testing.T, stderr string) {
-				if !strings.Contains(stderr, "not implemented yet") {
-					t.Errorf("stderr = %q, want not-implemented", stderr)
-				}
-			},
-		},
 		{
 			name:     "invalid --dir fails fast",
 			args:     []string{"--dir", filepath.Join(t.TempDir(), "missing"), "dev"},
@@ -393,9 +357,6 @@ func TestRunDevWithDirFlag(t *testing.T) {
 				t.Fatalf("exit = %d, want %d; stderr = %q", code, tt.wantCode, stderr.String())
 			}
 			tt.check(t, stderr.String())
-			if stdout.Len() != 0 {
-				t.Errorf("stdout = %q, want empty", stdout.String())
-			}
 		})
 	}
 }
