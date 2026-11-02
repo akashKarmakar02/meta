@@ -365,3 +365,118 @@ test.describe('G07: graceful subtree exit /dashboard → /about', () => {
     expect(await page.locator('[data-go-page-root]').count()).toBe(1);
   });
 });
+
+test.describe('G08: fresh layout state on re-entry', () => {
+  test('exit destroys old instance; re-entry mounts fresh state at 0', async ({ page }) => {
+    await page.goto('/about');
+    await expect(page.locator('[data-go-page-about]')).toBeVisible();
+    await page.evaluate(() => {
+      (window as unknown as Record<string, unknown>).__e2eSoftNav = true;
+    });
+
+    // Enter; bump counter to a nonzero value.
+    await page.click('nav[data-go-site-nav] a[href="/dashboard"]');
+    await expect(page.locator('[data-go-page-root] h1')).toHaveText('Dashboard');
+    // Tag the live host so node identity can be checked across the cycle.
+    await page.evaluate(() => {
+      document
+        .querySelector('[data-go-layout-shell-host]')
+        ?.setAttribute('data-e2e-first-cycle', '1');
+    });
+    await page.click('[data-go-layout-counter-button]');
+    await page.click('[data-go-layout-counter-button]');
+    await expect(page.locator('[data-go-layout-counter]')).toHaveText('Layout count: 2');
+
+    // Within-subtree swap: value persists (G05/G06 contract).
+    await page.click('[data-go-dashboard-side-nav] a[href="/dashboard/settings"]');
+    await expect(page.locator('[data-go-page-root] h1')).toHaveText('Settings');
+    await expect(page.locator('[data-go-layout-counter]')).toHaveText('Layout count: 2');
+
+    // Completed exit: old layout host gone.
+    await page.click('nav[data-go-site-nav] a[href="/about"]');
+    await expect(page.locator('[data-go-page-about]')).toBeVisible();
+    await expect(page.locator('[data-go-layout-shell-host]')).toHaveCount(0);
+    expect(
+      await page.evaluate(
+        () => (window as unknown as Record<string, unknown>).__e2eSoftNav === true
+      ),
+      'exit stayed soft'
+    ).toBe(true);
+
+    // Re-entry: fresh instance, counter reset to initial value, new identity.
+    await page.click('nav[data-go-site-nav] a[href="/dashboard"]');
+    await expect(page.locator('[data-go-page-root] h1')).toHaveText('Dashboard');
+    // The stamped host must be gone: the new mount is a different node.
+    await expect(page.locator('[data-e2e-first-cycle]')).toHaveCount(0);
+    expect(
+      await page.evaluate(() => document.querySelector('[data-go-layout-shell-host]') !== null)
+    ).toBe(true);
+    await expect(page.locator('[data-go-layout-counter]')).toHaveText('Layout count: 0');
+    expect(await page.locator('[data-go-layout-shell-host]').count()).toBe(1); // no duplicates
+    expect(await page.locator('[data-go-page-root]').count()).toBe(1);
+
+    // New instance remains reactive.
+    await page.click('[data-go-layout-counter-button]');
+    await expect(page.locator('[data-go-layout-counter]')).toHaveText('Layout count: 1');
+  });
+
+  test('direct-load re-entry also starts fresh at 0', async ({ page }) => {
+    // The direct-load path exercises CSR boot + adoption, not soft nav.
+    await page.goto('/dashboard');
+    await page.click('[data-go-layout-counter-button]');
+    await expect(page.locator('[data-go-layout-counter]')).toHaveText('Layout count: 1');
+    // Full reload leaves; direct re-load starts clean.
+    await page.goto('/about');
+    await page.goto('/dashboard');
+    await expect(page.locator('[data-go-layout-counter]')).toHaveText('Layout count: 0');
+    expect(await page.locator('[data-go-layout-shell-host]').count()).toBe(1);
+  });
+
+  test('Back after exit does not resurrect old component state', async ({ page }) => {
+    await page.goto('/about');
+    await expect(page.locator('[data-go-page-about]')).toBeVisible();
+    await page.evaluate(() => {
+      (window as unknown as Record<string, unknown>).__e2eSoftNav = true;
+    });
+
+    await page.click('nav[data-go-site-nav] a[href="/dashboard"]');
+    await expect(page.locator('[data-go-page-root] h1')).toHaveText('Dashboard');
+    await page.click('[data-go-layout-counter-button]');
+    await expect(page.locator('[data-go-layout-counter]')).toHaveText('Layout count: 1');
+
+    // Exit, then Back into the subtree: history must not resurrect state.
+    await page.click('nav[data-go-site-nav] a[href="/about"]');
+    await expect(page.locator('[data-go-page-about]')).toBeVisible();
+    await page.goBack();
+    await expect(page.locator('[data-go-page-root] h1')).toHaveText('Dashboard');
+    // Fresh mount via history restoration: counter reset.
+    await expect(page.locator('[data-go-layout-counter]')).toHaveText('Layout count: 0');
+    expect(await page.locator('[data-go-layout-shell-host]').count()).toBe(1);
+    expect(await page.locator('[data-go-page-root]').count()).toBe(1);
+    expect(
+      await page.evaluate(
+        () => (window as unknown as Record<string, unknown>).__e2eSoftNav === true
+      ),
+      'Back re-entry stayed soft'
+    ).toBe(true);
+  });
+
+  test('repeated full cycles never leak or accumulate state', async ({ page }) => {
+    await page.goto('/about');
+    await expect(page.locator('[data-go-page-about]')).toBeVisible();
+    for (let i = 0; i < 3; i++) {
+      await page.click('nav[data-go-site-nav] a[href="/dashboard"]');
+      await expect(page.locator('[data-go-page-root] h1')).toHaveText('Dashboard');
+      await page.click('[data-go-layout-counter-button]');
+      await expect(page.locator('[data-go-layout-counter]')).toContainText('Layout count: 1');
+      await page.click('nav[data-go-site-nav] a[href="/about"]');
+      await expect(page.locator('[data-go-page-about]')).toBeVisible();
+      await expect(page.locator('[data-go-layout-shell-host]')).toHaveCount(0);
+    }
+    // Re-entry after three cycles: still exactly one fresh layout at 0.
+    await page.click('nav[data-go-site-nav] a[href="/dashboard"]');
+    await expect(page.locator('[data-go-layout-counter]')).toHaveText('Layout count: 0');
+    expect(await page.locator('[data-go-layout-shell-host]').count()).toBe(1);
+    expect(await page.locator('[data-go-page-root]').count()).toBe(1);
+  });
+});
