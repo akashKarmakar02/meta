@@ -4,7 +4,7 @@
   "routeId": "dashboard/settings/page.svelte",
   "mode": "csr",
   "title": "Settings",
-  "layouts": ["app/layout.templ"],
+  "layouts": ["app/layout.templ", "app/dashboard/layout.svelte"],
   "html": "",
   "clientEntry": "dashboard/settings/page.svelte"
 }
