@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 )
@@ -25,12 +26,9 @@ Go backend under Air (github.com/air-verse/air) for automatic rebuild
 and restart on Go source changes (P2-A02).
 
 Current scope:
-  - Go backend hot reload via Air only.
+  - Go backend hot reload via Air and Svelte HMR via Vite.
   - templ and route metadata regenerate before backend builds.
-  - Vite/Svelte HMR and the unified dev origin arrive in A04/A05; the
-    client bundle under dist/client must be built once beforehand
-    ('make build' or 'npm run build') or the server exits with a
-    missing-assets error.
+  - Vite listens on 127.0.0.1:5173; a unified origin arrives in A05.
 
 Usage:
   meta dev [--dir <path>]
@@ -41,6 +39,7 @@ Flags:
 Environment:
   PORT            Server port override (default :3000), passed through
                   to the server process
+  GO_META_VITE_PORT  Vite port override (default 5173)
 
 Exit status:
   0  interrupted development session (Ctrl+C)
@@ -90,6 +89,9 @@ type execRunner struct{}
 func (execRunner) Start(ctx context.Context, stdout io.Writer, name string, arg ...string) (process, error) {
 	cmd := exec.Command(name, arg...)
 	cmd.Dir = workingDirFrom(ctx)
+	if env, ok := ctx.Value(ctxKeyEnv).([]string); ok {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	cmd.Stdout = stdout
 	cmd.Stderr = stdout
 	if err := cmd.Start(); err != nil {
@@ -101,6 +103,7 @@ func (execRunner) Start(ctx context.Context, stdout io.Writer, name string, arg 
 type ctxKey int
 
 const ctxKeyWorkingDir ctxKey = iota
+const ctxKeyEnv ctxKey = iota + 1
 
 func withWorkingDir(ctx context.Context, dir string) context.Context {
 	return context.WithValue(ctx, ctxKeyWorkingDir, dir)
@@ -115,19 +118,50 @@ func workingDirFrom(ctx context.Context) string {
 // unit-testable without a real Air binary: resolving Air, launching
 // processes, and receiving interruption signals.
 type devDeps struct {
-	lookAir func() (string, error)
-	runner  runner
-	signals func() (<-chan os.Signal, func())
-	grace   time.Duration // override for the shutdown grace period in tests
+	lookAir  func() (string, error)
+	lookNode func() (string, error)
+	runner   runner
+	signals  func() (<-chan os.Signal, func())
+	grace    time.Duration // override for the shutdown grace period in tests
 }
 
 // prodDeps is the production wiring. Tests may swap this variable (with
 // cleanup) rather than threading a second parameter through runDev.
 var prodDeps = devDeps{
-	lookAir: airLookPath,
-	runner:  execRunner{},
-	signals: watchInterrupt,
-	grace:   airShutdownGrace,
+	lookAir:  airLookPath,
+	lookNode: nodeLookPath,
+	runner:   execRunner{},
+	signals:  watchInterrupt,
+	grace:    airShutdownGrace,
+}
+
+func nodeLookPath() (string, error) {
+	path, err := exec.LookPath("node")
+	if err != nil {
+		return "", fmt.Errorf("meta dev: Node.js was not found; install Node.js and npm, then run npm ci")
+	}
+	return path, nil
+}
+
+func viteCommand(root string, lookNode func() (string, error)) (string, []string, string, error) {
+	node, err := lookNode()
+	if err != nil {
+		return "", nil, "", err
+	}
+	vite := filepath.Join(root, "node_modules", "vite", "bin", "vite.js")
+	if _, err := os.Stat(vite); err != nil {
+		return "", nil, "", fmt.Errorf("meta dev: Vite dependencies missing; run npm ci: %w", err)
+	}
+	port := os.Getenv("GO_META_VITE_PORT")
+	if port == "" {
+		port = "5173"
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 1 || n > 65535 {
+		return "", nil, "", fmt.Errorf("meta dev: invalid GO_META_VITE_PORT %q", port)
+	}
+	origin := "http://127.0.0.1:" + strconv.Itoa(n)
+	return node, []string{vite, "--host", "127.0.0.1", "--port", strconv.Itoa(n), "--strictPort"}, origin, nil
 }
 
 // watchInterrupt subscribes to termination signals.
@@ -237,7 +271,14 @@ func runDevWith(c *Context, deps devDeps) error {
 		return err
 	}
 
-	if err := checkClientAssets(root); err != nil {
+	var node, origin string
+	var viteArgs []string
+	if deps.lookNode != nil {
+		node, viteArgs, origin, err = viteCommand(root, deps.lookNode)
+		if err != nil {
+			return err
+		}
+	} else if err := checkClientAssets(root); err != nil {
 		return err
 	}
 
@@ -255,8 +296,38 @@ func runDevWith(c *Context, deps devDeps) error {
 	}
 	defer stopReconcile()
 
-	proc, err := deps.runner.Start(withWorkingDir(context.Background(), root), c.Stderr, airPath, config)
+	var vite process
+	var viteWait chan error
+	if node != "" {
+		vite, err = deps.runner.Start(withWorkingDir(context.Background(), root), c.Stderr, node, viteArgs...)
+		if err != nil {
+			return fmt.Errorf("meta dev: failed to start Vite: %w", err)
+		}
+		viteWait = make(chan error, 1)
+		go func() { viteWait <- vite.Wait() }()
+		fmt.Fprintf(c.Stdout, "Frontend: Vite at %s\n", origin)
+	}
+	stop := func(p process, done <-chan error, sig os.Signal) {
+		if p == nil {
+			return
+		}
+		_ = p.Signal(sig)
+		timer := time.NewTimer(deps.grace)
+		defer timer.Stop()
+		select {
+		case <-done:
+		case <-timer.C:
+			_ = p.Kill()
+			<-done
+		}
+	}
+	airCtx := withWorkingDir(context.Background(), root)
+	if origin != "" {
+		airCtx = context.WithValue(airCtx, ctxKeyEnv, []string{"GO_META_VITE_ORIGIN=" + origin})
+	}
+	proc, err := deps.runner.Start(airCtx, c.Stderr, airPath, config)
 	if err != nil {
+		stop(vite, viteWait, os.Interrupt)
 		return fmt.Errorf("meta dev: failed to start Air: %w", err)
 	}
 
@@ -265,7 +336,11 @@ func runDevWith(c *Context, deps devDeps) error {
 
 	select {
 	case waitErr := <-waitCh:
+		stop(vite, viteWait, os.Interrupt)
 		if waitErr == nil {
+			if vite != nil {
+				return fmt.Errorf("meta dev: Air exited unexpectedly")
+			}
 			return nil
 		}
 		var exitErr *exec.ExitError
@@ -274,19 +349,24 @@ func runDevWith(c *Context, deps devDeps) error {
 		}
 		return fmt.Errorf("meta dev: Air exited unexpectedly: %w", waitErr)
 
+	case viteErr := <-viteWait:
+		stop(proc, waitCh, os.Interrupt)
+		if viteErr == nil {
+			return fmt.Errorf("meta dev: Vite exited unexpectedly")
+		}
+		return fmt.Errorf("meta dev: Vite exited unexpectedly: %w", viteErr)
+
 	case sig := <-sigCh:
 		fmt.Fprintf(c.Stderr, "meta dev: received %v, stopping development backend\n", sig)
 		// Interactive Ctrl+C reaches Air directly (same process group),
 		// but when only the meta process is signaled, forward the
 		// interrupt so Air tears its child server down itself.
-		_ = proc.Signal(sig)
-		select {
-		case <-waitCh:
-			// Air exited on its own within the grace period.
-		case <-time.After(deps.grace):
-			// Air did not shut down in time; kill and collect its exit.
-			_ = proc.Kill()
-			<-waitCh
+		if vite != nil {
+			_ = vite.Signal(sig)
+		}
+		stop(proc, waitCh, sig)
+		if vite != nil {
+			stop(vite, viteWait, sig)
 		}
 		fmt.Fprintln(c.Stderr, "meta dev: development session ended")
 		return nil

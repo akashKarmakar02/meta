@@ -19,12 +19,8 @@
 #     hidden, Go-ignored .go trigger only on changes. Air watches that file
 #     and runs devgen before rebuilding; consistency checking remains a
 #     recovery mechanism for missed events.
-#   - Vite/Svelte HMR is still ahead (A04); editing .svelte components
-#     regenerates routes only when page.svelte/layout.svelte changed.
-#
-# Prerequisite: the client bundle must exist (the example server fails
-# fast without dist/client). Run `make build` once, or `npm run build`,
-# before `meta dev`.
+#   - Vite handles Svelte edits; the reconciler requests builds when
+#     route declaration filenames change.
 
 root = "."
 tmp_dir = ".tmp/air"
@@ -35,11 +31,9 @@ tmp_dir = ".tmp/air"
   # devgen exits 0 on no-op so routine Go-only edits don't fail.
   cmd = "bin/meta devgen && go build -o ./.tmp/air/server ./cmd/example"
   entrypoint = ["./.tmp/air/server"]
-  # Watched extensions: .go (hand-written and generated), .templ for
-  # regeneration, .svelte for route-structure changes (adds/removes of
-  # page.svelte/layout.svelte are structural; content edits regenerate
-  # routes cheaply via skip-if-same output).
-  include_ext = ["go", "templ", "svelte"]
+  # Svelte content edits belong to Vite. The route reconciler asks Air
+  # to rebuild when page/layout declarations are added, removed or moved.
+  include_ext = ["go", "templ"]
   # Generated Go sources stay compilable: they remain inside the watched
   # tree with extension go. Exclusions below remove only non-input dirs.
   exclude_dir = ["node_modules", "dist", ".tmp", ".git", "test-results", "playwright-report"]

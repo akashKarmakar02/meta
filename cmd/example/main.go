@@ -54,7 +54,14 @@ func newApp(assets *httpserver.Assets) *fiber.App {
 }
 
 func main() {
-	assets, err := httpserver.LoadAssets("dist/client")
+	var assets httpserver.Assets
+	var err error
+	devOrigin := os.Getenv("GO_META_VITE_ORIGIN")
+	if devOrigin != "" {
+		assets, err = httpserver.DevelopmentAssets(devOrigin)
+	} else {
+		assets, err = httpserver.LoadAssets("dist/client")
+	}
 	if err != nil {
 		log.Fatalf("load client assets: %v", err)
 	}
@@ -62,8 +69,10 @@ func main() {
 	// E09: serve the hashed production bundle at the same /assets prefix
 	// the shells reference. Fails explicitly when the build output is
 	// missing rather than serving pages that cannot boot.
-	if err := httpserver.MountAssets(app, "dist/client"); err != nil {
-		log.Fatalf("mount client assets: %v", err)
+	if devOrigin == "" {
+		if err := httpserver.MountAssets(app, "dist/client"); err != nil {
+			log.Fatalf("mount client assets: %v", err)
+		}
 	}
 	// PORT overrides the default :3000 (E2E runs the same binary on a
 	// scratch port; production picks its own through the environment).

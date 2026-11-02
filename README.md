@@ -28,6 +28,23 @@ files in the same directory are an error.
 
 ## Generated artifacts policy
 
+## Development
+
+Install Node.js and npm, run `npm ci`, install Air, and build the CLI with
+`go build -o bin/meta ./cmd/meta`. Start the backend and Vite together with
+`bin/meta dev`. Air regenerates routes and templates before backend builds;
+Vite serves the existing frontend entry and Svelte HMR directly. No
+`dist/client` build is needed in this mode.
+
+The backend defaults to port 3000 (`PORT` overrides it). Vite binds only
+`127.0.0.1:5173` (`GO_META_VITE_PORT` overrides the port) and fails if its
+port is in use. The browser must run on the same machine and reach both
+origins. Production continues to serve the built manifest and does not run
+Node. A05 must provide a unified origin, including HTTP and WebSocket proxying
+and an appropriate externally reachable host policy; A06 owns richer
+diagnostics. Run the isolated real-browser development test with
+`npm exec playwright -- test -c playwright.dev.config.ts`.
+
 ## Commands (from a clean checkout)
 
 ```bash

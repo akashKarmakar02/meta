@@ -7,8 +7,11 @@ package httpserver
 import (
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -21,11 +24,28 @@ const viteEntryKey = "frontend/entry.ts"
 // Assets carries resolved production client asset URLs. Hashed filenames
 // come only from the manifest — nothing hardcodes them.
 type Assets struct {
+	// DevClientURL is set only for a local Vite development server.
+	DevClientURL string
 	// EntryScriptURL is the module script URL for the client entry,
 	// e.g. /assets/entry-<hash>.js.
 	EntryScriptURL string
 	// EntryCSSURLs are stylesheet URLs for the entry, in manifest order.
 	EntryCSSURLs []string
+}
+
+// DevelopmentAssets constructs script URLs for the explicitly configured
+// local Vite origin. Production never consults the development server.
+func DevelopmentAssets(origin string) (Assets, error) {
+	u, err := url.Parse(origin)
+	if err != nil || u.Scheme != "http" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+		return Assets{}, fmt.Errorf("invalid Vite development origin %q", origin)
+	}
+	host, port, err := net.SplitHostPort(u.Host)
+	portNumber, portErr := strconv.Atoi(port)
+	if err != nil || host != "127.0.0.1" || portErr != nil || portNumber < 1 || portNumber > 65535 {
+		return Assets{}, fmt.Errorf("Vite development origin must use 127.0.0.1 and an explicit port")
+	}
+	return Assets{DevClientURL: origin + "/@vite/client", EntryScriptURL: origin + "/" + viteEntryKey}, nil
 }
 
 // viteManifestChunk mirrors the fields go-meta consumes from Vite's

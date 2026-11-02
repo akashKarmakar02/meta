@@ -28,12 +28,21 @@ func TestRouteReconciliationAir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := nodeLookPath(); err != nil {
+		t.Skip(err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "node_modules", "vite", "bin", "vite.js")); err != nil {
+		t.Skip("Vite dependencies unavailable; run npm ci")
+	}
 	root := t.TempDir()
-	for _, name := range []string{".air.toml", "go.mod", "go.sum", "app", "cmd", "internal", "frontend", "generated"} {
+	for _, name := range []string{".air.toml", "go.mod", "go.sum", "package.json", "vite.config.ts", "app", "cmd", "internal", "frontend", "generated"} {
 		cmd := exec.Command("cp", "-a", filepath.Join(repo, name), root)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("copy %s: %v: %s", name, err, out)
 		}
+	}
+	if err := os.Symlink(filepath.Join(repo, "node_modules"), filepath.Join(root, "node_modules")); err != nil {
+		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(root, "dist/client/.vite"), 0755); err != nil {
 		t.Fatal(err)
@@ -48,6 +57,7 @@ func TestRouteReconciliationAir(t *testing.T) {
 	}
 	build := exec.Command("go", "build", "-o", "bin/meta", "./cmd/meta")
 	build.Dir = root
+	build.Env = append(os.Environ(), "GOFLAGS=-buildvcs=false")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build meta: %v: %s", err, out)
 	}
@@ -59,7 +69,7 @@ func TestRouteReconciliationAir(t *testing.T) {
 	port := freeTCPPort(t)
 	cmd := exec.Command(filepath.Join(root, "bin/meta"), "dev")
 	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "PORT="+port)
+	cmd.Env = append(os.Environ(), "PORT="+port, "GO_META_VITE_PORT="+freeTCPPort(t), "GOFLAGS=-buildvcs=false")
 	cmd.Stdout = log
 	cmd.Stderr = log
 	if err := cmd.Start(); err != nil {

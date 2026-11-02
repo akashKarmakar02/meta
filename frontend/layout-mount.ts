@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 // G04: mount a persistent client (layout.svelte) layout ONCE when the
 // runtime enters its subtree, and host the current child page inside its
 // [data-go-layout-outlet].
@@ -36,6 +37,7 @@ import { mountComponent, type MountHandle } from './svelte-mounter';
 import {
   requireEmptyOutlet,
   LayoutOutletError,
+  LayoutOutletSelector,
 } from './layout-outlet';
 import type { NavigationResponse } from './types';
 
@@ -170,12 +172,27 @@ export async function mountPersistentLayout(
     );
   }
 
+  // A Svelte layout HMR replacement owns and replaces the outlet element.
+  // Reattach only the runtime-owned page root to the replacement outlet;
+  // production navigation never replaces a mounted layout this way.
+  const hmrObserver = import.meta.env.DEV ? new MutationObserver(() => {
+    if (host.contains(outlet)) return;
+    const candidates = host.querySelectorAll<HTMLElement>(LayoutOutletSelector);
+    if (candidates.length !== 1) return;
+    const replacement = candidates[0];
+    const pageRoot = outlet.querySelector<HTMLElement>(':scope > [data-go-page-root]');
+    if (pageRoot) replacement.appendChild(pageRoot);
+    outlet = replacement;
+  }) : null;
+  hmrObserver?.observe(host, { childList: true, subtree: true });
+
   return {
     ...handle,
     layoutId,
     host,
-    outlet,
+    get outlet(): HTMLElement { return outlet; },
     async dispose(): Promise<void> {
+      hmrObserver?.disconnect();
       await handle.unmount();
       host.remove();
     },
