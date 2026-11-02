@@ -15,9 +15,10 @@
 #     mtimes, so a no-op build cycle cannot retrigger another cycle.
 #   - _templ.go files stay watched (include_ext "go"): they change only
 #     when a real .templ edit changed them, producing exactly one rebuild.
-#   - devgen verifies tree/generated consistency on every build: fsnotify
-#     drops recursive directory deletions (rm -rf app/someroute), so the
-#     next build regenerates instead of compiling stale route imports.
+#   - meta dev reconciles route filenames every two seconds and writes a
+#     hidden, Go-ignored .go trigger only on changes. Air watches that file
+#     and runs devgen before rebuilding; consistency checking remains a
+#     recovery mechanism for missed events.
 #   - Vite/Svelte HMR is still ahead (A04); editing .svelte components
 #     regenerates routes only when page.svelte/layout.svelte changed.
 #

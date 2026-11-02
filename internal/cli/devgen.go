@@ -52,6 +52,14 @@ type genNeeds struct {
 // running.
 func devgen(root string, out, errW io.Writer) error {
 	needs := scanGenerationInputs(root)
+	manifest, manifestErr := routeManifest(root)
+	manifestPath := filepath.Join(root, ".tmp", "air", ".route-manifest")
+	if manifestErr == nil {
+		previous, err := os.ReadFile(manifestPath)
+		if err != nil || string(previous) != manifest {
+			needs.routes = true
+		}
+	}
 
 	// Always verify tree/generated consistency — not only on the no-op
 	// path. fsnotify drops recursive directory deletions (observed live:
@@ -100,6 +108,9 @@ func devgen(root string, out, errW io.Writer) error {
 	}
 	removeOrphanTemplGo(root, errW)
 	writeGenMarker(root)
+	if manifestErr == nil {
+		_ = os.WriteFile(manifestPath, []byte(manifest), 0o644)
+	}
 	return nil
 }
 

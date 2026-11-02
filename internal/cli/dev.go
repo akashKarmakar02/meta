@@ -26,8 +26,7 @@ and restart on Go source changes (P2-A02).
 
 Current scope:
   - Go backend hot reload via Air only.
-  - Editing .templ files requires 'make generate' until P2-A03 wires in
-    templ regeneration.
+  - templ and route metadata regenerate before backend builds.
   - Vite/Svelte HMR and the unified dev origin arrive in A04/A05; the
     client bundle under dist/client must be built once beforehand
     ('make build' or 'npm run build') or the server exits with a
@@ -249,6 +248,12 @@ func runDevWith(c *Context, deps devDeps) error {
 
 	sigCh, stopSignals := deps.signals()
 	defer stopSignals()
+
+	stopReconcile, err := startRouteReconciler(root, c.Stderr)
+	if err != nil {
+		return fmt.Errorf("meta dev: route reconciliation: %w", err)
+	}
+	defer stopReconcile()
 
 	proc, err := deps.runner.Start(withWorkingDir(context.Background(), root), c.Stderr, airPath, config)
 	if err != nil {

@@ -44,3 +44,4 @@ npm-debug.log*
 
 # Air build/generation output (meta dev)
 .tmp/
+.go-meta-route-trigger.go

@@ -198,6 +198,13 @@ func TestDevGenNoOpSkipsTools(t *testing.T) {
 	writeFixtureFile(t, filepath.Join(root, "app", "page.templ"), "old", past())
 	writeRoutesGen(t, root, []string{"go-meta/app"}) // consistent with tree
 	writeMarker(t, root)
+	manifest, err := routeManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".tmp", "air", ".route-manifest"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	var stdout, stderr bytes.Buffer
 	if err := devgen(root, &stdout, &stderr); err != nil {
