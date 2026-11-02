@@ -153,7 +153,7 @@ describe('link interceptor (F05)', () => {
 
   it('keeps target=_blank and other browsing contexts native', () => {
     const calls = setup();
-    for (const target of ['_blank', '_parent', '_top', 'custom-window', '_SELF']) {
+    for (const target of ['_blank', '_parent', '_top', 'custom-window']) {
       const a = makeAnchor({ href: '/about', target });
       const event = click(a);
       expect(calls, `target=${target}`).toHaveLength(0);
@@ -163,7 +163,7 @@ describe('link interceptor (F05)', () => {
 
   it('treats target=_self (case-insensitive) as current context and intercepts', () => {
     const calls = setup();
-    const a = makeAnchor({ href: '/about', target: '_self' });
+    const a = makeAnchor({ href: '/about', target: '_SELF' });
     click(a);
     expect(calls).toHaveLength(1);
   });
@@ -217,6 +217,25 @@ describe('link interceptor (F05)', () => {
       expect(calls, `href=${href}`).toHaveLength(0);
       expect(event.defaultPrevented, `href=${href}`).toBe(false);
     }
+  });
+
+  it('prevents a plain current-page click without starting a navigation', () => {
+    const calls = setup();
+    window.history.replaceState(null, '', '/dashboard?tab=summary');
+    const a = makeAnchor({ href: '/dashboard?tab=summary' });
+    const event = click(a);
+    expect(event.defaultPrevented).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('soft-navigates to the current path when removing a fragment', () => {
+    const calls = setup();
+    window.history.replaceState(null, '', '/dashboard#details');
+    const a = makeAnchor({ href: '/dashboard' });
+    const event = click(a);
+    expect(event.defaultPrevented).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].destination).toBe('/dashboard');
   });
 
   it('intercepts a same-page URL that changes the query string', () => {

@@ -103,14 +103,19 @@ function onClick(event: MouseEvent): void {
   if (url.origin !== window.location.origin) {
     return;
   }
-  // Fragment-only / same-document links (href="#section", or any link whose
-  // path and query already match the current document) keep native scroll
-  // behavior instead of triggering a navigation.
+  // Explicit fragment links keep native scrolling and history semantics.
+  // A plain link to the current URL is a no-op; otherwise the browser would
+  // reload the document and discard client state. An empty href stays native.
   if (
     url.pathname === window.location.pathname &&
     url.search === window.location.search
   ) {
-    return;
+    const href = anchor.getAttribute('href');
+    if (href === null || href === '' || href.includes('#')) return;
+    if (window.location.hash === '') {
+      event.preventDefault();
+      return;
+    }
   }
 
   // Eligible (blueprint 5.2 step 3): take over the default and hand off.
