@@ -67,7 +67,6 @@ import {
   clientLayoutSequence,
 } from './layout-stack';
 import {
-  clientLayouts,
   mountPersistentLayout,
   createLayoutPageRoot,
   LayoutMountError,
@@ -76,6 +75,7 @@ import {
 import { swapLayoutChildPage } from './layout-child-swap';
 import { unmountLayoutSubtree } from './layout-subtree-exit';
 import { logNavDecision } from './navigation-debug';
+import { loadLayout } from './route-import-map';
 import {
   pushNavigationState,
   installPopstateNavigation,
@@ -125,6 +125,12 @@ export function adoptMountedInstances(handles: {
   }
   currentLayout = handles.layout;
   currentPage = { ...handles.page };
+}
+
+/** Transfer a directly mounted page when it has no client layout. */
+export function adoptMountedPage(page: MountHandle & { readonly pageRoot: HTMLElement }): void {
+  if (!page.pageRoot.isConnected) throw new LayoutMountError('cannot adopt a detached page');
+  currentPage = { ...page };
 }
 
 /** Serializes destructive DOM commits (unmount / outlet replace / mount). */
@@ -258,7 +264,7 @@ async function applyEnvelope(
     // G04: client (.svelte) layouts that must ENTER with this navigation.
     // SSR (.templ) enter-list entries belong to documents the server
     // composed — a soft navigation never enters one client-side.
-    const enteringLayouts = clientLayouts(transition.enter);
+    const enteringLayouts = transition.enter;
 
     // G05: a mounted, retained client layout hosting the outgoing page —
     // the destination keeps every mounted client layout, and one is
@@ -284,12 +290,20 @@ async function applyEnvelope(
     // A G07 subtree exit takes this same handle as its CHILD — the layout
     // teardown sequence below unmounts it before its parent.
     const outgoing = currentPage;
-    currentPage = null;
 
     if (env.mode === 'csr') {
       // Import resolved (or failed — caught by the caller's fallback).
       const component = await componentPromise;
       if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
+      if (!component) {
+        throw new LayoutMountError(`unknown clientEntry ${JSON.stringify(env.clientEntry)}`);
+      }
+      for (const layoutId of enteringLayouts) {
+        const layoutComponent = await loadLayout(layoutId);
+        if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
+        if (!layoutComponent) throw new LayoutMountError(`unknown client layout ${JSON.stringify(layoutId)}`);
+      }
+      currentPage = null;
 
       if (exiting !== null) {
         // G07 graceful subtree exit, then bare-page CSR entry: child page
@@ -320,8 +334,8 @@ async function applyEnvelope(
         // as its retained instance.
         currentLayout = null;
         if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
-        currentPage = await (seams.mountCsr ?? mountCsrPage)(env, undefined);
-      } else if (retainedLayout !== null) {
+      }
+      if (retainedLayout !== null && exiting === null) {
         // G05 child-only swap: destination keeps every mounted client
         // layout, so the retained instance keeps its component, host,
         // marker, and outlet; only the page inside the outlet changes.
@@ -332,7 +346,10 @@ async function applyEnvelope(
           retainedLayout,
           env,
           component,
-          outgoing
+          outgoing,
+          () => {
+            if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
+          }
         );
         if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
       } else if (enteringLayouts.length > 0) {
@@ -386,9 +403,24 @@ async function applyEnvelope(
         }
         currentPage = await mountPageInLayout(env, currentLayout, component);
       } else {
-        currentPage = await (seams.mountCsr ?? mountCsrPage)(env, outgoing ?? undefined);
+        if (env.html) {
+          await outgoing?.unmount();
+          if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
+          const outlet = document.querySelector(PageOutletSelector);
+          if (!outlet) throw new LayoutMountError('missing document outlet');
+          const template = document.createElement('template');
+          template.innerHTML = env.html;
+          outlet.replaceChildren(template.content);
+        } else if (!exiting) {
+          // Discard any outgoing server visual layout before a layout-free page.
+          await outgoing?.unmount();
+          if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
+          document.querySelector(PageOutletSelector)?.replaceChildren();
+        }
+        currentPage = await (seams.mountCsr ?? mountCsrPage)(env, undefined);
       }
     } else {
+      currentPage = null;
       logNavDecision(env.url, 'ssr-outlet-replace', mountedClients, desiredClients);
       if (exiting !== null) {
         // G07 graceful subtree exit, then SSR outlet replacement: the

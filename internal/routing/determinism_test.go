@@ -57,7 +57,7 @@ func TestDiscoverSnapshot(t *testing.T) {
 	}
 	// Golden snapshot: root layout.templ wraps every route (ancestry walks
 	// to the app root), dashboard adds its svelte layout for its subtree.
-	want := `[/ ssr> ssr page.templ [layout.templ ] /about ssr> ssr about/page.templ [layout.templ ] /dashboard ssr>csr> csr dashboard/page.svelte [layout.templ dashboard/layout.svelte ] /dashboard/settings ssr>csr> csr dashboard/settings/page.svelte [layout.templ dashboard/layout.svelte ] /shop/catalog/item ssr> csr shop/catalog/item/page.svelte [layout.templ ]]`
+	want := `[/ ssr> ssr page.templ [layout.templ ] /about ssr> ssr about/page.templ [layout.templ ] /dashboard csr> csr dashboard/page.svelte [dashboard/layout.svelte ] /dashboard/settings csr> csr dashboard/settings/page.svelte [dashboard/layout.svelte ] /shop/catalog/item ssr> csr shop/catalog/item/page.svelte [layout.templ ]]`
 	got := fmt.Sprint(describeRoutes(routes))
 	if got != want {
 		t.Errorf("snapshot mismatch:\ngot:  %s\nwant: %s", got, want)

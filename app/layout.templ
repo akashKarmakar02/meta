@@ -1,31 +1,10 @@
 package app
 
-// Layout is the root document wrapper for SSR pages. D06 generated the
-// root->page composition; D01 defines the component contract: full HTML5
-// document, metadata in head, and a single content slot in body.
-// F07 wraps the page slot in data-go-page-outlet: the server-owned page
-// region soft navigation replaces client-side (blueprint 5.2 step 9).
-// data-go-layout stamps this layout's stable routing ID on its element so
-// the client can derive the actually-mounted layout stack from the DOM
-// (F12) instead of trusting envelope metadata — layout IDs in env.layouts
-// describe desired ancestry, never prove mounted instances.
-// Everything outside this wrapper — html, head, body — persists across
-// soft navigations, including the Nav rendered above the outlet.
+// Layout is the root visual layout. The framework owns the surrounding
+// document and page outlet independently of this wrapper.
 templ Layout(pageContent templ.Component) {
-	<!DOCTYPE html>
-	<html lang="en">
-		<head>
-			<meta charset="utf-8"/>
-			<meta name="viewport" content="width=device-width, initial-scale=1"/>
-			<title>go-meta</title>
-		</head>
-		<body>
-			<div data-go-layout="app/layout.templ">
-				@Nav()
-				<div data-go-page-outlet>
-					@pageContent
-				</div>
-			</div>
-		</body>
-	</html>
+	<div data-go-layout="app/layout.templ">
+		@Nav()
+		@pageContent
+	</div>
 }

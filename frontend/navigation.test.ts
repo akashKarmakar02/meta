@@ -197,18 +197,17 @@ describe('fetchNavigation (F06)', () => {
     expect(err.code).toBe('bad-envelope');
   });
 
-  it('rejects CSR envelopes without clientEntry or with html', async () => {
+  it('requires CSR clientEntry and accepts server-rendered visual layout markup', async () => {
     mockFetch(() => jsonResponse({ ...csrFixture, clientEntry: null }));
-    let err = await fetchNavigation('/dashboard/settings').catch((e) => e);
+    const err = await fetchNavigation('/dashboard/settings').catch((e) => e);
     expect(err).toBeInstanceOf(NavigationError);
     expect(err.code).toBe('bad-envelope');
 
     mockFetch(() =>
       jsonResponse({ ...csrFixture, html: '<p>server html</p>' })
     );
-    err = await fetchNavigation('/dashboard/settings').catch((e) => e);
-    expect(err).toBeInstanceOf(NavigationError);
-    expect(err.code).toBe('bad-envelope');
+    const response = await fetchNavigation('/dashboard/settings');
+    expect(response.html).toBe('<p>server html</p>');
   });
 
   it('rejects non-object JSON payloads', async () => {

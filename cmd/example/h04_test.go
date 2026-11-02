@@ -156,7 +156,7 @@ func TestH04ProductionShellInjectsScriptsAndKeepsMount(t *testing.T) {
 // never fabricated by the HTTP handlers. The Go side declares the chain;
 // the shell itself stays mode-agnostic and the client resolves mounting.
 func TestH04LayoutAncestryFromManifest(t *testing.T) {
-	want := []string{"app/layout.templ", "app/dashboard/layout.svelte"}
+	want := []string{"app/dashboard/layout.svelte"}
 	for _, path := range []string{"/dashboard", "/dashboard/settings"} {
 		r := h04CSRRoute(t, path)
 		if r.Mode != routing.ModeCSR {

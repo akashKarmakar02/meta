@@ -84,17 +84,14 @@ func RoutesFile(m routing.Manifest) ([]byte, error) {
 	// generated fallback returns a typed error instead of panicking —
 	// no runtime nil-pointer or panic path exists for missing bindings.
 	b.WriteString("// SSRPage returns the templ-generated page component for an SSR route,\n")
-	b.WriteString("// composed with its layout chain (D06). Route.Layouts is ordered\n")
-	b.WriteString("// outermost to innermost; composition wraps from the innermost\n")
-	b.WriteString("// layout outward, so the outermost layout owns the HTML document.\n")
+	b.WriteString("// composed with its selected visual layout, if any.\n")
 	b.WriteString("func SSRPage(r routing.Route) (templ.Component, error) {\n")
 	for _, r := range m.Routes {
 		if r.Mode != routing.ModeSSR {
 			continue
 		}
 		fmt.Fprintf(&b, "\tif r.ID == %q {\n", r.ID)
-		// Compose layouts innermost-first so the outermost layout owns the
-		// document: Layouts is [outermost..innermost], so wrap in reverse.
+		// Discovery has selected at most one visual layout.
 		expr := fmt.Sprintf("page%d.%s()", ssrIndex(r, m), pageSymbol(r))
 		for i := len(r.Layouts) - 1; i >= 0; i-- {
 			l := r.Layouts[i]
@@ -104,6 +101,15 @@ func RoutesFile(m routing.Manifest) ([]byte, error) {
 	}
 	fmt.Fprintf(&b, "\treturn nil, fmt.Errorf(%q, r.ID)\n", "routes: SSRPage: no component mapped for route %s (check that the page file exists and exports the expected templ component)")
 	b.WriteString("}\n\n")
+	b.WriteString("// VisualLayout wraps content in the selected templ layout, if any.\n")
+	b.WriteString("func VisualLayout(r routing.Route, content templ.Component) (templ.Component, error) {\n")
+	for _, r := range m.Routes {
+		if len(r.Layouts) == 1 && r.Layouts[0].Mode == routing.ModeSSR {
+			l := r.Layouts[0]
+			fmt.Fprintf(&b, "\tif r.ID == %q { return layout%d.%s(content), nil }\n", r.ID, layoutIndex(layouts, l.SourceFile), layoutSymbol(l.SourceFile))
+		}
+	}
+	b.WriteString("\treturn content, nil\n}\n\n")
 
 	// BarePage resolves the same page component WITHOUT layout composition.
 	// Soft navigation (F02) carries only the page outlet in the
@@ -219,9 +225,6 @@ func layoutSources(m routing.Manifest) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, r := range m.Routes {
-		if r.Mode != routing.ModeSSR {
-			continue
-		}
 		for _, l := range r.Layouts {
 			if l.Mode != routing.ModeSSR {
 				continue

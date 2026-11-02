@@ -1,22 +1,15 @@
 // Layout stack identity and persistence planning (blueprint §4.3, §5.2
 // steps 7-8; task G01).
 //
-// A LAYOUT STACK is a chain of layout IDs ordered OUTERMOST to INNERMOST
-// — exactly the order the Go server emits in NavigationResponse.layouts,
-// derived from the generated route manifest (routes_gen.go Route.Layouts),
-// which mirrors the app tree. Each ID (e.g. "app/layout.templ",
-// "app/dashboard/layout.svelte") names one layout FILE; the same ID always
-// means the same layout, which is what makes stacks comparable.
+// A route declares zero or one nearest visual-layout ID. These helpers
+// compare mounted client instances with that declaration. The generic
+// sequence operations can also detect inconsistent mounted states.
 //
 // Two DIFFERENT kinds of stacks exist, and conflating them is the classic
 // bug this module exists to prevent:
 //
-// - DECLARED ancestry: what route metadata says SHOULD wrap a page. It is
-//   a wish, not a fact about the DOM. A directly-loaded CSR shell (the
-//   bare boot document Fiber serves for /dashboard on a hard navigation)
-//   declares ["app/layout.templ", ...] in its envelope but contains NO
-//   root layout markup at all — the shell document mounts nothing but the
-//   page itself.
+// - DECLARED layout: what route metadata says SHOULD wrap a page. It is
+//   not proof that a client instance has mounted.
 // - MOUNTED ancestry: what layout INSTANCES actually exist in the current
 //   document, read from DOM markers ([data-go-layout] elements, emitted by
 //   templ layouts) plus, from G02 on, client-side layout instance records.
@@ -84,9 +77,7 @@ export class LayoutStackError extends Error {
  * deliberate restriction, surfaced as an error — never a silent guess):
  * - every entry must be a string (after trimming) naming a file path;
  * - blank/whitespace-only entries are invalid;
- * - an ID may appear AT MOST ONCE in a stack: one ID names one layout
- *   instance, so a repeated ID claims the same wrapper twice — an
- *   ambiguous hierarchy the Phase 1 runtime refuses rather than guesses.
+ * - there may be at most one ID, because a route selects one visual layout.
  *
  * Returns a new array of trimmed IDs, or null when the input is not a
  * valid stack.
@@ -94,6 +85,7 @@ export class LayoutStackError extends Error {
 export function normalizeLayoutStack(
   ids: readonly unknown[]
 ): LayoutId[] | null {
+  if (ids.length > 1) return null;
   const out: LayoutId[] = [];
   for (const id of ids) {
     if (typeof id !== 'string') return null;

@@ -93,8 +93,8 @@ func TestRouteRegistryTSIncludesLayoutLoader(t *testing.T) {
 func TestRouteRegistryTSIncludesRouteLayouts(t *testing.T) {
 	src := RouteRegistryTS(fixtureCSRManifest(t))
 	for _, want := range []string{
-		`"dashboard/page.svelte": ["app/layout.templ", "app/dashboard/layout.svelte"],`,
-		`"dashboard/settings/page.svelte": ["app/layout.templ", "app/dashboard/layout.svelte"],`,
+		`"dashboard/page.svelte": ["app/dashboard/layout.svelte"],`,
+		`"dashboard/settings/page.svelte": ["app/dashboard/layout.svelte"],`,
 		`"about/page.templ": ["app/layout.templ"],`,
 	} {
 		if !strings.Contains(src, want) {

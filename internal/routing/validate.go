@@ -75,50 +75,20 @@ func validateDynamicAmbiguity(routes []Route) error {
 	return nil
 }
 
-// validateLayoutChain enforces the Phase 1 layout ownership rules
-// (blueprint §4.3):
-//
-//   - An SSR layout (layout.templ) may wrap anything, including CSR
-//     layouts and CSR pages: the root Go layout owns the document while a
-//     nested Svelte layout owns its client DOM subtree.
-//   - Once a chain contains a CSR layout, nothing deeper may be SSR: an
-//     SSR layout or SSR page cannot render inside a client-only Svelte
-//     subtree. That includes an SSR page sitting directly inside a
-//     layout.svelte directory.
-//
-// Same-directory layout.templ + layout.svelte is already rejected during
-// discovery (blueprint §3.4).
+// validateLayoutChain enforces the single visual-layout contract and the
+// combinations the Go and client-only Svelte renderers can actually serve.
 func validateLayoutChain(r Route) error {
-	csrSeen := false
-	for _, l := range r.Layouts {
-		if l.Mode == ModeCSR {
-			csrSeen = true
-			continue
-		}
-		if csrSeen && l.Mode == ModeSSR {
-			return fmt.Errorf(
-				"routing: route %q: SSR layout %q cannot nest beneath CSR layout %q: server-rendered layouts cannot live inside a client Svelte subtree",
-				r.Path, l.SourceFile, innermostCSR(r.Layouts),
-			)
-		}
+	if len(r.Layouts) > 1 {
+		return fmt.Errorf("routing: route %q has multiple visual layouts: select only the nearest layout", r.Path)
 	}
-	if csrSeen && r.Mode == ModeSSR {
+	if len(r.Layouts) == 1 && r.Layouts[0].Mode == ModeSSR && pathHasParamSegment(r.Layouts[0].SourceFile) {
+		return fmt.Errorf("routing: templ layout %q is inside a dynamic segment directory: Go import paths cannot contain brackets; move the layout outside the dynamic segment or use layout.svelte", r.Layouts[0].SourceFile)
+	}
+	if len(r.Layouts) == 1 && r.Layouts[0].Mode == ModeCSR && r.Mode == ModeSSR {
 		return fmt.Errorf(
 			"routing: route %q: SSR page %q cannot render beneath CSR layout %q: move the page into a directory without a layout.svelte ancestor, or make it page.svelte",
-			r.Path, r.SourceFile, innermostCSR(r.Layouts),
+			r.Path, r.SourceFile, r.Layouts[0].SourceFile,
 		)
 	}
 	return nil
-}
-
-// innermostCSR returns the deepest CSR layout source path in the chain,
-// for use in error messages.
-func innermostCSR(layouts []Layout) string {
-	deepest := ""
-	for _, l := range layouts {
-		if l.Mode == ModeCSR {
-			deepest = l.SourceFile
-		}
-	}
-	return deepest
 }

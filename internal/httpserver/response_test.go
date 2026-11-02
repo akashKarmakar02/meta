@@ -69,7 +69,7 @@ func TestNavigationCSRFixture(t *testing.T) {
 	if resp.ClientEntry == nil || *resp.ClientEntry != entry {
 		t.Errorf("clientEntry = %v, want %q", resp.ClientEntry, entry)
 	}
-	wantLayouts := []string{"app/layout.templ", "app/dashboard/layout.svelte"}
+	wantLayouts := []string{"app/dashboard/layout.svelte"}
 	if len(resp.Layouts) != len(wantLayouts) {
 		t.Fatalf("layouts = %v, want %v", resp.Layouts, wantLayouts)
 	}

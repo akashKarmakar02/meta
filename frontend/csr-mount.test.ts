@@ -114,10 +114,9 @@ describe('mountCsrPage (F08)', () => {
     const root = document.querySelector(PageRootSelector) as HTMLElement;
     expect(root.querySelectorAll('[data-go-page="dashboard"]')).toHaveLength(0);
     expect(root.querySelectorAll('h1')).toHaveLength(1);
-    // One page main and one nav (CSR pages render the shared SiteNav),
-    // never a second copy of anything across repeated mounts.
+    // The page does not supply a visual layout of its own.
     expect(root.querySelectorAll('[data-go-page="dashboard/settings"]')).toHaveLength(1);
-    expect(root.querySelectorAll('[data-go-site-nav]')).toHaveLength(1);
+    expect(root.querySelectorAll('[data-go-site-nav]')).toHaveLength(0);
   });
 
   it('creates a page root inside the F07 outlet when entering CSR from an SSR page', async () => {

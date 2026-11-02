@@ -40,7 +40,7 @@ const dashboardEnv: NavigationResponse = {
   routeId: 'dashboard/page.svelte',
   mode: 'csr',
   title: 'Dashboard',
-  layouts: ['app/layout.templ', DASHBOARD_LAYOUT_ID],
+  layouts: [DASHBOARD_LAYOUT_ID],
   html: '',
   clientEntry: 'dashboard/page.svelte',
 };
@@ -51,7 +51,7 @@ const settingsEnv: NavigationResponse = {
   routeId: 'dashboard/settings/page.svelte',
   mode: 'csr',
   title: 'Settings',
-  layouts: ['app/layout.templ', DASHBOARD_LAYOUT_ID],
+  layouts: [DASHBOARD_LAYOUT_ID],
   html: '',
   clientEntry: 'dashboard/settings/page.svelte',
 };
@@ -84,22 +84,20 @@ beforeAll(async () => {
 describe('G05: clientLayoutSequence (retention planning base)', () => {
   it('keeps only client layout IDs, order preserved', () => {
     expect(
-      clientLayoutSequence(['app/layout.templ', DASHBOARD_LAYOUT_ID])
+      clientLayoutSequence([DASHBOARD_LAYOUT_ID])
     ).toEqual([DASHBOARD_LAYOUT_ID]);
     expect(clientLayoutSequence(['app/layout.templ'])).toEqual([]);
-    // The bare boot shell (no server markup) retains its client layouts:
-    // mounted [] vs declared [templ, svelte] must plan ENTRY only.
+    // A directly loaded shell has no client instance until it mounts.
     const t = layoutStackTransition(
       clientLayoutSequence([]),
-      clientLayoutSequence(['app/layout.templ', DASHBOARD_LAYOUT_ID])
+      clientLayoutSequence([DASHBOARD_LAYOUT_ID])
     );
     expect(t.discard).toEqual([]);
     expect(t.enter).toEqual([DASHBOARD_LAYOUT_ID]);
-    // Direct-loaded shell vs settings destination: no discard — a
-    // phantom discard here was the bug that broke real-browser swaps.
+    // A mounted dashboard layout is retained by the settings page.
     const t2 = layoutStackTransition(
       clientLayoutSequence([DASHBOARD_LAYOUT_ID]),
-      clientLayoutSequence(['app/layout.templ', DASHBOARD_LAYOUT_ID])
+      clientLayoutSequence([DASHBOARD_LAYOUT_ID])
     );
     expect(t2.discard).toEqual([]);
     expect(t2.enter).toEqual([]);
@@ -369,6 +367,57 @@ describe('G05: pipeline integration — soft navigation inside the subtree', () 
       document.querySelector(`[data-go-layout="${CSS.escape(DASHBOARD_LAYOUT_ID)}"]`)
     ).toBe(marker);
     __setHandlesForTesting({ fetch: null, hardNavigate: null });
+  });
+
+  it('keeps the current page and layout when the destination layout cannot load', async () => {
+    document.body.innerHTML = `<div data-go-page-outlet><h1>About</h1></div>`;
+    const badLayout: NavigationResponse = {
+      ...settingsEnv,
+      layouts: ['app/missing/layout.svelte'],
+    };
+    let hardNav: string | null = null;
+    const { __setHandlesForTesting } = navigationPipelineModule();
+    __setHandlesForTesting({
+      fetch: ((url: string) => Promise.resolve(
+        new URL(url, document.baseURI).pathname === '/dashboard' ? dashboardEnv : badLayout
+      )) as unknown as typeof import('./navigation').fetchNavigation,
+      hardNavigate: (url: string) => { hardNav = url; },
+    });
+    await navigateTo('/dashboard');
+    const marker = document.querySelector(`[data-go-layout="${CSS.escape(DASHBOARD_LAYOUT_ID)}"]`);
+    const page = document.querySelector('[data-go-page="dashboard"]');
+    await navigateTo('/dashboard/settings');
+    expect(hardNav).toBe('/dashboard/settings');
+    expect(document.querySelector(`[data-go-layout="${CSS.escape(DASHBOARD_LAYOUT_ID)}"]`)).toBe(marker);
+    expect(document.querySelector('[data-go-page="dashboard"]')).toBe(page);
+    __setHandlesForTesting({ fetch: null, hardNavigate: null });
+  });
+
+  it('disposes the old layout and mounts a different selected layout', async () => {
+    const { layoutLoaders } = await import('./route-registry.generated');
+    layoutLoaders['app/alternate/layout.svelte'] = () => import('./test-pages/alternate-layout.svelte');
+    document.body.innerHTML = `<div data-go-page-outlet><h1>About</h1></div>`;
+    const alternate: NavigationResponse = {
+      ...settingsEnv,
+      layouts: ['app/alternate/layout.svelte'],
+    };
+    const { __setHandlesForTesting } = navigationPipelineModule();
+    __setHandlesForTesting({
+      fetch: ((url: string) => Promise.resolve(
+        new URL(url, document.baseURI).pathname === '/dashboard' ? dashboardEnv : alternate
+      )) as unknown as typeof import('./navigation').fetchNavigation,
+    });
+    try {
+      await navigateTo('/dashboard');
+      await navigateTo('/dashboard/settings');
+      expect(document.querySelector(`[data-go-layout="${CSS.escape(DASHBOARD_LAYOUT_ID)}"]`)).toBeNull();
+      expect(document.querySelectorAll('[data-go-layout="app/alternate/layout.svelte"]')).toHaveLength(1);
+      expect(document.querySelectorAll('[data-go-page-root]')).toHaveLength(1);
+      expect(document.querySelector('[data-go-page="dashboard/settings"]')).not.toBeNull();
+    } finally {
+      delete layoutLoaders['app/alternate/layout.svelte'];
+      __setHandlesForTesting({ fetch: null });
+    }
   });
 
   it('stale navigation cannot overwrite a newer child page', async () => {

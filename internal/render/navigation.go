@@ -72,9 +72,8 @@ func requestURL(c fiber.Ctx) string {
 	return u
 }
 
-// NavigationEnvelope builds the navigation response for an SSR route:
-// bare page outlet HTML (layouts persist client-side, blueprint 5.2
-// step 9), route metadata, and layout chain by stable ID.
+// NavigationEnvelope builds an SSR envelope and extracts the page title.
+// The handler replaces HTML with the selected visual layout and page.
 func NavigationEnvelope(c fiber.Ctx, route routing.Route, bareHTML string) httpserver.NavigationResponse {
 	return httpserver.NavigationResponse{
 		Version: httpserver.NavigationVersion,
@@ -105,9 +104,8 @@ func csrTitle(path string) string {
 
 // CSRNavigationEnvelope builds the navigation response for a CSR route:
 // no server-rendered HTML — the browser mounts the page component — with
-// clientEntry set to the stable source-derived route ID the generated
-// import registry is keyed by (blueprint 5.1). Layouts report the
-// discovered ancestry as it exists today, never fabricated chains.
+// clientEntry set to the stable source-derived route ID. The handler adds
+// server-rendered visual-layout HTML when the selected layout is templ.
 func CSRNavigationEnvelope(c fiber.Ctx, route routing.Route) httpserver.NavigationResponse {
 	entry := route.ID
 	return httpserver.NavigationResponse{
@@ -171,10 +169,10 @@ func InjectBeforeTag(document, tag, tags string) string {
 // either the composed full document (normal GET, with the client entry
 // script so soft navigation boots on server-rendered pages too — blueprint
 // §6: the backend emits manifest-resolved asset URLs into HTML) or the
-// bare page outlet inside a navigation envelope (header present). The
+// selected visual layout and page in a navigation envelope. The
 // resolvers come from generated code; render stays decoupled from the
 // routes package. Nil assets keeps the fixture/test mode scriptless.
-func SSRNavigationHandler(route routing.Route, assets *httpserver.Assets, composed, bare PageResolver) fiber.Handler {
+func SSRNavigationHandler(route routing.Route, assets *httpserver.Assets, composed, bare PageResolver, resolve VisualLayoutResolver) fiber.Handler {
 	tags := entryTags(assets)
 	return func(c fiber.Ctx) error {
 		if !IsNavigationRequest(c) {
@@ -187,7 +185,7 @@ func SSRNavigationHandler(route routing.Route, assets *httpserver.Assets, compos
 				return fmt.Errorf("render %s: %w", route.Path, err)
 			}
 			c.Set(fiber.HeaderContentType, "text/html; charset=utf-8")
-			return c.SendString(InjectBeforeTag(string(htmlDoc), "</body>", tags))
+			return c.SendString(document(string(htmlDoc), tags, "go-meta"))
 		}
 		bareComponent, err := bare(route)
 		if err != nil {
@@ -197,22 +195,45 @@ func SSRNavigationHandler(route routing.Route, assets *httpserver.Assets, compos
 		if err != nil {
 			return fmt.Errorf("render bare page %s: %w", route.Path, err)
 		}
-		return SendNavigation(c, NavigationEnvelope(c, route, string(bareHTML)))
+		// bareHTML is already escaped, server-owned templ output. Compose it
+		// once so the title and visible page come from the same render.
+		visual, err := resolve(route, templ.Raw(string(bareHTML)))
+		if err != nil {
+			return fmt.Errorf("routes: VisualLayout: %w", err)
+		}
+		visualHTML, err := RenderComponent(c.RequestCtx(), visual)
+		if err != nil {
+			return fmt.Errorf("render visual layout %s: %w", route.Path, err)
+		}
+		env := NavigationEnvelope(c, route, string(bareHTML))
+		env.HTML = string(visualHTML)
+		return SendNavigation(c, env)
 	}
 }
 
 // CSRNavigationHandler adapts a CSR route into a Fiber handler serving
 // either the boot shell (normal GET, E10 contract) or a navigation
 // envelope describing what the browser must mount (header present).
-// The server never renders Svelte components; html stays empty and
-// clientEntry carries the registry key for the browser to resolve
-// through the generated static import map.
-func CSRNavigationHandler(route routing.Route, assets *httpserver.Assets) fiber.Handler {
-	shell := ShellHandler(route, assets)
+// The server never renders Svelte components; HTML contains only a templ
+// visual layout and mount point when such a layout is selected.
+func CSRNavigationHandler(route routing.Route, assets *httpserver.Assets, resolvers ...VisualLayoutResolver) fiber.Handler {
+	var resolve VisualLayoutResolver
+	if len(resolvers) > 0 {
+		resolve = resolvers[0]
+	}
 	return func(c fiber.Ctx) error {
-		if !IsNavigationRequest(c) {
-			return shell(c)
+		visual, err := csrVisual(c.RequestCtx(), route, resolve)
+		if err != nil {
+			return err
 		}
-		return SendNavigation(c, CSRNavigationEnvelope(c, route))
+		if !IsNavigationRequest(c) {
+			c.Set(fiber.HeaderContentType, "text/html; charset=utf-8")
+			return c.SendString(document(visual, entryTags(assets), route.ID))
+		}
+		env := CSRNavigationEnvelope(c, route)
+		if len(route.Layouts) > 0 && route.Layouts[0].Mode == routing.ModeSSR {
+			env.HTML = visual
+		}
+		return SendNavigation(c, env)
 	}
 }

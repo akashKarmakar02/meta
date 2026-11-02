@@ -56,6 +56,41 @@ func TestVerifySymbolsRejection(t *testing.T) {
 	}
 }
 
+func TestCSRPageWithNearestTemplLayout(t *testing.T) {
+	fsys := fstest.MapFS{
+		"layout.templ":                   {Data: []byte("templ Layout(templ.Component) {}")},
+		"dashboard/layout.templ":         {Data: []byte("templ DashboardLayout(templ.Component) {}")},
+		"dashboard/page.svelte":          {Data: []byte("<main />")},
+		"dashboard/settings/page.svelte": {Data: []byte("<main />")},
+	}
+	routes, err := routing.Discover(fsys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := routing.NewManifest(routes)
+	if err := VerifySymbols(fsys, manifest); err != nil {
+		t.Fatal(err)
+	}
+	goSource, err := RoutesFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tsSource := RouteRegistryTS(manifest)
+	for _, route := range routes {
+		if len(route.Layouts) != 1 || route.Layouts[0].ID != "app/dashboard/layout.templ" {
+			t.Fatalf("%s: layouts = %+v", route.Path, route.Layouts)
+		}
+		for _, source := range []string{string(goSource), tsSource} {
+			if !strings.Contains(source, route.ID) || !strings.Contains(source, "app/dashboard/layout.templ") {
+				t.Errorf("generated source lacks route and layout identifiers: %s", source)
+			}
+		}
+	}
+	if !strings.Contains(string(goSource), "DashboardLayout(content)") {
+		t.Fatalf("CSR layout binding missing: %s", goSource)
+	}
+}
+
 // TestVerifySymbolsAccepts: a valid tree verifies cleanly, and a CSR-only
 // tree (no SSR routes at all) also verifies cleanly — no nonexistent SSR
 // component imports are demanded.

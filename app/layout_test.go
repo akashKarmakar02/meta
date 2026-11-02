@@ -19,17 +19,9 @@ func TestLayoutOutputsFullDocument(t *testing.T) {
 	got := b.String()
 
 	for _, want := range []string{
-		`<!doctype html>`,
-		`<html lang="en">`,
-		`<head>`,
-		`<meta charset="utf-8">`,
-		`<meta name="viewport" content="width=device-width, initial-scale=1">`,
-		`<title>go-meta</title>`,
-		`</head>`,
-		`<body>`,
+		`<div data-go-layout="app/layout.templ">`,
+		`<nav data-go-site-nav>`,
 		`<main id="p">page body</main>`,
-		`</body>`,
-		`</html>`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("layout output missing %q\noutput:\n%s", want, got)
@@ -47,7 +39,7 @@ func TestLayoutContentIsComposable(t *testing.T) {
 		t.Fatalf("render: %v", err)
 	}
 	got := strings.TrimSpace(b.String())
-	wantSuffix := `<nav data-go-site-nav><ul><li><a href="/">Home</a></li><li><a href="/about">About</a></li><li><a href="/docs">Docs</a></li><li><a href="/dashboard">Dashboard</a></li><li><a href="/dashboard/settings">Settings</a></li><li><a href="/products/new">New product</a></li></ul></nav><div data-go-page-outlet>X</div></div></body></html>`
+	wantSuffix := `<nav data-go-site-nav><ul><li><a href="/">Home</a></li><li><a href="/about">About</a></li><li><a href="/docs">Docs</a></li><li><a href="/dashboard">Dashboard</a></li><li><a href="/dashboard/settings">Settings</a></li><li><a href="/products/new">New product</a></li></ul></nav>X</div>`
 	if !strings.HasSuffix(got, wantSuffix) {
 		t.Errorf("content should render inside the page outlet, last before </body>, want suffix %q, got:\n%s", wantSuffix, got)
 	}

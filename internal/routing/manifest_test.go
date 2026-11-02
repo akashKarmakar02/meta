@@ -175,8 +175,8 @@ func TestRouteStableIDs(t *testing.T) {
 			t.Errorf("route %s ID = %q, want %q", path, r.ID, wantID)
 		}
 	}
-	if byPath["/dashboard"].Layouts[1].ID != "app/dashboard/layout.svelte" {
+	if byPath["/dashboard"].Layouts[0].ID != "app/dashboard/layout.svelte" {
 		t.Errorf("nested layout ID = %q, want app/dashboard/layout.svelte",
-			byPath["/dashboard"].Layouts[1].ID)
+			byPath["/dashboard"].Layouts[0].ID)
 	}
 }

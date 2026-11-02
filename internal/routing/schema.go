@@ -49,8 +49,7 @@ type Route struct {
 	SourceFile string `json:"sourceFile"`
 	// Mode is the rendering mode of the page.
 	Mode RenderMode `json:"mode"`
-	// Layouts is the wrapping chain, outermost first (root layout at
-	// index 0, the innermost layout last).
+	// Layouts contains the nearest visual layout, or is empty if none exists.
 	Layouts []Layout `json:"layouts"`
 }
 

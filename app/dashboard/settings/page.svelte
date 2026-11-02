@@ -1,5 +1,4 @@
 <script lang="ts">
-  import SiteNav from '../../components/SiteNav.svelte';
   let saved = $state(false);
 
   function save(): void {
@@ -7,7 +6,6 @@
   }
 </script>
 
-<SiteNav />
 <main data-go-page="dashboard/settings">
   <h1>Settings</h1>
   <p>Notification preferences, appearance, and account settings live here.</p>

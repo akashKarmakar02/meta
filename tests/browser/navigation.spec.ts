@@ -261,7 +261,7 @@ test.describe('G07: graceful subtree exit /dashboard → /about', () => {
     await expect(page.locator('[data-go-layout-counter]')).toHaveText('Layout count: 1');
 
     // The exit under test — trusted click to a route outside the subtree.
-    await page.click('nav[data-go-site-nav] a[href="/about"]');
+    await page.click('a[href="/about"]');
     await expect(page.locator('[data-go-page-about]')).toBeVisible();
 
     // Soft navigation, not a reload.
@@ -305,7 +305,7 @@ test.describe('G07: graceful subtree exit /dashboard → /about', () => {
     await page.click('[data-go-dashboard-side-nav] a[href="/dashboard/settings"]');
     await expect(page.locator('[data-go-page-root] h1')).toHaveText('Settings');
 
-    await page.click('nav[data-go-site-nav] a[href="/about"]');
+    await page.click('a[href="/about"]');
     await expect(page.locator('[data-go-page-about]')).toBeVisible();
     expect(
       await page.evaluate(
@@ -324,7 +324,7 @@ test.describe('G07: graceful subtree exit /dashboard → /about', () => {
       await page.click('nav[data-go-site-nav] a[href="/dashboard"]');
       await expect(page.locator('[data-go-page-root] h1')).toHaveText('Dashboard');
       expect(await page.locator('[data-go-layout-shell-host]').count()).toBe(1);
-      await page.click('nav[data-go-site-nav] a[href="/about"]');
+      await page.click('a[href="/about"]');
       await expect(page.locator('[data-go-page-about]')).toBeVisible();
       expect(await page.locator('[data-go-layout-shell-host]').count()).toBe(0);
       expect(await page.locator('[data-go-page-root]').count()).toBe(0);
@@ -393,7 +393,7 @@ test.describe('G08: fresh layout state on re-entry', () => {
     await expect(page.locator('[data-go-layout-counter]')).toHaveText('Layout count: 2');
 
     // Completed exit: old layout host gone.
-    await page.click('nav[data-go-site-nav] a[href="/about"]');
+    await page.click('a[href="/about"]');
     await expect(page.locator('[data-go-page-about]')).toBeVisible();
     await expect(page.locator('[data-go-layout-shell-host]')).toHaveCount(0);
     expect(
@@ -445,7 +445,7 @@ test.describe('G08: fresh layout state on re-entry', () => {
     await expect(page.locator('[data-go-layout-counter]')).toHaveText('Layout count: 1');
 
     // Exit, then Back into the subtree: history must not resurrect state.
-    await page.click('nav[data-go-site-nav] a[href="/about"]');
+    await page.click('a[href="/about"]');
     await expect(page.locator('[data-go-page-about]')).toBeVisible();
     await page.goBack();
     await expect(page.locator('[data-go-page-root] h1')).toHaveText('Dashboard');
@@ -469,7 +469,7 @@ test.describe('G08: fresh layout state on re-entry', () => {
       await expect(page.locator('[data-go-page-root] h1')).toHaveText('Dashboard');
       await page.click('[data-go-layout-counter-button]');
       await expect(page.locator('[data-go-layout-counter]')).toContainText('Layout count: 1');
-      await page.click('nav[data-go-site-nav] a[href="/about"]');
+      await page.click('a[href="/about"]');
       await expect(page.locator('[data-go-page-about]')).toBeVisible();
       await expect(page.locator('[data-go-layout-shell-host]')).toHaveCount(0);
     }

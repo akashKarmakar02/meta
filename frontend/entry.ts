@@ -27,7 +27,7 @@ import {
   LayoutHostAttr,
   type LayoutInstanceHandle,
 } from './layout-mount';
-import { startSoftNavigation, adoptMountedInstances } from './navigation-pipeline';
+import { startSoftNavigation, adoptMountedInstances, adoptMountedPage } from './navigation-pipeline';
 import type { NavigationResponse } from './types';
 
 const PageRootSelector = '[data-go-page-root]';
@@ -124,6 +124,9 @@ void boot().finally(() => {
       // just not state-preserving. Never block activation on handover.
     }
     currentLayout = null;
+    currentPage = null;
+  } else if (bootPage) {
+    adoptMountedPage(bootPage);
     currentPage = null;
   }
   // Activate SPA navigation once the initial mount is underway. The pipeline

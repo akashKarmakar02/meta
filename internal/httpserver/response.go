@@ -15,7 +15,8 @@ const NavigationHeader = "X-Go-Web-Navigation"
 // frontend/types.ts field-for-field. Both sides are pinned to the same
 // checked-in fixtures (tests/fixtures) so the contract cannot drift.
 //
-// HTML carries server-owned templ output only. ClientEntry maps to the
+// HTML carries server-owned templ output only, including the visual layout
+// and (for CSR under templ) the page mount. ClientEntry maps to the
 // generated static import registry; it is never evaluated as a path.
 type NavigationResponse struct {
 	Version     int      `json:"version"`

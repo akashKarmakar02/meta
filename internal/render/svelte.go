@@ -3,13 +3,59 @@
 package render
 
 import (
+	"context"
+	"fmt"
 	"html"
+	"io"
+	"strings"
+
+	"github.com/a-h/templ"
 
 	"github.com/gofiber/fiber/v3"
 
 	"go-meta/internal/httpserver"
 	"go-meta/internal/routing"
 )
+
+// VisualLayoutResolver applies the selected server-owned visual layout.
+type VisualLayoutResolver func(routing.Route, templ.Component) (templ.Component, error)
+
+func document(content, tags, title string) string {
+	styles, script := tags, ""
+	if i := strings.Index(tags, "<script"); i >= 0 {
+		styles, script = tags[:i], tags[i:]
+	}
+	return "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">" +
+		"<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>" +
+		html.EscapeString(title) + "</title>" + styles + "</head><body><div data-go-page-outlet>" +
+		content + "</div>" + script + "</body></html>"
+}
+
+func csrMountMarkup(route routing.Route) string {
+	id := html.EscapeString(route.ID)
+	path := html.EscapeString(route.Path)
+	return "<div id=\"" + MountID + "\" " + PageRootAttr + " " + RouteAttr + "=\"" + path + "\" " + RouteIDAttr + "=\"" + id + "\"></div>"
+}
+
+func csrVisual(ctx context.Context, route routing.Route, resolve VisualLayoutResolver) (string, error) {
+	markup := csrMountMarkup(route)
+	if resolve == nil {
+		if len(route.Layouts) > 0 && route.Layouts[0].Mode == routing.ModeSSR {
+			return "", fmt.Errorf("missing templ visual-layout resolver for route %q", route.ID)
+		}
+		return markup, nil
+	}
+	component := templ.ComponentFunc(func(_ context.Context, w io.Writer) error {
+		_, err := io.WriteString(w, markup)
+		return err
+	})
+	wrapped, err := resolve(route, component)
+	if err != nil {
+		return "", fmt.Errorf("resolve visual layout: %w", err)
+	}
+	data, err := RenderComponent(ctx, wrapped)
+	return string(data), err
+}
 
 // Shell renders the minimal HTML5 document served for CSR (page.svelte)
 // routes. The browser receives this shell on direct navigation or reload;
@@ -23,32 +69,7 @@ import (
 // come from the manifest via httpserver.Assets — never hardcoded. The
 // E09 static middleware serves them under the same /assets prefix.
 func Shell(route routing.Route, assets *httpserver.Assets) string {
-	// Route ID and path come from our own generated manifest (already
-	// validated, slash-normalized paths), but escape anyway so no route
-	// naming choice can ever inject markup into the document.
-	id := html.EscapeString(route.ID)
-	path := html.EscapeString(route.Path)
-
-	head := "<!DOCTYPE html>\n" +
-		"<html lang=\"en\">\n" +
-		"<head>\n" +
-		"<meta charset=\"utf-8\">\n" +
-		"<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n" +
-		"<title>" + id + "</title>\n"
-	if assets != nil {
-		for _, css := range assets.EntryCSSURLs {
-			head += "<link rel=\"stylesheet\" href=\"" + html.EscapeString(css) + "\">\n"
-		}
-	}
-	head += "</head>\n" +
-		"<body>\n" +
-		"<div id=\"" + MountID + "\" " + PageRootAttr + " " + RouteAttr + "=\"" + path + "\" " + RouteIDAttr + "=\"" + id + "\"></div>\n"
-	if assets != nil {
-		head += "<script type=\"module\" src=\"" + html.EscapeString(assets.EntryScriptURL) + "\"></script>\n"
-	}
-	head += "</body>\n" +
-		"</html>\n"
-	return head
+	return document(csrMountMarkup(route), entryTags(assets), route.ID)
 }
 
 // ShellHandler returns a Fiber handler that responds with the rendered

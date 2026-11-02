@@ -81,7 +81,8 @@ export async function swapLayoutChildPage(
   layout: { readonly outlet: HTMLElement },
   env: NavigationResponse,
   component: unknown,
-  outgoing?: MountHandle | null
+  outgoing?: MountHandle | null,
+  assertCurrent?: () => void
 ): Promise<ChildPageHandle> {
   if (!component) {
     // Resolve-before-teardown discipline mirrored from csr-mount: fail
@@ -99,6 +100,7 @@ export async function swapLayoutChildPage(
   if (outgoing) {
     await outgoing.unmount();
   }
+  assertCurrent?.();
 
   // Fresh page mount root in the outlet INTERIOR. createLayoutPageRoot
   // clears the runtime-owned interior (any remnant of the outgoing page

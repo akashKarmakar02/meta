@@ -6,6 +6,17 @@ soft navigation.
 
 The implementation plan lives in [`phase1-implementation-blueprint.md`](phase1-implementation-blueprint.md).
 
+## Visual layouts
+
+Each page uses the nearest ancestor `layout.templ` or `layout.svelte`,
+including one in its own directory. More distant layouts are not composed.
+The framework supplies the HTML document independently. A templ layout may
+wrap a templ or Svelte page; a Svelte layout supports Svelte pages. A templ
+page under a Svelte layout is rejected because Svelte is client-only. Templ
+layouts in dynamic `[parameter]` directories are also rejected because
+their generated Go packages cannot use bracketed import paths. Two layout
+files in the same directory are an error.
+
 ## Toolchain requirements
 
 - **Go 1.26+** is required. The Fiber v3 documentation lists Go 1.26 as the

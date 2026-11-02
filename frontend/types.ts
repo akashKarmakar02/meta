@@ -21,7 +21,9 @@ export type NavigationMode = 'ssr' | 'csr';
  * - `html` carries server-owned templ output only; never executable content.
  * - `clientEntry` maps to the generated static import registry, never an
  *   evaluated path; null for SSR routes.
- * - `layouts` are stable source IDs used to find the longest shared prefix.
+ * - `layouts` contains zero or one stable visual-layout ID.
+ * - `html` includes the server-owned visual layout when one is selected,
+ *   including the mount element for a Svelte page in a templ layout.
  */
 export interface NavigationResponse {
   version: number;

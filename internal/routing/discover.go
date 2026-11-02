@@ -10,10 +10,8 @@ import (
 
 // Discover walks an fs.FS rooted at the app directory and describes every
 // page route it finds. B07 scope: page.templ/page.svelte classification
-// plus layout.templ (SSR) and layout.svelte (CSR) discovery and ancestry
-// resolution (outermost -> innermost). Same-directory layout conflicts are
-// rejected; mixed-mode chain validation and other collision rules arrive in
-// later tasks.
+// plus layout.templ (SSR) and layout.svelte (CSR) discovery. Each page
+// selects the nearest layout; same-directory conflicts are rejected.
 //
 // Route output is deterministic: sorted by normalized path.
 //
@@ -93,24 +91,17 @@ func Discover(fsys fs.FS) ([]Route, error) {
 	return routes, nil
 }
 
-// layoutChain resolves the layout ancestry for a route whose page lives in
-// routeDir: every ancestor directory (root first, page directory last) that
-// holds a layout contributes one entry, ordered outermost -> innermost.
+// layoutChain returns the nearest visual layout, if any.
 func layoutChain(routeDir string, layouts map[string]Layout) []Layout {
-	var chain []Layout
 	for dir := routeDir; ; dir = path.Dir(dir) {
 		if l, ok := layouts[dir]; ok {
-			chain = append(chain, l)
+			return []Layout{l}
 		}
 		if dir == "." {
 			break
 		}
 	}
-	// Collected innermost-first; reverse to outermost-first.
-	for i, j := 0, len(chain)-1; i < j; i, j = i+1, j-1 {
-		chain[i], chain[j] = chain[j], chain[i]
-	}
-	return chain
+	return nil
 }
 
 // classifyPage maps a filename to its render mode. Only exact page

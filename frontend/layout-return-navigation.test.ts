@@ -37,7 +37,7 @@ const dashboardEnv: NavigationResponse = {
   routeId: 'dashboard/page.svelte',
   mode: 'csr',
   title: 'Dashboard',
-  layouts: ['app/layout.templ', DASHBOARD_LAYOUT_ID],
+  layouts: [DASHBOARD_LAYOUT_ID],
   html: '',
   clientEntry: 'dashboard/page.svelte',
 };
@@ -48,7 +48,7 @@ const settingsEnv: NavigationResponse = {
   routeId: 'dashboard/settings/page.svelte',
   mode: 'csr',
   title: 'Settings',
-  layouts: ['app/layout.templ', DASHBOARD_LAYOUT_ID],
+  layouts: [DASHBOARD_LAYOUT_ID],
   html: '',
   clientEntry: 'dashboard/settings/page.svelte',
 };

@@ -178,22 +178,21 @@ function validateNavigationResponse(parsed: unknown, sourceURL: string): Navigat
   if (!Array.isArray(env.layouts) || env.layouts.some((l) => typeof l !== 'string')) {
     fail('layouts must be an array of strings');
   }
+  if ((env.layouts as unknown[]).length > 1) {
+    fail('at most one visual layout is supported');
+  }
   if (typeof env.html !== 'string') {
     fail('missing or invalid html');
   }
 
-  // Mode-specific rules (5.1): SSR carries server-owned outlet html and
-  // no clientEntry; CSR carries a clientEntry naming the page component
-  // in the generated registry and empty html.
+  // SSR has no client entry. CSR has an entry and may include a
+  // server-rendered templ visual layout with its page mount point.
   if (env.mode === 'ssr' && env.clientEntry !== null && env.clientEntry !== undefined) {
     fail('ssr envelope must not carry clientEntry');
   }
   if (env.mode === 'csr') {
     if (typeof env.clientEntry !== 'string' || env.clientEntry === '') {
       fail('csr envelope requires a clientEntry route ID');
-    }
-    if (env.html !== '') {
-      fail('csr envelope html must be empty');
     }
   }
 

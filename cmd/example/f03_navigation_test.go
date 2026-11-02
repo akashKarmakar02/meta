@@ -78,10 +78,9 @@ func TestF03DashboardNavigationEnvelope(t *testing.T) {
 	}
 	// G02: app/dashboard/layout.svelte exists, so /dashboard's declared
 	// ancestry is now the full chain, outermost first.
-	if len(env.Layouts) != 2 ||
-		env.Layouts[0] != "app/layout.templ" ||
-		env.Layouts[1] != "app/dashboard/layout.svelte" {
-		t.Errorf("layouts = %v, want [app/layout.templ app/dashboard/layout.svelte] (actual ancestry)", env.Layouts)
+	if len(env.Layouts) != 1 ||
+		env.Layouts[0] != "app/dashboard/layout.svelte" {
+		t.Errorf("layouts = %v, want [app/dashboard/layout.svelte] (actual ancestry)", env.Layouts)
 	}
 }
 

@@ -289,11 +289,11 @@ func TestDiscoverNestedTemplLayoutChain(t *testing.T) {
 	if docs == nil {
 		t.Fatalf("/docs not discovered: %+v", routes)
 	}
-	if len(docs.Layouts) != 2 {
-		t.Fatalf("/docs Layouts = %+v, want [root, docs] chain", docs.Layouts)
+	if len(docs.Layouts) != 1 {
+		t.Fatalf("/docs Layouts = %+v, want only docs layout", docs.Layouts)
 	}
-	if docs.Layouts[0].SourceFile != "layout.templ" || docs.Layouts[1].SourceFile != "docs/layout.templ" {
-		t.Errorf("/docs Layouts = %+v, want outermost-first [layout.templ, docs/layout.templ]", docs.Layouts)
+	if docs.Layouts[0].SourceFile != "docs/layout.templ" {
+		t.Errorf("/docs Layouts = %+v, want docs/layout.templ", docs.Layouts)
 	}
 }
 
@@ -343,18 +343,15 @@ func TestDiscoverNestedSvelteLayoutAncestry(t *testing.T) {
 		t.Fatalf("/dashboard/settings missing: %+v", routes)
 	}
 	for name, r := range map[string]Route{"dashboard": dash, "settings": settings} {
-		if len(r.Layouts) != 2 {
-			t.Fatalf("/%s Layouts = %+v, want [layout.templ, dashboard/layout.svelte]", name, r.Layouts)
+		if len(r.Layouts) != 1 {
+			t.Fatalf("/%s Layouts = %+v, want dashboard/layout.svelte", name, r.Layouts)
 		}
-		if r.Layouts[0].SourceFile != "layout.templ" || r.Layouts[0].Mode != ModeSSR {
-			t.Errorf("/%s outermost = %+v, want layout.templ ssr", name, r.Layouts[0])
-		}
-		if r.Layouts[1].SourceFile != "dashboard/layout.svelte" || r.Layouts[1].Mode != ModeCSR {
-			t.Errorf("/%s inner = %+v, want dashboard/layout.svelte csr", name, r.Layouts[1])
+		if r.Layouts[0].SourceFile != "dashboard/layout.svelte" || r.Layouts[0].Mode != ModeCSR {
+			t.Errorf("/%s layout = %+v, want dashboard/layout.svelte csr", name, r.Layouts[0])
 		}
 		// Both dashboard routes report the same nested layout ID (B07 acceptance).
-		if r.Layouts[1].ID != "app/dashboard/layout.svelte" {
-			t.Errorf("/%s layout ID = %q, want app/dashboard/layout.svelte", name, r.Layouts[1].ID)
+		if r.Layouts[0].ID != "app/dashboard/layout.svelte" {
+			t.Errorf("/%s layout ID = %q, want app/dashboard/layout.svelte", name, r.Layouts[0].ID)
 		}
 	}
 }
@@ -502,14 +499,12 @@ func TestDiscoverSSRLayoutUnderCSRLayoutRejected(t *testing.T) {
 		"dashboard/settings/layout.templ": &fstest.MapFile{Data: []byte("templ S() {}")},
 		"dashboard/settings/page.svelte":  &fstest.MapFile{Data: []byte("<main />")},
 	}
-	_, err := Discover(fsys)
-	if err == nil {
-		t.Fatal("Discover succeeded with SSR layout beneath CSR layout, want error")
+	routes, err := Discover(fsys)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, want := range []string{"settings/layout.templ", "layout.svelte", "SSR layout"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q missing %q", err.Error(), want)
-		}
+	if got := routes[len(routes)-1].Layouts; len(got) != 1 || got[0].SourceFile != "dashboard/settings/layout.templ" {
+		t.Errorf("layouts = %+v, want the nearer templ layout", got)
 	}
 }
 
@@ -560,8 +555,8 @@ func TestDiscoverRootSSRWrappingCSLSupported(t *testing.T) {
 	if dash == nil {
 		t.Fatal("/dashboard missing")
 	}
-	if len(dash.Layouts) != 2 || dash.Layouts[0].Mode != ModeSSR || dash.Layouts[1].Mode != ModeCSR {
-		t.Errorf("/dashboard Layouts = %+v, want [ssr root, csr dashboard]", dash.Layouts)
+	if len(dash.Layouts) != 1 || dash.Layouts[0].Mode != ModeCSR {
+		t.Errorf("/dashboard Layouts = %+v, want csr dashboard", dash.Layouts)
 	}
 }
 

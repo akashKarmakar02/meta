@@ -43,18 +43,16 @@ func TestF08DocsEnvelopeBarePageNoLayouts(t *testing.T) {
 	}
 
 	// The wire contract: html is the BARE page, without layout wrappers.
-	if strings.Contains(env.HTML, "data-go-layout-docs") {
-		t.Errorf("envelope html must not include docs layout markup; layouts persist client-side and are reconciled via the layouts array (blueprint 5.2 step 9):\n%s", env.HTML)
+	if !strings.Contains(env.HTML, "data-go-layout-docs") || strings.Contains(env.HTML, `data-go-layout="app/layout.templ"`) {
+		t.Errorf("envelope html must contain only the docs visual layout:\n%s", env.HTML)
 	}
 	if !strings.Contains(env.HTML, "data-go-page-docs") {
 		t.Errorf("envelope html must include the docs page content (data-go-page-docs):\n%s", env.HTML)
 	}
 
 	// The ancestry is carried in `layouts`, not in `html`.
-	if len(env.Layouts) != 2 ||
-		env.Layouts[0] != "app/layout.templ" ||
-		env.Layouts[1] != "app/docs/layout.templ" {
-		t.Errorf("layouts = %v, want [app/layout.templ app/docs/layout.templ]", env.Layouts)
+	if len(env.Layouts) != 1 || env.Layouts[0] != "app/docs/layout.templ" {
+		t.Errorf("layouts = %v, want [app/docs/layout.templ]", env.Layouts)
 	}
 
 	// And the full document DOES include the layout — proving the two

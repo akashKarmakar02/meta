@@ -31,7 +31,7 @@ describe('navigation protocol fixtures (F01)', () => {
     expect(resp.routeId).toBe('dashboard/settings/page.svelte');
     expect(resp.mode).toBe('csr');
     expect(resp.title).toBe('Settings');
-    expect(resp.layouts).toEqual(['app/layout.templ', 'app/dashboard/layout.svelte']);
+    expect(resp.layouts).toEqual(['app/dashboard/layout.svelte']);
     expect(resp.html).toBe('');
     expect(resp.clientEntry).toBe('dashboard/settings/page.svelte');
   });

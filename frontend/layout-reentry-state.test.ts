@@ -33,7 +33,7 @@ const csrDashboard: NavigationResponse = {
   routeId: 'dashboard/page.svelte',
   mode: 'csr',
   title: 'Dashboard',
-  layouts: ['app/layout.templ', DASHBOARD_LAYOUT_ID],
+  layouts: [DASHBOARD_LAYOUT_ID],
   html: '',
   clientEntry: 'dashboard/page.svelte',
 };

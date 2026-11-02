@@ -86,8 +86,8 @@ func TestH05SSREnvelopesRootAboutDocs(t *testing.T) {
 		t.Errorf("/: html missing root page content: %q", root.HTML)
 	}
 	if strings.Contains(root.HTML, "<html") || strings.Contains(root.HTML, "<!DOCTYPE") ||
-		strings.Contains(root.HTML, "data-go-layout") {
-		t.Errorf("/: html must be the bare page outlet, not a composed document: %q", root.HTML)
+		!strings.Contains(root.HTML, `data-go-layout="app/layout.templ"`) {
+		t.Errorf("/: html must contain the visual layout without a document: %q", root.HTML)
 	}
 	if root.ClientEntry != nil {
 		t.Errorf("/: clientEntry = %q, want null for SSR", *root.ClientEntry)
@@ -103,8 +103,8 @@ func TestH05SSREnvelopesRootAboutDocs(t *testing.T) {
 	}
 	// The blueprint 5.1 example: envelope html for /about is the bare page.
 	wantHTML := "<main data-go-page-about><h1>About</h1><p>go-meta renders templ pages server-side; this one is distinct from the root page.</p></main>"
-	if about.HTML != wantHTML {
-		t.Errorf("/about: html = %q, want the exact bare page markup", about.HTML)
+	if !strings.Contains(about.HTML, wantHTML) || !strings.Contains(about.HTML, `data-go-layout="app/layout.templ"`) {
+		t.Errorf("/about: html = %q, want page inside root visual layout", about.HTML)
 	}
 	if about.ClientEntry != nil {
 		t.Errorf("/about: clientEntry = %q, want null for SSR", *about.ClientEntry)
@@ -126,16 +126,15 @@ func TestH05SSREnvelopesRootAboutDocs(t *testing.T) {
 	}
 	// Bare outlet only: no enclosing layout markup in envelope html —
 	// the ordered ancestry travels in `layouts` instead.
-	if strings.Contains(docs.HTML, "data-go-layout") || strings.Contains(docs.HTML, "data-go-page-outlet") {
-		t.Errorf("/docs: html must not include layout markup: %q", docs.HTML)
+	if !strings.Contains(docs.HTML, `data-go-layout="app/docs/layout.templ"`) || strings.Contains(docs.HTML, `data-go-layout="app/layout.templ"`) {
+		t.Errorf("/docs: html must include only docs layout: %q", docs.HTML)
 	}
 	if docs.ClientEntry != nil {
 		t.Errorf("/docs: clientEntry = %q, want null for SSR", *docs.ClientEntry)
 	}
-	if len(docs.Layouts) != 2 ||
-		docs.Layouts[0] != "app/layout.templ" ||
-		docs.Layouts[1] != "app/docs/layout.templ" {
-		t.Errorf("/docs: layouts = %v, want [app/layout.templ app/docs/layout.templ]", docs.Layouts)
+	if len(docs.Layouts) != 1 ||
+		docs.Layouts[0] != "app/docs/layout.templ" {
+		t.Errorf("/docs: layouts = %v, want [app/docs/layout.templ]", docs.Layouts)
 	}
 }
 
@@ -158,10 +157,9 @@ func TestH05CSREnvelopesDashboardSettings(t *testing.T) {
 	if dash.ClientEntry == nil || *dash.ClientEntry != "dashboard/page.svelte" {
 		t.Errorf("/dashboard: clientEntry = %v, want dashboard/page.svelte (registry key)", dash.ClientEntry)
 	}
-	if len(dash.Layouts) != 2 ||
-		dash.Layouts[0] != "app/layout.templ" ||
-		dash.Layouts[1] != "app/dashboard/layout.svelte" {
-		t.Errorf("/dashboard: layouts = %v, want [app/layout.templ app/dashboard/layout.svelte]", dash.Layouts)
+	if len(dash.Layouts) != 1 ||
+		dash.Layouts[0] != "app/dashboard/layout.svelte" {
+		t.Errorf("/dashboard: layouts = %v, want [app/dashboard/layout.svelte]", dash.Layouts)
 	}
 
 	settings := h05Envelope(t, "/dashboard/settings")
@@ -178,10 +176,9 @@ func TestH05CSREnvelopesDashboardSettings(t *testing.T) {
 	if settings.ClientEntry == nil || *settings.ClientEntry != "dashboard/settings/page.svelte" {
 		t.Errorf("/dashboard/settings: clientEntry = %v, want dashboard/settings/page.svelte", settings.ClientEntry)
 	}
-	if len(settings.Layouts) != 2 ||
-		settings.Layouts[0] != "app/layout.templ" ||
-		settings.Layouts[1] != "app/dashboard/layout.svelte" {
-		t.Errorf("/dashboard/settings: layouts = %v, want [app/layout.templ app/dashboard/layout.svelte]", settings.Layouts)
+	if len(settings.Layouts) != 1 ||
+		settings.Layouts[0] != "app/dashboard/layout.svelte" {
+		t.Errorf("/dashboard/settings: layouts = %v, want [app/dashboard/layout.svelte]", settings.Layouts)
 	}
 
 	// Distinct envelopes per route: no metadata bleed between dashboard pages.

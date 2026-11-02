@@ -7,15 +7,11 @@
 // dashboard subtree (child swaps, return navigation, exits). This file
 // covers what H06 owns and they do not:
 //
-//   - SSR → SSR soft clicks through the persistent templ nav (/ → /about
-//     → /docs): the page outlet swaps, everything else survives.
+//   - SSR → SSR soft clicks (/ → /about → /docs): visual layouts change
+//     while the document survives.
 //   - SSR → CSR cross-mode entry (/about → /dashboard): layout subtree
 //     mounts client-side, destination page is interactive afterwards.
-//   - The framework's ONE intentional hard-navigation fallback: a
-//     directly-loaded bare CSR shell has no [data-go-page-outlet], so a
-//     click to an SSR route correctly performs a full document navigation
-//     (the runtime never fabricates server layouts) — asserted as a
-//     reload, so a regression toward silent breakage cannot pass as soft.
+//   - A direct CSR page with a templ layout can soft-navigate to SSR.
 //
 // All clicks are trusted Playwright input events against the production
 // binary + Vite assets; no synthetic .click() dispatch.
@@ -36,15 +32,14 @@ async function bootCount(page: import('@playwright/test').Page): Promise<unknown
 }
 
 test.describe('H06: cross-mode clicks do not reload the document', () => {
-  test('SSR / → /about → /docs: outlet swap stays soft, nav survives, titles update', async ({ page }) => {
+  test('SSR / → /about → /docs: visual layouts change softly and titles update', async ({ page }) => {
     const errors: string[] = [];
     page.on('pageerror', (err) => errors.push(String(err)));
 
     await page.goto('/');
     await expect(page.locator('[data-go-page="home"]')).toBeVisible();
 
-    // Document-lifetime markers: the boot counter and a stamped persistent
-    // nav element. Both survive only if the document survives.
+    // The document marker survives, while visual-layout markup is replaced.
     await markBootCount(page);
     await page.evaluate(() => {
       document
@@ -58,11 +53,12 @@ test.describe('H06: cross-mode clicks do not reload the document', () => {
     expect(page.url()).toContain('/about');
     await expect(page).toHaveTitle('About');
     expect(await bootCount(page), '/about must arrive without a reload').toBe(1);
-    // The old page is gone; the persistent nav is the SAME element.
+    // The old page and old visual-layout markup are gone.
     expect(await page.locator('[data-go-page="home"]').count()).toBe(0);
     expect(
       await page.locator('nav[data-go-site-nav][data-e2e-nav-id="persists"]').count()
-    ).toBe(1);
+    ).toBe(0);
+    await expect(page.locator('nav[data-go-site-nav]')).toHaveCount(1);
 
     // A second soft hop, SSR → SSR again: /docs.
     await page.click('nav[data-go-site-nav] a[href="/docs"]');
@@ -72,7 +68,8 @@ test.describe('H06: cross-mode clicks do not reload the document', () => {
     expect(await bootCount(page), '/docs must arrive without a reload').toBe(1);
     expect(
       await page.locator('nav[data-go-site-nav][data-e2e-nav-id="persists"]').count()
-    ).toBe(1);
+    ).toBe(0);
+    await expect(page.locator('[data-go-layout="app/docs/layout.templ"]')).toHaveCount(1);
     expect(await page.locator('[data-go-page-about]').count()).toBe(0);
 
     expect(errors, 'no browser JavaScript errors').toEqual([]);
@@ -109,30 +106,24 @@ test.describe('H06: cross-mode clicks do not reload the document', () => {
     expect(errors, 'no browser JavaScript errors').toEqual([]);
   });
 
-  test('direct-loaded CSR shell → SSR route takes the documented full-document fallback', async ({ page }) => {
+  test('direct CSR page with templ layout → SSR route stays soft', async ({ page }) => {
     const errors: string[] = [];
     page.on('pageerror', (err) => errors.push(String(err)));
 
-    // Direct load of a bare CSR shell — /products/new boots without any
-    // client layout, so its own SiteNav renders standalone and gives the
-    // test a trusted link to click. The shell has no server layout, no
-    // outlet; /dashboard's shell behaves identically but hides its nav
-    // behind the mounting layout.
+    // The selected root templ layout supplies the site navigation.
     await page.goto('/products/new');
     await expect(page.locator('[data-go-page="products-new"]')).toBeVisible();
-    expect(await page.locator('[data-go-page-outlet]').count()).toBe(0);
-    expect(await page.locator('[data-go-layout]').count()).toBe(0);
+    expect(await page.locator('[data-go-page-outlet]').count()).toBe(1);
+    expect(await page.locator('[data-go-layout="app/layout.templ"]').count()).toBe(1);
     await markBootCount(page);
 
-    // Structurally unsupported transition (no outlet to render the SSR
-    // fragment into): the router must fall back to a real navigation, not
-    // strand the user — and the test must not mistake that for soft nav.
+    // The document outlet also allows a soft transition back to SSR.
     await page.click('nav[data-go-site-nav] a[href="/about"]');
     await expect(page.locator('[data-go-page-about]')).toBeVisible();
     expect(page.url()).toContain('/about');
 
-    // Full document load: the marker was wiped by the navigation.
-    expect(await bootCount(page), 'fallback must be a real document load').toBeUndefined();
+    // The document-lifetime marker survives.
+    expect(await bootCount(page), 'transition remains in the same document').toBe(1);
 
     expect(errors, 'no browser JavaScript errors').toEqual([]);
   });

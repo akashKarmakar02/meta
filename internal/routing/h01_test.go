@@ -38,7 +38,7 @@ func TestRoutingValidFixture(t *testing.T) {
 		got = append(got, descriptor{route.Path, route.SourceFile, route.Mode, ids})
 	}
 	root := []string{"app/layout.templ"}
-	dashboard := []string{"app/layout.templ", "app/dashboard/layout.svelte"}
+	dashboard := []string{"app/dashboard/layout.svelte"}
 	want := []descriptor{
 		{"/", "page.templ", ModeSSR, root},
 		{"/About", "About/page.templ", ModeSSR, root},

@@ -297,7 +297,7 @@ describe('G04: pipeline integration — soft navigation into the subtree', () =>
     routeId: 'dashboard/page.svelte',
     mode: 'csr',
     title: 'Dashboard',
-    layouts: ['app/layout.templ', 'app/dashboard/layout.svelte'],
+    layouts: ['app/dashboard/layout.svelte'],
     html: '',
     clientEntry: 'dashboard/page.svelte',
   };

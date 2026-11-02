@@ -46,6 +46,7 @@
       <ul>
         <li><a href="/dashboard">Overview</a></li>
         <li><a href="/dashboard/settings">Settings</a></li>
+        <li><a href="/about">About</a></li>
       </ul>
     </nav>
     <p data-go-layout-counter>Layout count: {count}</p>
