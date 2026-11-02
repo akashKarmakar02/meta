@@ -65,8 +65,12 @@ export class LayoutExitError extends Error {
  *   two teardowns (F11 currency): if it returns true, the exit STOPS
  *   with the layout still mounted — its child page unmounted, outlet
  *   interior empty, a fully consistent document for whatever navigation
- *   superseded this one. The caller observes the early return and bails
- *   out through its own stale-handling.
+ *   superseded this one. The caller observes the 'superseded' outcome
+ *   and OWNS the still-live handle: the pipeline restores it as its
+ *   tracked layout before bailing out through its stale-handling, so
+ *   mounted-vs-declared never desyncs (an untracked live layout would
+ *   force the NEXT exit into a hard-navigation fallback and leak the
+ *   instance).
  * - Both unmount handles are idempotent — a retried exit (double-dispose
  *   protection, or an already-unmounted child from a failed earlier
  *   attempt) never throws and never fires a second destructor.
@@ -75,11 +79,15 @@ export class LayoutExitError extends Error {
  *   marker throws LayoutExitError instead of passing silently — the
  *   caller hard-navigates rather than trusting a dirty document.
  */
+export type LayoutExitOutcome =
+  | { outcome: 'exited' }
+  | { outcome: 'superseded'; layout: LayoutInstanceHandle };
+
 export async function unmountLayoutSubtree(
   layout: LayoutInstanceHandle,
   outgoing?: MountHandle | null,
   guard?: () => boolean
-): Promise<void> {
+): Promise<LayoutExitOutcome> {
   // Child first: the outgoing page is unmounted and AWAITED before the
   // layout that hosts it is touched. Idempotent handle — an
   // already-unmounted child is a no-op.
@@ -91,7 +99,7 @@ export async function unmountLayoutSubtree(
   // superseded this one during the child's outro owns the document
   // now — its transition plan was made against the live layout, so the
   // layout stays and this exit stops.
-  if (guard?.()) return;
+  if (guard?.()) return { outcome: 'superseded', layout };
 
   // Layout component teardown: exactly one destructor call, host element
   // removal included (dispose unmounts the component AND removes the
@@ -109,4 +117,5 @@ export async function unmountLayoutSubtree(
       `layout ${JSON.stringify(layout.layoutId)} still has ${marked.length} marker(s) in the document after exit`
     );
   }
+  return { outcome: 'exited' };
 }

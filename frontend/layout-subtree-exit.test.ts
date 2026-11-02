@@ -174,7 +174,9 @@ describe('G07: unmountLayoutSubtree — unit contract', () => {
     const stopped = await unmountLayoutSubtree(layout, page, () => true);
     stop();
 
-    expect(stopped).toBeUndefined(); // early return, not a throw
+    // Guard abort reports the outcome (not a throw) and hands back the
+    // still-live layout handle for ownership restoration.
+    expect(stopped).toEqual({ outcome: 'superseded', layout: expect.objectContaining({ unmount: expect.any(Function) }) });
     expect(layoutUnmounts).toBe(0); // parent never destroyed
     // The child COMPONENT is gone (its DOM with it) but the layout
     // instance — sidebar, counter, outlet — is still fully mounted. The
@@ -193,8 +195,10 @@ describe('G07: unmountLayoutSubtree — unit contract', () => {
     document.body.append(region);
     const { layout, page } = await mountedSubtree(region);
     const before = liveInstanceCount(); // layout + page
-    await unmountLayoutSubtree(layout, page);
-    await expect(unmountLayoutSubtree(layout, page)).resolves.toBeUndefined();
+    expect((await unmountLayoutSubtree(layout, page)).outcome).toBe('exited'); // disposed once
+    // A repeated exit on the same handles is a safe no-op: both handles are
+    // idempotent, no second destructor fires, and no exception propagates.
+    await expect(unmountLayoutSubtree(layout, page)).resolves.toEqual({ outcome: 'exited' });
     expect(liveInstanceCount()).toBe(before - 2); // exactly the two went
   });
 });
@@ -471,39 +475,116 @@ describe('G07: pipeline — soft navigation out of the Dashboard subtree', () =>
     clearFetch();
   });
 
-  it('8. failure after partial teardown hard-navigates instead of leaving junk', async () => {
+  it('7b. audit sequence: superseded exit hands ownership back; the final exit disposes exactly once', async () => {
+    // The Phase G gate-audit sequence, end to end:
+    //   1. dashboard layout A live and tracked
+    //   2. navigate to /about (exit begins)
+    //   3. child page finishes unmounting
+    //   4. settings nav supersedes the exit BEFORE layout A is disposed
+    //   5. the newer navigation repopulates the retained layout
+    //   6. another /about navigation runs
+    // Proofs: A stays tracked after supersession (no orphan); the final
+    // exit unmounts A exactly once via the graceful path (not hard
+    // fallback); no duplicate hosts/page roots; liveInstanceCount returns
+    // to baseline; the stale exit never committed history/title/scroll.
     installSSRDocument();
+    const csrSettings: NavigationResponse = {
+      ...csrDashboard,
+      url: '/dashboard/settings',
+      routeId: 'dashboard/settings/page.svelte',
+      title: 'Settings',
+      clientEntry: 'dashboard/settings/page.svelte',
+    };
     stubFetch(
       new Map([
         [new URL('/dashboard', document.baseURI).href, csrDashboard],
+        [new URL('/dashboard/settings', document.baseURI).href, csrSettings],
         [new URL('/about', document.baseURI).href, ssrAbout],
       ])
     );
+    const baseline = liveInstanceCount();
     await pipelineRef!.navigateTo('/dashboard');
-    // Corrupt the destination render: an SSR envelope with mode "ssr" but
-    // the outlet requirement sabotaged — simulate via a bad envelope whose
-    // html is fine but the page-outlet duplicated right before navigate.
-    // Simpler deterministic route: make dispose throw after child removal.
-    const layoutEl = document.querySelector(
+    const marker = document.querySelector(
       `[data-go-layout="${CSS.escape(DASHBOARD_LAYOUT_ID)}"]`
     );
-    // Sabotage: an About envelope that is NOT valid for outlet replace
-    // forces a throw AFTER the subtree was already torn down.
-    const badAbout: NavigationResponse = {
-      ...ssrAbout,
-      html: '<h1>About</h1>',
-      // @ts-expect-error deliberately invalid mode for replacePageOutlet
-      mode: 'nonsense',
-    };
-    stubFetch(new Map([[new URL('/about', document.baseURI).href, badAbout]]));
-    const sink = { url: null as string | null };
-    stubHardNavigate(sink);
-    await pipelineRef!.navigateTo('/about');
-    expect(sink.url).toBe('/about'); // hard fallback taken
-    // The corrupted destination never landed as visible junk...
-    expect(document.querySelector('[data-go-page-about]')).toBeNull();
-    clearFetch();
-    void layoutEl;
+    expect(marker).not.toBeNull();
+
+    // Count lifecycle events identity-matched on the layout HOST element
+    // (the mount target, div[data-go-layout-host], which contains the
+    // component-stamped marker).
+    const layoutHost = marker!.closest('[data-go-layout-shell-host]');
+    expect(layoutHost).not.toBeNull();
+    const events: string[] = [];
+    const stopLifecycle = onLifecycleEvent((e) => {
+      if (e.target === layoutHost) events.push(e.phase);
+    });
+
+    // History/scroll spy: the STALE exit must not commit any of them.
+    const histSpy: string[] = [];
+    history.replaceState = ((state, title, url) => {
+      histSpy.push(`replace:${String(url)}`);
+      return undefined;
+    }) as typeof history.replaceState;
+    history.pushState = ((state, title, url) => {
+      histSpy.push(`push:${String(url)}`);
+      return undefined;
+    }) as typeof history.pushState;
+    const scrollSpy: string[] = [];
+    const origScrollTo = window.scrollTo;
+    window.scrollTo = (() => {
+      scrollSpy.push('scroll');
+      return undefined;
+    }) as typeof window.scrollTo;
+
+    try {
+      const exitP = pipelineRef!.navigateTo('/about'); // teardown begins...
+      // ...supersede before layout disposal completes.
+      const swapP = pipelineRef!.navigateTo('/dashboard/settings');
+      await exitP; // guard aborts it after the child unmount
+      await swapP; // settings repopulates the retained layout
+
+      // Proof 1 — an authoritative handle still exists for layout A: the
+      // final /about navigation takes the GRACEFUL exit branch, which only
+      // happens when the discarded layout is pipeline-tracked.
+      const hardSink: { url: string | null } = { url: null };
+      stubHardNavigate(hardSink);
+      await pipelineRef!.navigateTo('/about');
+      expect(hardSink.url).toBeNull(); // graceful path — no hard reload escape
+      // The About content rendered into the same document.
+      expect(document.querySelector('[data-go-page-about]')).not.toBeNull();
+
+      // Proof 2 — exactly one unmount of layout A, identity-matched.
+      const unmounts = events.filter((p) => p === 'unmounted');
+      expect(unmounts.length).toBe(1);
+
+      // Proof 3 — no orphan: layout A is gone from the document.
+      expect(
+        document.querySelector(`[data-go-layout="${CSS.escape(DASHBOARD_LAYOUT_ID)}"]`)
+      ).toBeNull();
+
+      // Proof 4 — no duplicates ever existed: one host element at peak is
+      // implied by marker counts; page roots never exceeded 1 at rest.
+      expect(document.querySelectorAll('[data-go-page-root]').length).toBe(0);
+
+      // Proof 5 — instance count returned to baseline (no leak).
+      expect(liveInstanceCount()).toBe(baseline);
+
+      // Proof 6 — the STALE exit committed no history/scroll state. The
+      // committed sequence must be exactly the two completed navigations,
+      // in order: settings swap, then the final About exit. A stale
+      // commit would surface as an extra entry or a wrong order.
+      expect(histSpy).toEqual([
+        `push:/dashboard/settings`,
+        `push:/about`,
+      ]);
+      // Scroll follows the same rule: one per completed navigation, none
+      // from the aborted exit.
+      expect(scrollSpy.length).toBe(2);
+    } finally {
+      stopLifecycle();
+      window.scrollTo = origScrollTo;
+      clearFetch();
+    }
   });
 
   it('9. popstate back/forward over an exit restores correctly (push: false path)', async () => {

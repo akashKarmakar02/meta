@@ -241,9 +241,12 @@ async function applyEnvelope(
         transition.discard[0] === trackedId;
       if (discardMatchesTracked && currentLayout !== null) {
         // The one layout the runtime tracks is leaving: execute the G07
-        // exit below, then apply the destination normally.
+        // exit below, then apply the destination normally. The tracked
+        // reference stays live until disposal is PROVEN — a superseded
+        // exit (child unmounted, guard tripped before layout dispose)
+        // hands the still-live handle back below, so the next navigation
+        // retains (not duplicates) it and a later exit can dispose it.
         exitingLayout = currentLayout;
-        currentLayout = null; // stale handles never outlive their disposal
       } else {
         logNavDecision(env.url, 'hard-navigate-discard', mountedClients, desiredClients);
         hardNavigate(env.url);
@@ -299,7 +302,23 @@ async function applyEnvelope(
         // throws anyway, the caller's hard-navigation fallback reloads.
         logNavDecision(env.url, 'layout-subtree-exit', mountedClients, desiredClients);
         const superseded = () => !token.isCurrent();
-        await unmountLayoutSubtree(exiting, outgoing, superseded);
+        const exitResult = await unmountLayoutSubtree(exiting, outgoing, superseded);
+        if (exitResult.outcome === 'superseded') {
+          // Ownership hand-back: the exit stopped at the guard with only
+          // the child unmounted — layout A is still live in the document.
+          // Restore the authoritative handle so the next navigation retains
+          // it (not duplicates it) and a later exit can dispose it exactly
+          // once. The stale token then throws as usual: this navigation
+          // commits nothing.
+          currentLayout = exitResult.layout;
+          throw new StaleNavigationError(token.id, currentNavigationId());
+        }
+        // Disposal proven complete (marker verified gone): drop the tracked
+        // reference NOW, before any later await can supersede — otherwise a
+        // stale throw would leave currentLayout pointing at a disposed
+        // handle and the superseding navigation would treat a dead layout
+        // as its retained instance.
+        currentLayout = null;
         if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
         currentPage = await (seams.mountCsr ?? mountCsrPage)(env, undefined);
       } else if (retainedLayout !== null) {
@@ -386,7 +405,15 @@ async function applyEnvelope(
           );
         }
         const superseded = () => !token.isCurrent();
-        await unmountLayoutSubtree(exiting, outgoing, superseded);
+        const exitResult = await unmountLayoutSubtree(exiting, outgoing, superseded);
+        if (exitResult.outcome === 'superseded') {
+          // Ownership hand-back — same rationale as the CSR branch above.
+          currentLayout = exitResult.layout;
+          throw new StaleNavigationError(token.id, currentNavigationId());
+        }
+        // Disposal proven complete: drop the tracked reference before any
+        // later await can supersede (same rationale as the CSR branch).
+        currentLayout = null;
         if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
         replacePageOutlet(env);
         currentPage = null;
