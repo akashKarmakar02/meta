@@ -109,6 +109,10 @@ export function pushNavigationState(
 
   const destination = destinationOf(target);
 
+  // Track the document this navigation committed (H09): popstate compares
+  // against it to recognize same-document hash traversals.
+  currentDocument = { pathname: target.pathname, search: target.search };
+
   // Remember the scroll of the page being left, under its own key. The
   // caller's pre-teardown capture wins; a fallback read here would see 0
   // whenever the outgoing page was already unmounted (DOM removal scrolls
@@ -153,12 +157,24 @@ export interface PopstateContext {
   url: URL;
   /** Scroll position remembered for this destination, if any. */
   scroll: { x: number; y: number } | null;
+  /**
+   * True when this traversal stayed within the SAME document: the
+   * destination's path and query are identical to where we were and only
+   * the fragment changed (a fragment-only link's own hash history entry,
+   * blueprint 5.2 step 2 — native anchor behavior, not a navigation).
+   */
+  sameDocument: boolean;
 }
 
 type PopstateHandler = (context: PopstateContext) => void;
 
 let activePopstateHandler: PopstateHandler | null = null;
 let popstateListenerInstalled = false;
+
+// The document the SPA is currently showing: path + query of the last
+// navigation-committed (or boot) URL. popstate compares against it to
+// classify same-document hash traversals.
+let currentDocument: { pathname: string; search: string } | null = null;
 
 function onPopstate(): void {
   if (activePopstateHandler === null) {
@@ -168,7 +184,14 @@ function onPopstate(): void {
   const context: PopstateContext = {
     url,
     scroll: scrollMemory.get(destinationOf(url)) ?? null,
+    sameDocument:
+      currentDocument !== null &&
+      url.pathname === currentDocument.pathname &&
+      url.search === currentDocument.search,
   };
+  // This traversal becomes the new current document for the next one —
+  // including hash-only moves, whose path+search keep it identical.
+  currentDocument = { pathname: url.pathname, search: url.search };
   activePopstateHandler(context);
 }
 
@@ -182,6 +205,12 @@ function onPopstate(): void {
  */
 export function installPopstateNavigation(handler: PopstateHandler): void {
   activePopstateHandler = handler;
+  // Seed the current document from the boot URL so the FIRST popstate can
+  // already classify same-document traversals (H09).
+  currentDocument = {
+    pathname: window.location.pathname,
+    search: window.location.search,
+  };
   if (!popstateListenerInstalled) {
     window.addEventListener('popstate', onPopstate);
     popstateListenerInstalled = true;

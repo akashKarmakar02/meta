@@ -220,6 +220,28 @@ describe('F12 integration pipeline', () => {
     expect(history.length).toBe(len);
   });
 
+  it('5b. same-document (fragment-only) popstate never triggers navigation', async () => {
+    // H09 regression: a fragment-only link stays native, so the browser's
+    // own hash history entry arrives as popstate with path+search
+    // unchanged. The pipeline must ignore it — no fetch, no outlet swap,
+    // or the anchor's target document gets replaced underneath the user.
+    renderShell('ssr-root');
+    const p = navigateTo('/about');
+    await settleFetch('/about');
+    await p;
+    expect(document.querySelector('[data-go-page-about]')).toBeTruthy();
+
+    // Simulate the browser's same-document hash history entry exactly as
+    // navigation-history hands it over (hash changed, path did not).
+    window.history.replaceState(null, '', '/about#section');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    await vi.waitFor(() => void 0);
+
+    // No navigation envelope was requested and the page is untouched.
+    expect(pending.size).toBe(0);
+    expect(document.querySelector('[data-go-page-about]')).toBeTruthy();
+  });
+
   it('6. title and URL reflect navigation', async () => {
     renderShell('ssr-root');
     const p = navigateTo('/dashboard');

@@ -502,6 +502,13 @@ function startSoftNavigation(_opts?: SoftNavigationOptions): void {
   if (!installedPopstate) {
     installedPopstate = true;
     installPopstateNavigation((ctx) => {
+      // Same-document popstate (a fragment-only link's own hash history
+      // entry, per blueprint 5.2 step 2) is native anchor behavior — the
+      // interceptor already kept the click native, so there is nothing to
+      // render: no fetch, no outlet swap.
+      if (ctx.sameDocument) {
+        return;
+      }
       // The restored entry's remembered scroll (from the popstate context)
       // is applied by applyEnvelope once the page content it belongs to is
       // actually rendered — never before, or the browser would clamp it

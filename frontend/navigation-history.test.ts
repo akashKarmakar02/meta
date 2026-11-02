@@ -175,7 +175,9 @@ describe('F10: popstate (step 11)', () => {
   });
 
   it('replaces the handler instead of stacking listeners', async () => {
-    installPopstateNavigation(() => handlerCalls.push({ url: null as never, scroll: { x: 0, y: 0 } }));
+    installPopstateNavigation(() =>
+      handlerCalls.push({ url: null as never, scroll: { x: 0, y: 0 }, sameDocument: false })
+    );
     installPopstateNavigation((ctx) => handlerCalls.push(ctx));
     handlerCalls = [];
 
