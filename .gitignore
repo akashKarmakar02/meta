@@ -41,3 +41,6 @@ npm-debug.log*
 # Playwright E2E output (screenshots, traces on failure)
 /test-results/
 /playwright-report/
+
+# Air build/generation output (meta dev)
+.tmp/

@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path"
@@ -133,6 +134,13 @@ func WriteRouteRegistryTS(dir string, m routing.Manifest) error {
 	src := RouteRegistryTS(m)
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fmt.Errorf("codegen: create frontend directory: %w", err)
+	}
+	// Skip the write when the file already holds the exact bytes (P2-A03):
+	// the output is deterministic for identical inputs, and rewriting an
+	// unchanged file bumps its mtime, retriggering watchers (Air, Vite).
+	// No-op regeneration leaves zero side effects.
+	if current, err := os.ReadFile(dst); err == nil && bytes.Equal(current, []byte(src)) {
+		return nil
 	}
 	if err := os.WriteFile(dst, []byte(src), 0o644); err != nil {
 		return fmt.Errorf("codegen: write %s: %w", dst, err)

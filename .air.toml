@@ -1,12 +1,25 @@
-# Air development configuration for go-meta, used by `meta dev` (P2-A02).
+# Air development configuration for go-meta, used by `meta dev`.
 #
 # Air version this config targets: github.com/air-verse/air v1.67.x
 # (v1.52+ syntax: build.entrypoint; build.bin is deprecated and unused).
 #
-# Scope (P2-A02): Go backend hot reload only. templ regeneration (A03),
-# Vite HMR (A04), and the unified dev origin (A05) extend this file or
-# replace it later. `.templ` events intentionally do not trigger anything
-# yet; editing a .templ file requires `make generate` until A03 lands.
+# P2-A03 scope: Go backend hot reload plus automatic templ and route
+# regeneration. build.cmd chains generation before compilation:
+#
+#   air -> meta devgen (templ generate + routegen when inputs changed)
+#       -> go build
+#       -> restart server
+#
+# Loop safety (blueprint A03 §9):
+#   - Generation writes are skip-if-same; unchanged outputs keep their
+#     mtimes, so a no-op build cycle cannot retrigger another cycle.
+#   - _templ.go files stay watched (include_ext "go"): they change only
+#     when a real .templ edit changed them, producing exactly one rebuild.
+#   - devgen verifies tree/generated consistency on every build: fsnotify
+#     drops recursive directory deletions (rm -rf app/someroute), so the
+#     next build regenerates instead of compiling stale route imports.
+#   - Vite/Svelte HMR is still ahead (A04); editing .svelte components
+#     regenerates routes only when page.svelte/layout.svelte changed.
 #
 # Prerequisite: the client bundle must exist (the example server fails
 # fast without dist/client). Run `make build` once, or `npm run build`,
@@ -16,15 +29,18 @@ root = "."
 tmp_dir = ".tmp/air"
 
 [build]
-  # Build the Fiber example server into Air's tmp dir. Never build or run
-  # meta itself here: air -> go build ./cmd/example -> server, no recursion.
-  cmd = "go build -o ./.tmp/air/server ./cmd/example"
-  # Run the built server directly; PORT env still overrides :3000.
+  # meta binary path: Air runs from the project root; bin/meta is the
+  # committed location for locally built CLI binaries.
+  # devgen exits 0 on no-op so routine Go-only edits don't fail.
+  cmd = "bin/meta devgen && go build -o ./.tmp/air/server ./cmd/example"
   entrypoint = ["./.tmp/air/server"]
-  include_ext = ["go"]
-  # Generated Go sources (*_templ.go, generated/) stay watched and
-  # compilable; they only change via make generate, so no self-triggering
-  # rebuild loop exists in A02 (full templ wiring is A03).
+  # Watched extensions: .go (hand-written and generated), .templ for
+  # regeneration, .svelte for route-structure changes (adds/removes of
+  # page.svelte/layout.svelte are structural; content edits regenerate
+  # routes cheaply via skip-if-same output).
+  include_ext = ["go", "templ", "svelte"]
+  # Generated Go sources stay compilable: they remain inside the watched
+  # tree with extension go. Exclusions below remove only non-input dirs.
   exclude_dir = ["node_modules", "dist", ".tmp", ".git", "test-results", "playwright-report"]
   exclude_regex = ["_test.go"]
   delay = 500

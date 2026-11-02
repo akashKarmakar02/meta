@@ -6,6 +6,7 @@
 package codegen
 
 import (
+	"bytes"
 	"fmt"
 	"go/format"
 	"io/fs"
@@ -310,6 +311,13 @@ func WriteRoutesFile(dir string, m routing.Manifest) error {
 	dst := filepath.Join(dir, "generated", "routes_gen.go")
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fmt.Errorf("codegen: create generated directory: %w", err)
+	}
+	// Skip the write when the file already holds the exact bytes (P2-A03):
+	// rewriting an unchanged generated file bumps its mtime and makes
+	// watchers like Air rebuild even though nothing changed. Deterministic
+	// output + skip-if-same = no-op generation has zero side effects.
+	if current, err := os.ReadFile(dst); err == nil && bytes.Equal(current, src) {
+		return nil
 	}
 	if err := os.WriteFile(dst, src, 0o644); err != nil {
 		return fmt.Errorf("codegen: write %s: %w", dst, err)
