@@ -28,7 +28,16 @@ func Discover(fsys fs.FS) ([]Route, error) {
 			return err
 		}
 		if d.IsDir() {
-			return nil
+			// B01 ignore rules: directories prefixed with underscore hold
+			// colocated components, not routes; dot-directories are tooling
+			// state (Vite cache, git metadata). Neither is walked.
+			base := path.Base(p)
+			if strings.HasPrefix(base, "_") || (strings.HasPrefix(base, ".") && p != ".") {
+				return fs.SkipDir
+			}
+			// B01 segment validation: reject malformed bracket declarations
+			// during the walk so they never reach generated output.
+			return validateSegment(base, p)
 		}
 		dir, base := path.Split(p)
 
@@ -163,6 +172,12 @@ func normalizeDirToPath(dir string) string {
 
 // trimParamBrackets reports whether seg is a dynamic parameter segment of the
 // form "[name]" and returns the bare parameter name.
+//
+// B01 hardening: any segment that merely looks like bracket syntax is now an
+// error instead of silently degrading to a static segment. Malformed forms
+// include unbalanced brackets ("[id", "id]"), empty names ("[]"), nested
+// brackets ("[[id]"), embedded slashes ("[a/b]"), and catch-all markers
+// ("[...slug]", rejected until B03 implements them).
 func trimParamBrackets(seg string) (string, bool) {
 	if !strings.HasPrefix(seg, "[") || !strings.HasSuffix(seg, "]") {
 		return "", false
@@ -172,6 +187,54 @@ func trimParamBrackets(seg string) (string, bool) {
 		return "", false
 	}
 	return name, true
+}
+
+// validateSegment rejects directory names that declare bracket intent but do
+// not form a valid Phase 1 dynamic parameter segment. It runs before
+// normalizeDirToPath so malformed segments never reach generated output.
+func validateSegment(seg, dir string) error {
+	brackety := strings.HasPrefix(seg, "[") || strings.HasSuffix(seg, "]")
+	if !brackety {
+		return nil
+	}
+	switch {
+	case seg == "[]":
+		return fmt.Errorf("routing: INVALID_SEGMENT %q in %q: dynamic segment has an empty parameter name", seg, dir)
+	case strings.HasPrefix(seg, "[..."):
+		return fmt.Errorf("routing: INVALID_SEGMENT %q in %q: catch-all routes are not implemented yet (planned for B03); use a single [param] segment or plain static directories", seg, dir)
+	case !strings.HasPrefix(seg, "[") || !strings.HasSuffix(seg, "]"):
+		return fmt.Errorf("routing: INVALID_SEGMENT %q in %q: dynamic segments must be fully wrapped in brackets like [id]", seg, dir)
+	case strings.Contains(seg, "[]"), strings.Contains(strings.TrimSuffix(strings.TrimPrefix(seg, "["), "]"), "["):
+		return fmt.Errorf("routing: INVALID_SEGMENT %q in %q: nested brackets are not valid parameter syntax", seg, dir)
+	case strings.ContainsAny(seg, "/"):
+		return fmt.Errorf("routing: INVALID_SEGMENT %q in %q: parameter names cannot contain slashes", seg, dir)
+	}
+	name := strings.TrimSuffix(strings.TrimPrefix(seg, "["), "]")
+	if strings.Contains(name, "[") || strings.Contains(name, "]") {
+		return fmt.Errorf("routing: INVALID_SEGMENT %q in %q: nested brackets are not valid parameter syntax", seg, dir)
+	}
+	if !validParamName(name) {
+		return fmt.Errorf("routing: INVALID_SEGMENT %q in %q: parameter names must start with a letter or underscore and contain only letters, digits, and underscores", seg, dir)
+	}
+	return nil
+}
+
+// validParamName reports whether name is a safe parameter identifier: it
+// becomes a Fiber ":name" token and may surface in identifiers, so it must
+// look like a Go identifier fragment.
+func validParamName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r == '_':
+		case r >= '0' && r <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // pathHasParamSegment reports whether any segment of dir (a slash-separated

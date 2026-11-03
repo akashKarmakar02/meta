@@ -40,7 +40,11 @@ func validateDynamicAmbiguity(routes []Route) error {
 		prefix string // static segments before the parameter
 		suffix string // static segments after the parameter
 	}
-	slots := make(map[dynamicKey]string)
+	type slotOwner struct {
+		name   string
+		source string
+	}
+	slots := map[dynamicKey]slotOwner{}
 	for _, r := range routes {
 		segs := strings.Split(strings.TrimPrefix(r.Path, "/"), "/")
 		var names []string
@@ -63,13 +67,13 @@ func validateDynamicAmbiguity(routes []Route) error {
 				prefix: strings.Join(segs[:i], "/"),
 				suffix: strings.Join(segs[i+1:], "/"),
 			}
-			if prevName, ok := slots[key]; ok && prevName != seg[1:] {
+			if prev, ok := slots[key]; ok && prev.name != seg[1:] {
 				return fmt.Errorf(
-					"routing: ambiguous dynamic segments %q and %q: both match the same URL shape under %q: use one parameter name per position",
-					prevName, seg[1:], "/"+key.prefix,
+					"routing: ambiguous dynamic segments [%s] (%s) and [%s] (%s): both match the same URL shape under %q: use one parameter name per position",
+					prev.name, prev.source, seg[1:], r.SourceFile, "/"+key.prefix,
 				)
 			}
-			slots[key] = seg[1:]
+			slots[key] = slotOwner{name: seg[1:], source: r.SourceFile}
 		}
 	}
 	return nil
