@@ -34,7 +34,32 @@ B04/B05. Query strings are not part of captured values. Encoded slashes,
 backslashes, dot segments, invalid percent escapes and invalid UTF-8 are
 rejected; other encoded values are decoded once after route segmentation.
 Fiber's trailing-slash behavior is retained, and repeated interior slashes
-do not match a single dynamic segment. Catch-all routes are not implemented.
+do not match a single dynamic segment.
+
+### Catch-all routes
+
+A catch-all segment captures one or more path segments using `[...name]`, for
+example `docs/[...slug]/page.templ` matches `/docs/a`, `/docs/a/b`, and
+`/docs/a/b/c`. The captured value is the slash-joined decoded segments, stored
+under the declared name (`slug == "a/b"`). A catch-all must be the **last** path
+segment; a non-terminal declaration such as `docs/[...slug]/extra/` is rejected.
+Optional catch-alls (`[[...slug]]`) and zero-segment matches are not supported.
+
+Precedence is deterministic and does not depend on filesystem enumeration
+order: static routes are never shadowed by a catch-all, and a single-segment
+dynamic route directly under the catch-all prefix (`/docs/[id]` + `/docs/[...slug]`)
+is the documented one-segment overlap — the dynamic route wins for exactly one
+segment and the catch-all wins for two or more. Conflicts that Fiber cannot
+resolve deterministically (a nested catch-all, or a multi-segment dynamic route
+under a catch-all prefix) are rejected at generation time.
+
+Server-rendered catch-all pages read the captured value from the render context
+(`ctx.Value("slug")`); the typed, query-aware parameter API is deferred to
+B04/B05. Client-rendered catch-all pages mount by stable route id (the declared
+module, not the concrete URL) and read the destination from the page root's
+`data-go-route` attribute. Encoded slashes, backslashes, dot segments, invalid
+percent escapes and invalid UTF-8 are rejected in catch-all values, exactly as
+in single-segment parameters.
 
 ## Toolchain requirements
 

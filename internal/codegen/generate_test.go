@@ -56,6 +56,41 @@ func TestVerifySymbolsRejection(t *testing.T) {
 	}
 }
 
+// B03: a catch-all route emits its Fiber "+" path and the declared catch-all
+// name in the generated Go literal, so WithRouteParams can decode the value
+// under the right key.
+func TestRoutesFileCatchAllLiteral(t *testing.T) {
+	fsys := fstest.MapFS{
+		"layout.templ":                             {Data: []byte("templ Layout(templ.Component) {}")},
+		"docs/[...slug]/page.templ":                {Data: []byte("templ Page() {}")},
+		"orgs/[orgId]/files/[...path]/page.svelte": {Data: []byte("<main />")},
+	}
+	routes, err := routing.Discover(fsys)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	m := routing.NewManifest(routes)
+	src, err := RoutesFile(m)
+	if err != nil {
+		t.Fatalf("RoutesFile: %v", err)
+	}
+	s := string(src)
+	for _, want := range []string{
+		`Path: "/docs/+"`,
+		`CatchAll: "slug"`,
+		`Path: "/orgs/:orgId/files/+"`,
+		`CatchAll: "path"`,
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("generated source missing %q:\n%s", want, s)
+		}
+	}
+	// The generated file must still parse.
+	if _, err := parser.ParseFile(token.NewFileSet(), "routes_gen.go", s, parser.ParseComments); err != nil {
+		t.Errorf("generated source does not parse: %v", err)
+	}
+}
+
 func TestCSRPageWithNearestTemplLayout(t *testing.T) {
 	fsys := fstest.MapFS{
 		"layout.templ":                   {Data: []byte("templ Layout(templ.Component) {}")},

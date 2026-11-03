@@ -20,7 +20,8 @@ func TestB01MalformedRouteRejectedBeforeGeneration(t *testing.T) {
 	}{
 		{"unbalanced open", "blog/[[id", "brackets"},
 		{"unbalanced close", "blog/id]", "brackets"},
-		{"catch-all", "docs/[...slug]", "catch-all"},
+		{"catch-all unbalanced", "docs/[...slug", "brackets"},
+		{"catch-all empty name", "docs/[...]", "empty"},
 		{"empty name", "blog/[]", "empty"},
 	}
 	for _, tc := range cases {

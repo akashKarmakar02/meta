@@ -37,7 +37,16 @@ func Discover(fsys fs.FS) ([]Route, error) {
 			}
 			// B01 segment validation: reject malformed bracket declarations
 			// during the walk so they never reach generated output.
-			return validateSegment(base, p)
+			if err := validateSegment(base, p); err != nil {
+				return err
+			}
+			// B03: a catch-all must be the final path segment. Reject a
+			// non-terminal "[...name]" directory during the walk so it never
+			// reaches generated output (e.g. docs/[...slug]/extra/).
+			if bad := catchAllNonTerminalSegment(p); bad != "" {
+				return fmt.Errorf("routing: INVALID_SEGMENT %q in %q: catch-all segments must be the last path segment", bad, p)
+			}
+			return nil
 		}
 		dir, base := path.Split(p)
 		if pathHasParamSegment(path.Dir(p)) && strings.HasSuffix(base, ".go") {
@@ -77,6 +86,7 @@ func Discover(fsys fs.FS) ([]Route, error) {
 		if rerr != nil {
 			return rerr
 		}
+		route.CatchAll = catchAllName(dir)
 		routes = append(routes, route)
 		return nil
 	})
@@ -165,6 +175,12 @@ func normalizeDirToPath(dir string) string {
 			b.WriteString(param)
 			continue
 		}
+		if _, ok := trimCatchAllBrackets(seg); ok {
+			// Fiber's one-or-more greedy segment is the bare "+" token; the
+			// declared name is carried separately on Route.CatchAll (B03).
+			b.WriteString("+")
+			continue
+		}
 		b.WriteString(seg)
 	}
 	return b.String()
@@ -182,11 +198,60 @@ func trimParamBrackets(seg string) (string, bool) {
 	if !strings.HasPrefix(seg, "[") || !strings.HasSuffix(seg, "]") {
 		return "", false
 	}
+	if strings.HasPrefix(seg, "[...") {
+		return "", false // catch-all segment; handled by trimCatchAllBrackets
+	}
 	name := strings.TrimSuffix(strings.TrimPrefix(seg, "["), "]")
 	if name == "" || strings.ContainsAny(name, "[]/") {
 		return "", false
 	}
 	return name, true
+}
+
+// trimCatchAllBrackets reports whether seg is a catch-all segment of the form
+// "[...name]" and returns the bare parameter name.
+func trimCatchAllBrackets(seg string) (string, bool) {
+	const prefix = "[..."
+	if !strings.HasPrefix(seg, prefix) || !strings.HasSuffix(seg, "]") {
+		return "", false
+	}
+	name := strings.TrimSuffix(strings.TrimPrefix(seg, prefix), "]")
+	if name == "" || strings.ContainsAny(name, "[]/...") {
+		return "", false
+	}
+	return name, true
+}
+
+// catchAllName returns the declared catch-all parameter name if the final
+// segment of dir (a slash-separated page directory) is a "[...name]" segment,
+// else "".
+func catchAllName(dir string) string {
+	segs := strings.Split(strings.TrimSuffix(dir, "/"), "/")
+	if len(segs) == 0 {
+		return ""
+	}
+	name, ok := trimCatchAllBrackets(segs[len(segs)-1])
+	if !ok {
+		return ""
+	}
+	return name
+}
+
+// catchAllNonTerminalSegment returns the first catch-all "[...name]" segment
+// of dir (a slash-separated page directory) that is not the final segment, or
+// "" when every catch-all segment is terminal. A non-terminal catch-all is
+// rejected: a catch-all must be the last path segment (B03).
+func catchAllNonTerminalSegment(dir string) string {
+	segs := strings.Split(strings.TrimSuffix(dir, "/"), "/")
+	for i, seg := range segs {
+		if i == len(segs)-1 {
+			continue
+		}
+		if _, ok := trimCatchAllBrackets(seg); ok {
+			return seg
+		}
+	}
+	return ""
 }
 
 // validateSegment rejects directory names that declare bracket intent but do
@@ -201,7 +266,22 @@ func validateSegment(seg, dir string) error {
 	case seg == "[]":
 		return fmt.Errorf("routing: INVALID_SEGMENT %q in %q: dynamic segment has an empty parameter name", seg, dir)
 	case strings.HasPrefix(seg, "[..."):
-		return fmt.Errorf("routing: INVALID_SEGMENT %q in %q: catch-all routes are not implemented yet (planned for B03); use a single [param] segment or plain static directories", seg, dir)
+		// B03: catch-all segment. Validate the "[...name]" form; the terminal
+		// position is enforced by the caller (catchAllNotTerminal).
+		if !strings.HasSuffix(seg, "]") {
+			return fmt.Errorf("routing: INVALID_SEGMENT %q in %q: catch-all segments must be fully wrapped in brackets like [...slug]", seg, dir)
+		}
+		name := strings.TrimSuffix(strings.TrimPrefix(seg, "[..."), "]")
+		if name == "" {
+			return fmt.Errorf("routing: INVALID_SEGMENT %q in %q: catch-all segment has an empty parameter name", seg, dir)
+		}
+		if strings.ContainsAny(name, "[]/...") {
+			return fmt.Errorf("routing: INVALID_SEGMENT %q in %q: nested or dotted brackets are not valid catch-all syntax", seg, dir)
+		}
+		if !validParamName(name) {
+			return fmt.Errorf("routing: INVALID_SEGMENT %q in %q: catch-all parameter names must start with a letter or underscore and contain only letters, digits, and underscores", seg, dir)
+		}
+		return nil
 	case !strings.HasPrefix(seg, "[") || !strings.HasSuffix(seg, "]"):
 		return fmt.Errorf("routing: INVALID_SEGMENT %q in %q: dynamic segments must be fully wrapped in brackets like [id]", seg, dir)
 	case strings.Contains(seg, "[]"), strings.Contains(strings.TrimSuffix(strings.TrimPrefix(seg, "["), "]"), "["):
@@ -244,14 +324,19 @@ func pathHasParamSegment(dir string) bool {
 		if _, ok := trimParamBrackets(seg); ok {
 			return true
 		}
+		if _, ok := trimCatchAllBrackets(seg); ok {
+			return true
+		}
 	}
 	return false
 }
 
 // sortRoutes orders routes deterministically by path. Duplicate paths (an
 // error in later validation tasks) sort stably by source file as tie-break.
-// Dynamic routes sort after static ones at the same position so that static
-// paths register first and take priority in the router.
+// Dynamic routes sort after static ones, and catch-all routes after both, at
+// the same position, so static paths register first, then single-segment
+// parameters, then catch-alls — the order Fiber needs for static-first
+// matching (B03).
 func sortRoutes(routes []Route) {
 	sort.Slice(routes, func(i, j int) bool {
 		if routes[i].Path != routes[j].Path {
@@ -261,12 +346,20 @@ func sortRoutes(routes []Route) {
 	})
 }
 
-// routeSortKey rewrites ":param" segments to sort after any static segment
-// ("\x7f" is above all printable ASCII used in real path segments).
+// routeSortKey rewrites dynamic segments so they sort after any static
+// segment: ":param" becomes "\x7f..." and the catch-all "+" becomes "\xff...".
+// "\x7f" and "\xff" are above all printable ASCII used in real path segments,
+// so static paths register first, then single-segment parameters, then
+// catch-alls. Catch-alls must register LAST: a catch-all registered before a
+// static or single-segment route at the same position steals their URLs
+// (verified empirically against Fiber v3).
 func routeSortKey(p string) string {
 	segs := strings.Split(strings.TrimPrefix(p, "/"), "/")
 	for i, s := range segs {
-		if strings.HasPrefix(s, ":") {
+		switch {
+		case s == "+":
+			segs[i] = "\xff"
+		case strings.HasPrefix(s, ":"):
 			segs[i] = "\x7f" + s[1:]
 		}
 	}

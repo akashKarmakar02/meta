@@ -17,7 +17,12 @@ func TestValidateSegmentRejectsMalformedBrackets(t *testing.T) {
 		match string
 	}{
 		{"[]", "empty parameter name"},
-		{"[...slug]", "catch-all routes are not implemented"},
+		{"[...slug", "fully wrapped in brackets"},
+		{"[...]", "empty parameter name"},
+		{"[....slug]", "nested or dotted brackets"},
+		{"[...slug]extra", "fully wrapped in brackets"},
+		{"[[...slug]]", "nested brackets"},
+		{"[...my slug]", "letters, digits, and underscores"},
 		{"[..slug]", "must start with a letter or underscore"},
 		{"[id", "fully wrapped in brackets"},
 		{"id]", "fully wrapped in brackets"},
@@ -48,7 +53,7 @@ func TestValidateSegmentRejectsMalformedBrackets(t *testing.T) {
 // existing dynamic routes (the Phase 1 app uses app/products/[id]) are the
 // compatibility guarantee for this gate.
 func TestValidateSegmentAcceptsValidSegments(t *testing.T) {
-	for _, seg := range []string{"about", "products", "[id]", "[slug]", "[_private]", "[userId42]", "page", "_components"} {
+	for _, seg := range []string{"about", "products", "[id]", "[slug]", "[_private]", "[userId42]", "page", "_components", "[...slug]", "[...path]", "[...a1]"} {
 		if err := validateSegment(seg, "app/"+seg); err != nil {
 			t.Fatalf("validateSegment(%q) rejected a valid segment: %v", seg, err)
 		}
@@ -79,7 +84,8 @@ func TestDiscoverRejectsMalformedBracketRoutes(t *testing.T) {
 		seg  string
 	}{
 		{"empty name", "[]"},
-		{"catch-all", "[...slug]"},
+		{"catch-all empty name", "[...]"},
+		{"catch-all unbalanced", "[...slug"},
 		{"unbalanced open", "[id"},
 		{"unbalanced close", "id]"},
 		{"nested brackets", "[[id]]"},

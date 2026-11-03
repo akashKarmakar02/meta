@@ -51,6 +51,12 @@ type Route struct {
 	Mode RenderMode `json:"mode"`
 	// Layouts contains the nearest visual layout, or is empty if none exists.
 	Layouts []Layout `json:"layouts"`
+	// CatchAll is the declared name of the route's catch-all segment
+	// ("[...name]"), or empty when the route has no catch-all. It is the key
+	// the request-local parameter map stores the slash-joined captured value
+	// under. Path carries Fiber's bare "+" segment, which is anonymous, so the
+	// declared name is kept separately (B03).
+	CatchAll string `json:"catchAll,omitempty"`
 }
 
 // NewLayout constructs a layout descriptor after basic validation.

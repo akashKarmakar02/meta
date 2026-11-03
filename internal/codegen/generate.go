@@ -311,6 +311,9 @@ func pageSymbol(r routing.Route) string {
 func writeRouteLiteral(b *strings.Builder, r routing.Route) {
 	fmt.Fprintf(b, "\t\t{ID: %q, Path: %q, SourceFile: %q, Mode: %q",
 		r.ID, r.Path, r.SourceFile, r.Mode)
+	if r.CatchAll != "" {
+		fmt.Fprintf(b, ", CatchAll: %q", r.CatchAll)
+	}
 	if len(r.Layouts) == 0 {
 		b.WriteString("},\n")
 		return

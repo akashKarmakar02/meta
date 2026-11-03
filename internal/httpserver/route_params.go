@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"errors"
 	"net/url"
 	"strings"
 	"unicode/utf8"
@@ -32,23 +33,73 @@ func safePagePath(path string) bool {
 }
 
 // WithRouteParams captures Fiber's matched parameters into a fresh map before
-// invoking the page handler. Values are decoded once, after route segmentation.
+// invoking the page handler. Values are decoded once, after route
+// segmentation. Named parameters are single segments; a catch-all ("+") is a
+// slash-joined run of one or more segments, decoded and validated segment by
+// segment and stored under the route's declared catch-all name (B03).
 func WithRouteParams(route routing.Route, next fiber.Handler) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		params := make(map[string]string)
 		for _, segment := range strings.Split(route.Path, "/") {
-			if !strings.HasPrefix(segment, ":") {
-				continue
+			switch {
+			case segment == "+":
+				if route.CatchAll == "" {
+					// A "+" segment without a declared name is a generator
+					// bug, not a request condition; fail closed.
+					return fiber.NewError(fiber.StatusInternalServerError, "catch-all route has no declared parameter name")
+				}
+				value, err := decodeCatchAll(c.Params("+"))
+				if err != nil {
+					return fiber.NewError(fiber.StatusBadRequest, "invalid URL parameter")
+				}
+				params[route.CatchAll] = value
+			case strings.HasPrefix(segment, ":"):
+				name := segment[1:]
+				value, err := url.PathUnescape(c.Params(name))
+				if err != nil || value == "" || strings.ContainsAny(value, "/\\\x00") || value == "." || value == ".." || !utf8.ValidString(value) {
+					return fiber.NewError(fiber.StatusBadRequest, "invalid URL parameter")
+				}
+				params[name] = strings.Clone(value)
 			}
-			name := segment[1:]
-			value, err := url.PathUnescape(c.Params(name))
-			if err != nil || value == "" || strings.ContainsAny(value, "/\\\x00") || value == "." || value == ".." || !utf8.ValidString(value) {
-				return fiber.NewError(fiber.StatusBadRequest, "invalid URL parameter")
-			}
-			params[name] = strings.Clone(value)
 		}
 		c.Locals(routeParamsKey{}, params)
+		bridgeParamsToRequestContext(c, params)
 		return next(c)
+	}
+}
+
+// decodeCatchAll splits Fiber's raw catch-all capture on real "/" separators
+// and decodes each segment, rejecting the same unsafe values a single
+// parameter rejects (encoded separators, traversal, invalid UTF-8). The result
+// is the slash-joined decoded value, e.g. "getting-started/installation".
+func decodeCatchAll(raw string) (string, error) {
+	if raw == "" {
+		return "", errors.New("empty catch-all")
+	}
+	segments := strings.Split(raw, "/")
+	out := make([]string, 0, len(segments))
+	for _, seg := range segments {
+		decoded, err := url.PathUnescape(seg)
+		if err != nil || decoded == "" || strings.ContainsAny(decoded, "/\\\x00") || decoded == "." || decoded == ".." || !utf8.ValidString(decoded) {
+			return "", errors.New("unsafe catch-all segment")
+		}
+		out = append(out, decoded)
+	}
+	return strings.Join(out, "/"), nil
+}
+
+// bridgeParamsToRequestContext publishes the request's decoded parameters on
+// the underlying fasthttp RequestCtx so server-rendered templ pages can read
+// them from the render context (B03). The typed, query-aware route context is
+// deliberately deferred to B04/B05; this is only the minimal request-scoped
+// parameter bridge a catch-all SSR page needs to display its captured value.
+func bridgeParamsToRequestContext(c fiber.Ctx, params map[string]string) {
+	ctx := c.RequestCtx()
+	if ctx == nil {
+		return
+	}
+	for key, value := range params {
+		ctx.SetUserValue(key, value)
 	}
 }
 

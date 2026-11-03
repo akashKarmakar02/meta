@@ -1,0 +1,12 @@
+package docs
+
+// B03: a static route that sits under the /docs/[...slug] catch-all prefix.
+// It must win over the catch-all for the exact path /docs/intro (static-first
+// registration), proving the catch-all does not shadow static routes.
+templ DocsIntro() {
+	<main data-go-page-docs-intro>
+		<h1>Intro</h1>
+		<p data-static-docs>Static intro page, not the catch-all.</p>
+		<a href="/docs/getting-started/installation">Back to a catch-all page</a>
+	</main>
+}

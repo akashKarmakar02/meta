@@ -1,0 +1,20 @@
+package docsslug
+
+import "fmt"
+
+// B03 SSR catch-all page. The captured one-or-more-segment value is published
+// on the render context by the request-local parameter bridge (B04/B05's typed
+// API is out of scope), so the page reads it back with ctx.Value("slug").
+templ Page() {
+	<main data-go-page-docs-slug>
+		<h1>Docs</h1>
+		<p data-catchall-slug>{ fmt.Sprint(ctx.Value("slug")) }</p>
+		<nav data-docs-slug-nav>
+			<a href="/docs">Index</a>
+			<a href="/docs/intro">Intro</a>
+			<a href="/docs/getting-started/installation">Install guide</a>
+			<a href="/docs/getting-started/installation/linux">Linux install</a>
+			<a href="/products/reports/2026/summary.pdf">Open in files (CSR)</a>
+		</nav>
+	</main>
+}
