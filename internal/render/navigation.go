@@ -1,6 +1,7 @@
 package render
 
 import (
+	"encoding/json"
 	"fmt"
 	"html"
 	"strconv"
@@ -106,7 +107,11 @@ func csrTitle(path string) string {
 // no server-rendered HTML — the browser mounts the page component — with
 // clientEntry set to the stable source-derived route ID. The handler adds
 // server-rendered visual-layout HTML when the selected layout is templ.
-func CSRNavigationEnvelope(c fiber.Ctx, route routing.Route) httpserver.NavigationResponse {
+//
+// data is the optional C04 loader payload (the exact JSON bytes from the
+// server, or nil when the route has no loader). It is attached verbatim so
+// the browser can hand it to the mounted page; nil leaves the field absent.
+func CSRNavigationEnvelope(c fiber.Ctx, route routing.Route, data json.RawMessage) httpserver.NavigationResponse {
 	entry := route.ID
 	return httpserver.NavigationResponse{
 		Version:     httpserver.NavigationVersion,
@@ -117,6 +122,7 @@ func CSRNavigationEnvelope(c fiber.Ctx, route routing.Route) httpserver.Navigati
 		Layouts:     layoutIDs(route),
 		HTML:        "",
 		ClientEntry: &entry,
+		Data:        data,
 	}
 }
 
@@ -190,7 +196,7 @@ func SSRNavigationHandler(route routing.Route, assets *httpserver.Assets, compos
 				return fmt.Errorf("render %s: %w", route.Path, err)
 			}
 			c.Set(fiber.HeaderContentType, "text/html; charset=utf-8")
-			return c.SendString(document(string(htmlDoc), tags, "go-meta"))
+			return c.SendString(document(string(htmlDoc), tags, "go-meta", ""))
 		}
 		bareComponent, err := bare(route)
 		if err != nil {
@@ -216,6 +222,28 @@ func SSRNavigationHandler(route routing.Route, assets *httpserver.Assets, compos
 	}
 }
 
+// csrDataRaw returns the loader payload as a json.RawMessage for the
+// navigation envelope, or nil (field omitted) when the route has no loader.
+func csrDataRaw(data []byte, hasData bool) json.RawMessage {
+	if !hasData {
+		return nil
+	}
+	return json.RawMessage(data)
+}
+
+// csrDataScript renders the C04 initial-data payload as a non-executable
+// <script type="application/json"> element for the boot shell. The bytes come
+// from encoding/json.Marshal, which HTML-escapes <, > and &, so a literal
+// </script> cannot appear in the payload and break out of the element. The
+// element is empty when the route has no loader. The browser reads it by id,
+// not by evaluating it, so it is inert under a strict CSP.
+func csrDataScript(data []byte, hasData bool) string {
+	if !hasData {
+		return ""
+	}
+	return `<script id="go-meta-csr-data" type="application/json">` + string(data) + `</script>`
+}
+
 // CSRNavigationHandler adapts a CSR route into a Fiber handler serving
 // either the boot shell (normal GET, E10 contract) or a navigation
 // envelope describing what the browser must mount (header present).
@@ -231,11 +259,17 @@ func CSRNavigationHandler(route routing.Route, assets *httpserver.Assets, resolv
 		if err != nil {
 			return err
 		}
+		// C04: the loader result (if any) was attached to the context by
+		// WithLoader. It is delivered the same way on both response modes —
+		// embedded in the boot shell for a direct load, or attached to the
+		// envelope for soft navigation — so the browser never needs an extra
+		// fetch for initial data.
+		data, hasData := httpserver.CSRLoaderData(c.Context())
 		if !IsNavigationRequest(c) {
 			c.Set(fiber.HeaderContentType, "text/html; charset=utf-8")
-			return c.SendString(document(visual, entryTags(assets), route.ID))
+			return c.SendString(document(visual, entryTags(assets), route.ID, csrDataScript(data, hasData)))
 		}
-		env := CSRNavigationEnvelope(c, route)
+		env := CSRNavigationEnvelope(c, route, csrDataRaw(data, hasData))
 		if len(route.Layouts) > 0 && route.Layouts[0].Mode == routing.ModeSSR {
 			env.HTML = visual
 		}

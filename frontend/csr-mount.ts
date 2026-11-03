@@ -125,6 +125,8 @@ export async function mountCsrPage(
     outlet.appendChild(pageRoot);
   }
 
-  const handle = mountComponent(component, { target: pageRoot });
+  // C04: hand the envelope's loader payload (if any) to the page as a prop
+  // before it mounts. Absent (undefined) when the route has no loader.
+  const handle = mountComponent(component, { target: pageRoot, props: { data: env.data } });
   return { ...handle, pageRoot };
 }

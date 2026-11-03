@@ -20,7 +20,7 @@ import (
 // VisualLayoutResolver applies the selected server-owned visual layout.
 type VisualLayoutResolver func(routing.Route, templ.Component) (templ.Component, error)
 
-func document(content, tags, title string) string {
+func document(content, tags, title, dataScript string) string {
 	styles, script := tags, ""
 	if i := strings.Index(tags, "<script"); i >= 0 {
 		styles, script = tags[:i], tags[i:]
@@ -28,7 +28,7 @@ func document(content, tags, title string) string {
 	return "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">" +
 		"<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>" +
 		html.EscapeString(title) + "</title>" + styles + "</head><body><div data-go-page-outlet>" +
-		content + "</div>" + script + "</body></html>"
+		content + "</div>" + dataScript + script + "</body></html>"
 }
 
 func csrMountMarkup(route routing.Route) string {
@@ -71,7 +71,7 @@ func csrVisual(ctx context.Context, route routing.Route, resolve VisualLayoutRes
 // come from the manifest via httpserver.Assets — never hardcoded. The
 // E09 static middleware serves them under the same /assets prefix.
 func Shell(route routing.Route, assets *httpserver.Assets) string {
-	return document(csrMountMarkup(route), entryTags(assets), route.ID)
+	return document(csrMountMarkup(route), entryTags(assets), route.ID, "")
 }
 
 // ShellHandler returns a Fiber handler that responds with the rendered

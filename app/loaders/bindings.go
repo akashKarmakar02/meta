@@ -8,5 +8,6 @@ import "go-meta/loader"
 func Bindings() []loader.Binding {
 	return []loader.Binding{
 		loader.Bind("posts/[postId]/page.templ", LoadPost),
+		loader.Bind("dashboard/[teamId]/page.svelte", LoadDashboard),
 	}
 }

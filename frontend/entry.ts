@@ -29,6 +29,7 @@ import {
 } from './layout-mount';
 import { startSoftNavigation, adoptMountedInstances, adoptMountedPage } from './navigation-pipeline';
 import type { NavigationResponse } from './types';
+import { readInitialLoaderData } from './loader-data';
 
 const PageRootSelector = '[data-go-page-root]';
 const RouteIDAttr = 'data-go-route-id';
@@ -57,6 +58,11 @@ async function boot(): Promise<void> {
     // page; the navigation runtime (later phase) will hard-navigate.
     return;
   }
+
+  // C04: the initial loader payload is embedded in the boot shell (not fetched
+  // separately) and handed to the page as a prop before it mounts. Absent
+  // (undefined) when the route has no registered loader.
+  const initialData = readInitialLoaderData();
 
   // G04 direct-load layout entry: mount every CLIENT layout in the
   // declared chain (outermost first — one per chain position today),
@@ -96,12 +102,12 @@ async function boot(): Promise<void> {
       clientEntry: routeId,
     } satisfies NavigationResponse;
     pageTarget = createLayoutPageRoot(currentLayout!.outlet, env);
-    const handle = mountComponent(component, { target: pageTarget });
+    const handle = mountComponent(component, { target: pageTarget, props: { data: initialData } });
     bootPage = { ...handle, pageRoot: pageTarget };
     return;
   }
 
-  currentPage = mountComponent(component, { target: pageTarget });
+  currentPage = mountComponent(component, { target: pageTarget, props: { data: initialData } });
   if (clientChain.length === 0) {
     bootPage = { ...currentPage, pageRoot: pageTarget };
   }

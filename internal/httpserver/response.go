@@ -18,15 +18,23 @@ const NavigationHeader = "X-Go-Web-Navigation"
 // HTML carries server-owned templ output only, including the visual layout
 // and (for CSR under templ) the page mount. ClientEntry maps to the
 // generated static import registry; it is never evaluated as a path.
+//
+// Data is the optional C04 CSR loader payload. It is json.RawMessage so the
+// exact JSON bytes produced by the server are preserved verbatim (including a
+// legitimate JSON null), and omitempty so routes without a loader omit the
+// field entirely — letting the client distinguish "no loader" from "loader
+// returned null". SSR envelopes leave Data nil, so the field is absent and
+// existing SSR behavior is unchanged.
 type NavigationResponse struct {
-	Version     int      `json:"version"`
-	URL         string   `json:"url"`
-	RouteID     string   `json:"routeId"`
-	Mode        string   `json:"mode"` // "ssr" | "csr"
-	Title       string   `json:"title"`
-	Layouts     []string `json:"layouts"`
-	HTML        string   `json:"html"`
-	ClientEntry *string  `json:"clientEntry"`
+	Version     int             `json:"version"`
+	URL         string          `json:"url"`
+	RouteID     string          `json:"routeId"`
+	Mode        string          `json:"mode"` // "ssr" | "csr"
+	Title       string          `json:"title"`
+	Layouts     []string        `json:"layouts"`
+	HTML        string          `json:"html"`
+	ClientEntry *string         `json:"clientEntry"`
+	Data        json.RawMessage `json:"data,omitempty"`
 }
 
 // MarshalNavigation serializes the envelope with the exact wire shape

@@ -168,8 +168,8 @@ errors, including their causes, remain intact. Do not send raw internal errors
 to clients. C05 will decide HTTP and navigation mappings and redirect handling;
 no redirect outcome is defined here. C02 registration adapts a typed loader at
 the runtime boundary; C03 connects typed data to templ and runs SSR loaders
-automatically (see "Executing SSR loaders (C03)"); C04 will decide what may be
-serialized for clients.
+automatically (see "Executing SSR loaders (C03)"); C04 runs CSR loaders and
+serializes their results to JSON for clients (see "Executing CSR loaders (C04)").
 
 ## Registering loaders (C02)
 
@@ -215,7 +215,8 @@ registry. `Registered.Execute` returns a type-erased value and the original
 error, and requires the matching route snapshot; C03 uses it as the dispatch
 boundary to run SSR loaders and deliver typed data to templ. Registration and
 lookup never run loaders, and C02 adds no loader data to SSR or navigation
-responses. C04 will decide what may be serialized for clients.
+responses. C03/C04 run loaders and deliver their results (typed for SSR, JSON
+for CSR).
 
 `meta dev` rebuilds after edits to this ordinary Go package. Route creation,
 rename, and deletion still use the route reconciler and generator. A binding
@@ -295,6 +296,103 @@ serialization of results, no caching, prefetching, retries, or concurrent
 multi-loader orchestration, no streaming SSR, and no redirect/status mapping
 (C05). The loader is never invoked at startup, registration, code generation, or
 reconciliation — only during a matched SSR render.
+
+## Executing CSR loaders (C04)
+
+For every matched **CSR** request, the framework runs the route's registered
+loader **exactly once**, JSON-serializes its result, and hands it to the Svelte
+page **before it mounts** — on both a direct full-document load and a soft
+navigation. SSR routes are untouched: they keep C03's typed `loaderdata` delivery
+and are never JSON-serialized into the envelope.
+
+A CSR loader is defined and registered exactly as in C02/C03. The result reaches
+the page as a **`data` prop** (the simplest mechanism compatible with the Svelte 5
+mount code). The Go side serializes with `encoding/json`; the client reads the
+value through the `frontend/loader-data.ts` boundary, which keeps the transport
+type as `unknown` and lets each page declare its own expected type.
+
+```go
+// app/loaders/dashboard.go
+type DashboardData struct {
+    TeamID   string `json:"teamId"`
+    Title    string `json:"title"`
+    Greeting string `json:"greeting"` // not derivable from the URL
+}
+
+func LoadDashboard(ctx context.Context, route routecontext.Route) (DashboardData, error) {
+    teamID, _ := route.Params.Get("teamId")
+    return DashboardData{TeamID: teamID, Title: "Team " + teamID, Greeting: "Loaded by Go"}, nil
+}
+```
+
+```go
+// app/loaders/bindings.go
+loader.Bind("dashboard/[teamId]/page.svelte", LoadDashboard),
+```
+
+```svelte
+<!-- app/dashboard/[teamId]/page.svelte -->
+<script lang="ts">
+  let { data } = $props<{ data?: { teamId: string; title: string; greeting: string } }>();
+</script>
+{#if data}
+  <h1>{data.greeting}: {data.title}</h1>
+{:else}
+  <p>No loader data for this route.</p>
+{/if}
+```
+
+**When it executes.** Once per direct full-document request and once per
+navigation-envelope request, before the response is published. It does not run on
+static assets, invalid or unmatched paths, unsupported methods, or during
+registration/generation. A route with no registered loader keeps the existing
+shell (no data script is embedded).
+
+**Transport.** The serialized JSON travels in one consistent place for both paths:
+- **Direct load:** embedded in the shell as a `<script
+  type="application/json" id="go-meta-loader-data">` element, read by the
+  bootstrap before the page mounts.
+- **Soft navigation:** an optional `data` field on the existing **version-1**
+  navigation envelope (no version bump, no new required fields).
+
+`encoding/json` HTML-escapes `<`, `>`, and `&` by default, so the embedded bytes
+cannot close the `<script>` element — a payload containing `</script>` is emitted
+as `</script>` and cannot break out. The client never executes the
+payload as JavaScript; it is parsed as JSON.
+
+**Absent vs `null`.** A route with no loader omits the `data` field entirely. A
+loader that returns a JSON `null` produces an explicit `"data": null`. The client
+distinguishes the two: `loaderDataPresent(env)` is false for an absent field but
+true for `null`, so a page can tell "no loader" apart from "a loader returned
+null".
+
+**Persistent layouts.** Nearest-layout-wins is unchanged. Navigating between
+sibling CSR routes under the same layout preserves the layout instance and only
+updates the page (and its fresh `data` prop); leaving the subtree disposes the
+layout. Loader data is delivered per page mount, so a retained layout never shows
+stale page data.
+
+**Cancellation and stale navigation.** The loader runs with the B05
+request-lifetime context. A browser `AbortController` cancels the *fetch
+consumption*, but that does not guarantee the server cancels the in-flight loader
+(Fiber does not wire client disconnects into the request context). The existing
+monotonic navigation IDs, abort handling, and serialized commit queue are
+preserved: a stale navigation's data is never mounted, applied to props, or
+committed to history, because the client only consumes a response after the
+freshness check.
+
+**Failure behavior (temporary).** A loader error or a JSON serialization failure
+(preventing a successful publication with partial data) stops the request before
+the page is published: the original error is logged server-side and the client
+receives a generic `500`, which the navigation engine treats as a failed
+navigation (hard-navigation fallback). C04 does **not** map loader sentinels to
+specific statuses or redirects — that is C05.
+
+**What C04 does not do.** No C05 error/redirect mapping, no C06 integration gate,
+no caching, prefetching, retries, or concurrent multi-loader orchestration, no
+streaming, no server actions, no client-side route matching, no generated
+Go→TypeScript types, and no client-side schema validation (pages declare their
+type; the transport boundary is `unknown`).
 
 ## Toolchain requirements
 

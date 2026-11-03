@@ -106,8 +106,8 @@ func TestC03SSRExecutesRegisteredLoaderEndToEnd(t *testing.T) {
 }
 
 // TestC03LoaderExecutionCountAndIsolation uses a custom registry with counting
-// loaders to prove: SSR loaders run exactly once per request, CSR loaders are
-// never run, the loader receives the correct route snapshot (params + query),
+// loaders to prove: SSR and CSR loaders each run exactly once per matched
+// request, the loader receives the correct route snapshot (params + query),
 // and concurrent requests are isolated.
 func TestC03LoaderExecutionCountAndIsolation(t *testing.T) {
 	var ssrCalls, csrCalls atomic.Int32
@@ -151,13 +151,15 @@ func TestC03LoaderExecutionCountAndIsolation(t *testing.T) {
 		t.Fatalf("SSR loader ran %d times after 2 requests, want 2", ssrCalls.Load())
 	}
 
-	// CSR route: the registered loader must NOT run.
+	// CSR route: C04 executes the registered loader once and serializes the
+	// result to JSON for the browser (the C03 "CSR never runs" guarantee is
+	// intentionally superseded).
 	code, _ = getBody(t, app, "csr", "/products/42", false)
 	if code != 200 {
 		t.Fatalf("csr status=%d", code)
 	}
-	if csrCalls.Load() != 0 {
-		t.Fatalf("CSR loader ran %d times, want 0 (C03 must not execute CSR loaders)", csrCalls.Load())
+	if csrCalls.Load() != 1 {
+		t.Fatalf("CSR loader ran %d times, want 1 (C04 executes CSR loaders)", csrCalls.Load())
 	}
 
 	// Unmatched and invalid requests run no loader.

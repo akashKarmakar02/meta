@@ -85,7 +85,11 @@ func newConfiguredApp(assets *httpserver.Assets, privateSocket bool, registry *l
 			// no-op when the registry is nil or the route has no binding.
 			fapp.Get(routing.FiberRegistrationPath(route.Path), httpserver.WithRouteParams(route, httpserver.WithLoader(registry, route, render.SSRNavigationHandler(route, assets, routes.SSRPage, routes.BarePage, routes.VisualLayout))))
 		case routing.ModeCSR:
-			fapp.Get(routing.FiberRegistrationPath(route.Path), httpserver.WithRouteParams(route, render.CSRNavigationHandler(route, assets, routes.VisualLayout)))
+			// C04: run the route's registered loader (if any) before serving the
+			// CSR shell or envelope, serializing the result to JSON for the
+			// browser. WithLoader is a no-op when the registry is nil or the
+			// route has no binding.
+			fapp.Get(routing.FiberRegistrationPath(route.Path), httpserver.WithRouteParams(route, httpserver.WithLoader(registry, route, render.CSRNavigationHandler(route, assets, routes.VisualLayout))))
 		}
 	}
 

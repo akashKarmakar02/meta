@@ -179,4 +179,36 @@ describe('mountCsrPage (F08)', () => {
     const root = document.querySelector(PageRootSelector) as HTMLElement;
     expect(root.querySelectorAll('[data-go-page="dashboard"]')).toHaveLength(1);
   });
+
+  it('hands the envelope data to the page as a prop before mount (C04)', async () => {
+    // The dashboard/[teamId] page renders the server-defined greeting, which
+    // cannot be derived from the URL — proving the value came from the
+    // envelope's data field, not window.location.
+    const env = csrEnvelope({
+      url: '/dashboard/team-42',
+      routeId: 'dashboard/[teamId]/page.svelte',
+      clientEntry: 'dashboard/[teamId]/page.svelte',
+      title: 'Team',
+      data: { teamId: 'team-42', title: 'Team team-42', greeting: 'Loaded by Go' },
+    });
+    const handle = await mountCsrPage(env);
+    expect(handle.mounted).toBe(true);
+    const root = document.querySelector(PageRootSelector) as HTMLElement;
+    expect(root.querySelector('[data-go-page="dashboard-team"]')).not.toBeNull();
+    expect(root.textContent).toContain('Loaded by Go');
+    expect(root.textContent).toContain('Team team-42');
+  });
+
+  it('renders the no-data fallback when the envelope has no data (C04)', async () => {
+    const env = csrEnvelope({
+      url: '/dashboard/team-42',
+      routeId: 'dashboard/[teamId]/page.svelte',
+      clientEntry: 'dashboard/[teamId]/page.svelte',
+      title: 'Team',
+    });
+    const handle = await mountCsrPage(env);
+    expect(handle.mounted).toBe(true);
+    const root = document.querySelector(PageRootSelector) as HTMLElement;
+    expect(root.querySelector('[data-go-no-data]')).not.toBeNull();
+  });
 });

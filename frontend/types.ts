@@ -34,4 +34,8 @@ export interface NavigationResponse {
   layouts: string[];
   html: string;
   clientEntry: string | null;
+  // C04: optional CSR loader payload. Absent when the route has no registered
+  // loader; present (possibly JSON null) when a loader ran. The transport
+  // boundary is `unknown` — page authors narrow it to their own type.
+  data?: unknown;
 }

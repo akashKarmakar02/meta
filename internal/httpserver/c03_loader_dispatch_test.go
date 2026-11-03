@@ -95,12 +95,53 @@ func TestWithLoaderSkipsRouteWithoutBinding(t *testing.T) {
 	}
 }
 
-func TestWithLoaderDoesNotExecuteCSRRoute(t *testing.T) {
+// TestWithLoaderExecutesCSRRouteAndSerializesJSON is the C04 counterpart to
+// the C03 "CSR does not execute" test: CSR loaders now run once and their
+// result is JSON-serialized onto the context for browser delivery.
+func TestWithLoaderExecutesCSRRouteAndSerializesJSON(t *testing.T) {
 	var calls atomic.Int32
 	reg, err := loader.NewRegistry([]string{"page.svelte"},
 		loader.Bind("page.svelte", func(context.Context, routecontext.Route) (postResult, error) {
 			calls.Add(1)
-			return postResult{}, nil
+			return postResult{ID: 5, Title: "Team"}, nil
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route := routing.Route{ID: "page.svelte", SourceFile: "page.svelte", Path: "/csr", Mode: routing.ModeCSR}
+	var captured []byte
+	app := fiber.New()
+	app.Get(route.Path, httpserver.WithRouteParams(route, httpserver.WithLoader(reg, route, func(c fiber.Ctx) error {
+		if data, ok := httpserver.CSRLoaderData(c.Context()); ok {
+			captured = data
+		}
+		return c.SendString("ok")
+	})))
+
+	res, err := app.Test(httptest.NewRequest("GET", "/csr", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("status=%d", res.StatusCode)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("CSR loader ran %d times, want 1", calls.Load())
+	}
+	if string(captured) != `{"ID":5,"Title":"Team"}` {
+		t.Fatalf("serialized CSR data=%q", captured)
+	}
+}
+
+// TestWithLoaderCSRSerializationFailureStopsRender proves an unsupported
+// result type (a function) prevents a successful CSR response rather than
+// publishing a page with missing data.
+func TestWithLoaderCSRSerializationFailureStopsRender(t *testing.T) {
+	reg, err := loader.NewRegistry([]string{"page.svelte"},
+		loader.Bind("page.svelte", func(context.Context, routecontext.Route) (func(), error) {
+			return func() {}, nil
 		}),
 	)
 	if err != nil {
@@ -108,19 +149,20 @@ func TestWithLoaderDoesNotExecuteCSRRoute(t *testing.T) {
 	}
 	route := routing.Route{ID: "page.svelte", SourceFile: "page.svelte", Path: "/csr", Mode: routing.ModeCSR}
 	app := fiber.New()
-	app.Get(route.Path, httpserver.WithRouteParams(route, httpserver.WithLoader(reg, route, renderProbe)))
-
+	app.Get(route.Path, httpserver.WithRouteParams(route, httpserver.WithLoader(reg, route, func(c fiber.Ctx) error {
+		return c.SendString("should not render")
+	})))
 	res, err := app.Test(httptest.NewRequest("GET", "/csr", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer res.Body.Close()
 	body, _ := io.ReadAll(res.Body)
-	if res.StatusCode != 200 || string(body) != "absent" {
-		t.Fatalf("status=%d body=%q", res.StatusCode, body)
+	if res.StatusCode != 500 {
+		t.Fatalf("status=%d, want 500 (serialization failure must stop render)", res.StatusCode)
 	}
-	if calls.Load() != 0 {
-		t.Fatalf("CSR loader ran %d times, want 0", calls.Load())
+	if string(body) == "should not render" {
+		t.Fatalf("page rendered despite serialization failure")
 	}
 }
 

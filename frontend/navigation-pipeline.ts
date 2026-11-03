@@ -185,7 +185,11 @@ async function mountPageInLayout(
   component: unknown
 ): Promise<CsrPageHandle> {
   const pageRoot = createLayoutPageRoot(layout.outlet, env);
-  const handle = mountComponent(component as Parameters<typeof mountComponent>[0], { target: pageRoot });
+  // C04: pass the envelope's loader payload (if any) to the page as a prop.
+  const handle = mountComponent(component as Parameters<typeof mountComponent>[0], {
+    target: pageRoot,
+    props: { data: env.data },
+  });
   return { ...handle, pageRoot };
 }
 

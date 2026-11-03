@@ -107,8 +107,10 @@ export async function swapLayoutChildPage(
   // root) and stamps the destination route metadata.
   const pageRoot = createLayoutPageRoot(outlet, env);
 
+  // C04: pass the envelope's loader payload (if any) to the page as a prop.
   const handle = mountComponent(component as Parameters<typeof mountComponent>[0], {
     target: pageRoot,
+    props: { data: env.data },
   });
   return { ...handle, pageRoot };
 }
