@@ -26,6 +26,50 @@ Package-local `//go:embed` assets in dynamic templ packages are not yet staged.
 Run `make generate` rather than invoking `templ generate` directly, so generated
 Go is kept out of bracket-named source directories.
 
+## Request route context
+
+In templ rendering, `go-meta/routecontext` exposes the matched source-derived
+route ID, declared pattern, B04 typed parameters, and query values:
+
+```templ
+import "go-meta/routecontext"
+
+templ Page() {
+    {{ route, _ := routecontext.FromContext(ctx) }}
+    <p>{ route.RouteID }</p>
+    <p>{ route.Pattern }</p>
+    <p>{ route.Query.Get("tab") }</p>
+    for _, tag := range route.Query.Values("tag") {
+        <span>{ tag }</span>
+    }
+}
+```
+
+Use `route.Params.Int64("userId")` for a typed path parameter. The existing
+`routeparams.FromContext(ctx)` returns the same parameters. Query `Get`,
+`Values`, `Has`, and `All` preserve repeated keys; returned slices and maps
+are copies, and query key case is preserved. Route snapshots can be retained
+after the request. No context is
+attached before route dispatch or for unknown, invalid, or unsupported-method
+requests. Upstream Fiber middleware returning from `Next` can observe the
+matched snapshot on `c.Context()`, but that context is already cancelled.
+Route metadata is server-side and is not added to navigation JSON.
+
+Matched-page queries use Go's `url.ParseQuery`: `+` and `%20` mean space, a key
+without `=` has an empty value, and malformed percent escapes or unescaped
+semicolons produce HTTP 400. Query strings over 8192 bytes receive 414 if the
+HTTP server has not already rejected the request header. Query decoding happens once and
+does not affect path parameters.
+
+The render context inherits cancellation and deadlines from a context already
+set by Fiber middleware and is cancelled when matched-route dispatch returns.
+Fiber defaults to a background context. The pinned fasthttp request context
+does not signal client disconnects; it signals server shutdown instead, and
+that signal is not automatically propagated to Fiber's user context. Do not
+retain Fiber or fasthttp objects for background work. Retain a route snapshot
+and use a separately owned context for work that must outlive the request.
+This is route metadata access, not the future Phase C loader API.
+
 Routes may include multiple single-segment parameters, for example
 `users/[userId]/posts/[postId]/page.templ` matches `/users/42/posts/99`.
 Fiber selects the route and the server captures each named value separately

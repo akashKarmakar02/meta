@@ -1,17 +1,24 @@
 package httpserver
 
 import (
+	"context"
 	"errors"
 	"net/url"
+	"path"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/gofiber/fiber/v3"
 	"go-meta/internal/routing"
+	"go-meta/routecontext"
 	"go-meta/routeparams"
 )
 
 type routeParamsKey struct{}
+
+// maxQueryBytes bounds parsing even for in-process callers that bypass the
+// production server's request-header size limit.
+const maxQueryBytes = 8192
 
 // ValidatePagePath rejects encoded separators and traversal before Fiber's
 // normalization can turn them into a different route. Trailing and repeated
@@ -64,7 +71,31 @@ func WithRouteParams(route routing.Route, next fiber.Handler) fiber.Handler {
 			}
 		}
 		c.Locals(routeParamsKey{}, params)
-		bridgeParamsToRequestContext(c, params)
+		queryBytes := c.Request().URI().QueryString()
+		if len(queryBytes) > maxQueryBytes {
+			return fiber.NewError(fiber.StatusRequestURITooLong, "query string too long")
+		}
+		rawQuery := strings.Clone(string(queryBytes))
+		query, err := url.ParseQuery(rawQuery)
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, "invalid query string")
+		}
+		typed := routeparams.NewParams(params)
+		bridgeParamsToRequestContext(c, params, typed)
+		ctx, cancel := context.WithCancel(c.Context())
+		defer cancel()
+		ctx = routeparams.WithContext(ctx, typed)
+		for key, value := range params {
+			// Preserve B03's legacy string-key access in templ render contexts.
+			ctx = context.WithValue(ctx, key, value)
+		}
+		ctx = routecontext.WithContext(ctx, routecontext.Route{
+			RouteID: route.ID,
+			Pattern: declarationPattern(route),
+			Params:  typed,
+			Query:   routecontext.NewQuery(query),
+		})
+		c.SetContext(ctx)
 		return next(c)
 	}
 }
@@ -99,17 +130,28 @@ func decodeCatchAll(raw string) (string, error) {
 //     pages written before the typed API keep working.
 //
 // Both are request-scoped: fasthttp clears the RequestCtx user values when the
-// pooled request is reset, so values never leak between requests. The broader
-// query-aware route context is deferred to B05.
-func bridgeParamsToRequestContext(c fiber.Ctx, params map[string]string) {
+// pooled request is reset, so values never leak between requests. Rendering
+// uses the independent standard context constructed by WithRouteParams.
+func bridgeParamsToRequestContext(c fiber.Ctx, params map[string]string, typed routeparams.Params) {
 	ctx := c.RequestCtx()
 	if ctx == nil {
 		return
 	}
-	routeparams.Attach(ctx, routeparams.NewParams(params))
+	routeparams.Attach(ctx, typed)
 	for key, value := range params {
 		ctx.SetUserValue(key, value)
 	}
+}
+
+func declarationPattern(route routing.Route) string {
+	if route.SourceFile == "" {
+		return route.Path
+	}
+	dir := path.Dir(route.SourceFile)
+	if dir == "." {
+		return "/"
+	}
+	return "/" + dir
 }
 
 // RouteParams returns an independent snapshot of the request's matched

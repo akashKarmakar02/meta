@@ -185,7 +185,7 @@ func SSRNavigationHandler(route routing.Route, assets *httpserver.Assets, compos
 			if err != nil {
 				return fmt.Errorf("routes: SSRPage: %w", err)
 			}
-			htmlDoc, err := RenderComponent(c.RequestCtx(), component)
+			htmlDoc, err := RenderComponent(c.Context(), component)
 			if err != nil {
 				return fmt.Errorf("render %s: %w", route.Path, err)
 			}
@@ -196,7 +196,7 @@ func SSRNavigationHandler(route routing.Route, assets *httpserver.Assets, compos
 		if err != nil {
 			return fmt.Errorf("routes: BarePage: %w", err)
 		}
-		bareHTML, err := RenderComponent(c.RequestCtx(), bareComponent)
+		bareHTML, err := RenderComponent(c.Context(), bareComponent)
 		if err != nil {
 			return fmt.Errorf("render bare page %s: %w", route.Path, err)
 		}
@@ -206,7 +206,7 @@ func SSRNavigationHandler(route routing.Route, assets *httpserver.Assets, compos
 		if err != nil {
 			return fmt.Errorf("routes: VisualLayout: %w", err)
 		}
-		visualHTML, err := RenderComponent(c.RequestCtx(), visual)
+		visualHTML, err := RenderComponent(c.Context(), visual)
 		if err != nil {
 			return fmt.Errorf("render visual layout %s: %w", route.Path, err)
 		}
@@ -227,7 +227,7 @@ func CSRNavigationHandler(route routing.Route, assets *httpserver.Assets, resolv
 		resolve = resolvers[0]
 	}
 	return func(c fiber.Ctx) error {
-		visual, err := csrVisual(c.RequestCtx(), route, resolve, string(c.Request().URI().PathOriginal()))
+		visual, err := csrVisual(c.Context(), route, resolve, string(c.Request().URI().PathOriginal()))
 		if err != nil {
 			return err
 		}

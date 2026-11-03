@@ -11,8 +11,8 @@
 //
 // Params is deliberately small: string access plus strict numeric and boolean
 // conversions. It is server-side only; there is no client-side (JavaScript)
-// counterpart in this release. Query parameters, loaders, and the broader
-// route context are out of scope (they belong to later Phase 2 tasks).
+// counterpart in this release. Query values and matched-route metadata are
+// available through the separate routecontext package; loaders are future work.
 //
 // The package imports only the standard library. It never imports Fiber or
 // fasthttp and never exposes a Fiber request object: the framework-facing
@@ -233,8 +233,8 @@ func (e *paramError) Unwrap() []error {
 // FromContext returns the Params attached to ctx by the framework, or an
 // empty Params if none was attached. It never panics and never returns nil.
 //
-// In a templ component, ctx is the render context (the fasthttp request
-// context), so this is the standard way to read route parameters:
+// In a templ component, ctx is the framework's request-lifetime render
+// context, so this is the standard way to read route parameters:
 //
 //	params := routeparams.FromContext(ctx)
 func FromContext(ctx context.Context) Params {
@@ -249,9 +249,8 @@ func FromContext(ctx context.Context) Params {
 
 // WithContext returns a copy of ctx carrying params. It is the pure-Go way to
 // attach parameters to a context and is useful in tests and in non-Fiber
-// rendering paths. In the Fiber render path the framework uses Attach, which
-// stores the value on the request context so it survives templ's context
-// wrapping.
+// rendering paths. The framework also keeps Attach for existing fasthttp
+// integrations.
 func WithContext(ctx context.Context, params Params) context.Context {
 	return context.WithValue(ctx, key{}, params)
 }

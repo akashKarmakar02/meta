@@ -26,7 +26,7 @@ func RenderComponent(ctx context.Context, component templ.Component) ([]byte, er
 // response details out of page handlers and components.
 func SSRHandler(routePath string, component templ.Component) fiber.Handler {
 	return func(c fiber.Ctx) error {
-		html, err := RenderComponent(c.RequestCtx(), component)
+		html, err := RenderComponent(c.Context(), component)
 		if err != nil {
 			return fmt.Errorf("render %s: %w", routePath, err)
 		}
