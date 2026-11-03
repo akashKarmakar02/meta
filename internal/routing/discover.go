@@ -260,6 +260,9 @@ func catchAllNonTerminalSegment(dir string) string {
 func validateSegment(seg, dir string) error {
 	brackety := strings.HasPrefix(seg, "[") || strings.HasSuffix(seg, "]")
 	if !brackety {
+		if strings.ContainsAny(seg, ":*+?\\") {
+			return fmt.Errorf("routing: INVALID_SEGMENT %q in %q: static segments cannot contain Fiber route metacharacters", seg, dir)
+		}
 		return nil
 	}
 	switch {
@@ -331,37 +334,56 @@ func pathHasParamSegment(dir string) bool {
 	return false
 }
 
-// sortRoutes orders routes deterministically by path. Duplicate paths (an
-// error in later validation tasks) sort stably by source file as tie-break.
-// Dynamic routes sort after static ones, and catch-all routes after both, at
-// the same position, so static paths register first, then single-segment
-// parameters, then catch-alls — the order Fiber needs for static-first
-// matching (B03).
+// sortRoutes orders registrations by the first differing segment: static,
+// named parameter, then catch-all. Parameter names do not affect specificity.
+// Literal and source ordering break ties deterministically for disjoint routes
+// and for invalid equivalent declarations awaiting validation.
 func sortRoutes(routes []Route) {
 	sort.Slice(routes, func(i, j int) bool {
+		a, b := strings.Split(strings.TrimPrefix(routes[i].Path, "/"), "/"), strings.Split(strings.TrimPrefix(routes[j].Path, "/"), "/")
+		for n := 0; n < len(a) && n < len(b); n++ {
+			ar, br := segmentRank(a[n]), segmentRank(b[n])
+			if ar != br {
+				return ar < br
+			}
+			if ar == 0 && a[n] != b[n] {
+				return a[n] < b[n]
+			}
+		}
+		if len(a) != len(b) {
+			return len(a) < len(b)
+		}
 		if routes[i].Path != routes[j].Path {
-			return routeSortKey(routes[i].Path) < routeSortKey(routes[j].Path)
+			return routes[i].Path < routes[j].Path
 		}
 		return routes[i].SourceFile < routes[j].SourceFile
 	})
 }
 
-// routeSortKey rewrites dynamic segments so they sort after any static
-// segment: ":param" becomes "\x7f..." and the catch-all "+" becomes "\xff...".
-// "\x7f" and "\xff" are above all printable ASCII used in real path segments,
-// so static paths register first, then single-segment parameters, then
-// catch-alls. Catch-alls must register LAST: a catch-all registered before a
-// static or single-segment route at the same position steals their URLs
-// (verified empirically against Fiber v3).
-func routeSortKey(p string) string {
-	segs := strings.Split(strings.TrimPrefix(p, "/"), "/")
-	for i, s := range segs {
-		switch {
-		case s == "+":
-			segs[i] = "\xff"
-		case strings.HasPrefix(s, ":"):
-			segs[i] = "\x7f" + s[1:]
-		}
+func segmentRank(segment string) int {
+	if segment == "+" {
+		return 2
 	}
-	return "/" + strings.Join(segs, "/")
+	if strings.HasPrefix(segment, ":") {
+		return 1
+	}
+	return 0
+}
+
+// FiberRegistrationPath encodes non-ASCII literals for Fiber's default
+// escaped-path matcher. Parameter syntax and public route metadata stay intact.
+func FiberRegistrationPath(p string) string {
+	const hex = "0123456789ABCDEF"
+	var out strings.Builder
+	for i := 0; i < len(p); i++ {
+		b := p[i]
+		if b < 0x80 {
+			out.WriteByte(b)
+			continue
+		}
+		out.WriteByte('%')
+		out.WriteByte(hex[b>>4])
+		out.WriteByte(hex[b&15])
+	}
+	return out.String()
 }

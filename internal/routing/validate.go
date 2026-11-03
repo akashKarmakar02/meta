@@ -2,6 +2,7 @@ package routing
 
 import (
 	"fmt"
+	"path"
 	"strings"
 )
 
@@ -10,11 +11,13 @@ import (
 // directory holds more than one kind of page file (page.templ and
 // page.svelte). C08 adds ambiguous dynamic-parameter collision detection.
 func ValidateRoutes(routes []Route) error {
+	routes = append([]Route(nil), routes...)
+	sortRoutes(routes)
 	byPath := map[string]Route{}
 	for _, r := range routes {
 		if prev, dup := byPath[r.Path]; dup {
 			return fmt.Errorf(
-				"routing: duplicate route %q from %q and %q: choose one page file per directory (page.templ or page.svelte), not both",
+				"routing: duplicate route %q from %q and %q: declarations match the same URL shape",
 				r.Path, prev.SourceFile, r.SourceFile,
 			)
 		}
@@ -28,7 +31,10 @@ func ValidateRoutes(routes []Route) error {
 	if err := validateDynamicAmbiguity(routes); err != nil {
 		return err
 	}
-	return validateCatchAllConflicts(routes)
+	if err := validateCatchAllConflicts(routes); err != nil {
+		return err
+	}
+	return validateEncodedLiteralOverlaps(routes)
 }
 
 // validateDynamicAmbiguity rejects repeated names, routes over Fiber's 30
@@ -63,8 +69,12 @@ func validateDynamicAmbiguity(routes []Route) error {
 		}
 		// Fiber's route parser supports at most 30 parameters per route; a
 		// catch-all counts as one.
-		if len(names)+catchAlls > 30 {
-			return fmt.Errorf("routing: %s: route %q has %d parameters; Fiber supports at most 30", r.SourceFile, r.Path, len(names)+catchAlls)
+		count := len(names)
+		if r.CatchAll == "" {
+			count += catchAlls
+		}
+		if count > 30 {
+			return fmt.Errorf("routing: %s: route %q has %d parameters; Fiber supports at most 30", r.SourceFile, r.Path, count)
 		}
 		shape := strings.Join(segs, "/")
 		if prev, ok := shapes[shape]; ok {
@@ -81,15 +91,15 @@ func validateDynamicAmbiguity(routes []Route) error {
 // A catch-all C with prefix P (the segments before its "+") matches every URL
 // under P with one or more extra segments. Another route R whose path extends
 // P therefore overlaps C. The overlap is safe only in the two cases the
-// framework registers deterministically (catch-alls sort last):
-//   - R's segments after P are all static: the specific static path wins.
+// framework supports:
+//   - R's segments after P are all static.
 //   - R's segments after P are exactly one dynamic segment: the documented
-//     one-segment overlap, where the dynamic route wins for one segment and
-//     the catch-all wins for two or more.
+//     one-segment overlap. At the first differing segment, static wins over
+//     dynamic, which wins over catch-all.
 //
 // Anything else — a nested catch-all, a multi-segment dynamic route, or a
-// mixed static/dynamic route under the prefix — has an ambiguous winner that
-// depends on registration order, so it is rejected.
+// mixed static/dynamic route under the prefix — is conservatively rejected
+// pending support for a broader overlap policy.
 func validateCatchAllConflicts(routes []Route) error {
 	for _, c := range routes {
 		cSegs := strings.Split(strings.TrimPrefix(c.Path, "/"), "/")
@@ -175,6 +185,60 @@ func validateLayoutChain(r Route) error {
 			"routing: route %q: SSR page %q cannot render beneath CSR layout %q: move the page into a directory without a layout.svelte ancestor, or make it page.svelte",
 			r.Path, r.SourceFile, r.Layouts[0].SourceFile,
 		)
+	}
+	return nil
+}
+
+// Fiber preserves escapes for reserved ASCII in request paths. A dynamic
+// route could therefore capture an encoded spelling of a competing literal.
+// Reject such overlaps rather than changing escaped-path semantics.
+func validateEncodedLiteralOverlaps(routes []Route) error {
+	for i, a := range routes {
+		as := strings.Split(path.Dir(a.SourceFile), "/")
+		for _, b := range routes[i+1:] {
+			bs := strings.Split(path.Dir(b.SourceFile), "/")
+			unsafe := false
+			overlap := true
+			for n := 0; n < len(as) && n < len(bs); n++ {
+				x, y := as[n], bs[n]
+				_, xd := trimParamBrackets(x)
+				_, yd := trimParamBrackets(y)
+				_, xc := trimCatchAllBrackets(x)
+				_, yc := trimCatchAllBrackets(y)
+				if (xd || xc) && !yd && !yc && strings.ContainsAny(y, "!$&'()*+,;=:@%# ?\\") || (yd || yc) && !xd && !xc && strings.ContainsAny(x, "!$&'()*+,;=:@%# ?\\") {
+					unsafe = true
+				}
+				if !xd && !xc && !yd && !yc && x != y {
+					overlap = false
+					break
+				}
+				if xc || yc {
+					rest := bs[n:]
+					if yc {
+						rest = as[n:]
+					}
+					for _, segment := range rest {
+						if strings.ContainsAny(segment, "!$&'()*+,;=:@%# ?\\") {
+							unsafe = true
+						}
+					}
+					break
+				}
+			}
+			if len(as) != len(bs) {
+				shorter := as
+				if len(bs) < len(as) {
+					shorter = bs
+				}
+				_, catch := trimCatchAllBrackets(shorter[len(shorter)-1])
+				if !catch {
+					overlap = false
+				}
+			}
+			if overlap && unsafe {
+				return fmt.Errorf("routing: ambiguous encoded static segment in routes %q (%s) and %q (%s): Fiber preserves escapes for reserved characters", a.Path, a.SourceFile, b.Path, b.SourceFile)
+			}
+		}
 	}
 	return nil
 }

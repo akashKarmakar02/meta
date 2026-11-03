@@ -59,9 +59,9 @@ func newAppWithDevProxy(assets *httpserver.Assets, privateSocket bool) *fiber.Ap
 		route := r
 		switch route.Mode {
 		case routing.ModeSSR:
-			fapp.Get(route.Path, httpserver.WithRouteParams(route, render.SSRNavigationHandler(route, assets, routes.SSRPage, routes.BarePage, routes.VisualLayout)))
+			fapp.Get(routing.FiberRegistrationPath(route.Path), httpserver.WithRouteParams(route, render.SSRNavigationHandler(route, assets, routes.SSRPage, routes.BarePage, routes.VisualLayout)))
 		case routing.ModeCSR:
-			fapp.Get(route.Path, httpserver.WithRouteParams(route, render.CSRNavigationHandler(route, assets, routes.VisualLayout)))
+			fapp.Get(routing.FiberRegistrationPath(route.Path), httpserver.WithRouteParams(route, render.CSRNavigationHandler(route, assets, routes.VisualLayout)))
 		}
 	}
 

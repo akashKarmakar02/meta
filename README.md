@@ -73,8 +73,7 @@ This is route metadata access, not the future Phase C loader API.
 Routes may include multiple single-segment parameters, for example
 `users/[userId]/posts/[postId]/page.templ` matches `/users/42/posts/99`.
 Fiber selects the route and the server captures each named value separately
-for the request. A public page-data and typed-parameter API is deferred to
-B04/B05. Query strings are not part of captured values. Encoded slashes,
+for the request. Typed path parameters and query values are available through the route context above. Query strings are not part of captured values. Encoded slashes,
 backslashes, dot segments, invalid percent escapes and invalid UTF-8 are
 rejected; other encoded values are decoded once after route segmentation.
 Fiber's trailing-slash behavior is retained, and repeated interior slashes
@@ -89,17 +88,33 @@ under the declared name (`slug == "a/b"`). A catch-all must be the **last** path
 segment; a non-terminal declaration such as `docs/[...slug]/extra/` is rejected.
 Optional catch-alls (`[[...slug]]`) and zero-segment matches are not supported.
 
-Precedence is deterministic and does not depend on filesystem enumeration
-order: static routes are never shadowed by a catch-all, and a single-segment
-dynamic route directly under the catch-all prefix (`/docs/[id]` + `/docs/[...slug]`)
-is the documented one-segment overlap — the dynamic route wins for exactly one
-segment and the catch-all wins for two or more. Conflicts that Fiber cannot
-resolve deterministically (a nested catch-all, or a multi-segment dynamic route
-under a catch-all prefix) are rejected at generation time.
+### Route precedence and conflicts
+
+Routes register in a deterministic order independent of discovery order. At the
+first differing path segment, a static segment wins over `[name]`, which wins
+over `[...name]`; parameter names do not affect priority. For example,
+`/products/new` beats `/products/[id]`, and `/docs/[id]` beats
+`/docs/[...slug]` for one segment. A static prefix also wins earlier in the
+comparison: `/a/static/[...rest]` wins over `/a/[id]/[name]` for
+`/a/static/x`. Matching is case-sensitive and the existing trailing-slash
+behavior is retained. Non-ASCII static paths register in escaped form so they
+match browser URLs.
+
+Equivalent declarations such as `/users/[id]` and `/users/[name]`, including
+ones using different render modes, are rejected with both source paths. The
+same applies to equivalent catch-alls. As a conservative limit, nested
+catch-alls and mixed or multi-segment dynamic routes beneath a compatible
+catch-all prefix are rejected. Overlaps involving a static segment with a
+reserved ASCII character are also rejected when its encoded spelling could be
+captured by the competing dynamic route. Static directory names containing Fiber
+route metacharacters (`:`, `*`, `+`, `?`, or backslash) are rejected. For
+other reserved characters, Fiber may not match an encoded spelling to its
+literal static route. Static descendants and the immediate
+single-segment dynamic sibling are supported. These rules apply equally to SSR,
+CSR, and navigation requests; the nearest visual layout remains in effect.
 
 Server-rendered catch-all pages read the captured value from the render context
-(`ctx.Value("slug")`); the typed, query-aware parameter API is deferred to
-B04/B05. Client-rendered catch-all pages mount by stable route id (the declared
+via `routecontext.FromContext(ctx)` and `route.Params.Get("slug")`. Client-rendered catch-all pages mount by stable route id (the declared
 module, not the concrete URL) and read the destination from the page root's
 `data-go-route` attribute. Encoded slashes, backslashes, dot segments, invalid
 percent escapes and invalid UTF-8 are rejected in catch-all values, exactly as
