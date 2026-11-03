@@ -12,10 +12,29 @@ Each page uses the nearest ancestor `layout.templ` or `layout.svelte`,
 including one in its own directory. More distant layouts are not composed.
 The framework supplies the HTML document independently. A templ layout may
 wrap a templ or Svelte page; a Svelte layout supports Svelte pages. A templ
-page under a Svelte layout is rejected because Svelte is client-only. Templ
-layouts in dynamic `[parameter]` directories are also rejected because
-their generated Go packages cannot use bracketed import paths. Two layout
+page under a Svelte layout is rejected because Svelte is client-only. Two layout
 files in the same directory are an error.
+
+## Dynamic templ packages
+
+Templ pages in dynamic directories use `templ Page()` and templ layouts there
+use `templ Layout(templ.Component)`. Other `.templ` files in that directory
+share the same package. Generation compiles these files in a Go-safe generated
+package, while route IDs retain their source paths. Dynamic directories cannot
+contain `.go` files; put Go helpers in a normal Go package and import them.
+Package-local `//go:embed` assets in dynamic templ packages are not yet staged.
+Run `make generate` rather than invoking `templ generate` directly, so generated
+Go is kept out of bracket-named source directories.
+
+Routes may include multiple single-segment parameters, for example
+`users/[userId]/posts/[postId]/page.templ` matches `/users/42/posts/99`.
+Fiber selects the route and the server captures each named value separately
+for the request. A public page-data and typed-parameter API is deferred to
+B04/B05. Query strings are not part of captured values. Encoded slashes,
+backslashes, dot segments, invalid percent escapes and invalid UTF-8 are
+rejected; other encoded values are decoded once after route segmentation.
+Fiber's trailing-slash behavior is retained, and repeated interior slashes
+do not match a single dynamic segment. Catch-all routes are not implemented.
 
 ## Toolchain requirements
 

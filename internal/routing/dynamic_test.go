@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -35,6 +36,17 @@ func TestDiscoverDynamicRouteNormalization(t *testing.T) {
 		if routes[i].Mode != ModeCSR {
 			t.Errorf("routes[%d].Mode = %q, want %q", i, routes[i].Mode, ModeCSR)
 		}
+	}
+}
+
+func TestTooManyDynamicSegmentsRejected(t *testing.T) {
+	parts := make([]string, 31)
+	for i := range parts {
+		parts[i] = fmt.Sprintf("[p%d]", i)
+	}
+	_, err := Discover(fstest.MapFS{strings.Join(parts, "/") + "/page.svelte": {}})
+	if err == nil || !strings.Contains(err.Error(), "at most 30") {
+		t.Fatalf("expected parameter limit error, got %v", err)
 	}
 }
 
@@ -87,9 +99,8 @@ func TestAmbiguousDynamicSegmentsRejected(t *testing.T) {
 	}
 }
 
-// Phase 1 dynamic-route contract: at most one dynamic segment per route, so
-// /products/[id]/edit/[step] (two parameters) must be rejected at discovery,
-// while the same parameter name in different routes stays valid.
+// The same name may appear in different routes, and distinct names can occur
+// at any number of positions in a route.
 func TestSameParameterNameDifferentPositionsValid(t *testing.T) {
 	fsys := fstest.MapFS{
 		"products/[id]/page.svelte":   {Data: []byte("x")},
@@ -106,34 +117,50 @@ func TestSameParameterNameDifferentPositionsValid(t *testing.T) {
 	twoParams := fstest.MapFS{
 		"products/[id]/edit/[step]/page.svelte": {Data: []byte("x")},
 	}
-	if _, err := Discover(twoParams); err == nil {
-		t.Fatal("two dynamic segments should be rejected")
-	} else if !strings.Contains(err.Error(), "2 dynamic segments") || !strings.Contains(err.Error(), "products/[id]/edit/[step]") {
-		t.Errorf("error should name the source file and segment count, got: %v", err)
+	if _, err := Discover(twoParams); err != nil {
+		t.Fatalf("two dynamic segments: %v", err)
 	}
 
 	yearSlashSlug := fstest.MapFS{
 		"blog/[year]/[slug]/page.svelte": {Data: []byte("x")},
 	}
-	if _, err := Discover(yearSlashSlug); err == nil {
-		t.Fatal("/blog/:year/:slug should be rejected as two dynamic segments")
-	} else if !strings.Contains(err.Error(), "year, slug") {
-		t.Errorf("error should list both parameter names, got: %v", err)
+	if _, err := Discover(yearSlashSlug); err != nil {
+		t.Fatalf("adjacent dynamic segments: %v", err)
 	}
 }
 
-func TestSSRPageInBracketDirectoryRejected(t *testing.T) {
+func TestNestedDynamicConflicts(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		fsys fstest.MapFS
+		want string
+	}{
+		{"equivalent", fstest.MapFS{"users/[id]/posts/[post]/page.svelte": {}, "users/[name]/posts/[slug]/page.svelte": {}}, "ambiguous"},
+		{"equivalent mixed modes", fstest.MapFS{"users/[id]/posts/[post]/page.templ": {}, "users/[name]/posts/[slug]/page.svelte": {}}, "ambiguous"},
+		{"duplicate name", fstest.MapFS{"users/[id]/posts/[id]/page.svelte": {}}, "duplicate parameter"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Discover(tc.fsys)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Discover() error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestSSRPageInBracketDirectoryAllowed(t *testing.T) {
 	fsys := fstest.MapFS{
 		"products/[id]/page.templ": {Data: []byte("package app")},
 	}
+	if _, err := Discover(fsys); err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+}
+
+func TestGoSourceInsideDynamicDirectoryRejected(t *testing.T) {
+	fsys := fstest.MapFS{"users/[id]/page.templ": {}, "users/[id]/helpers.go": {}}
 	_, err := Discover(fsys)
-	if err == nil {
-		t.Fatal("Discover() expected SSR-in-bracket rejection, got nil")
-	}
-	if !strings.Contains(err.Error(), "import paths cannot contain") {
-		t.Errorf("error should explain the Go package constraint, got: %v", err)
-	}
-	if !strings.Contains(err.Error(), "page.svelte") {
-		t.Errorf("error should point to the CSR alternative, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "helpers.go") || !strings.Contains(err.Error(), "move helpers") {
+		t.Fatalf("Discover error = %v", err)
 	}
 }

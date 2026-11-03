@@ -38,3 +38,28 @@ func TestRouteManifestTracksOnlyDeclarations(t *testing.T) {
 		t.Fatalf("deletion missed: %q %v", empty, err)
 	}
 }
+
+func TestRouteManifestTracksDynamicTemplComponents(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "app", "users", "[id]")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, filepath.Join(dir, "page.templ"), "page")
+	before, err := routeManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, filepath.Join(dir, "card.templ"), "component")
+	after, err := routeManifest(root)
+	if err != nil || after == before {
+		t.Fatalf("component addition missed: %q %v", after, err)
+	}
+	if err := os.Remove(filepath.Join(dir, "card.templ")); err != nil {
+		t.Fatal(err)
+	}
+	again, err := routeManifest(root)
+	if err != nil || again != before {
+		t.Fatalf("component deletion missed: %q %v", again, err)
+	}
+}

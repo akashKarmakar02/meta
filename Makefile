@@ -14,7 +14,7 @@ help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-10s %s\n", $$1, $$2}'
 
 generate: ## Run templ + route codegen (must precede go build)
-	$(GO) tool templ generate
+	$(GO) tool templ generate -ignore-pattern '[/\\]app[/\\].*\[|[/\\]generated[/\\]routepages[/\\]'
 	$(GO) run ./cmd/routegen
 
 build: generate ## Full production build: templ + Go binary + client assets

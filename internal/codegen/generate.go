@@ -7,6 +7,7 @@ package codegen
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"go/format"
 	"io/fs"
@@ -145,10 +146,26 @@ func RoutesFile(m routing.Manifest) ([]byte, error) {
 // under app/ compiles to its own go-meta/app/<dir> package.
 func templImportPath(r routing.Route) string {
 	dir := path.Dir(r.SourceFile)
+	if dynamicSourceDir(dir) {
+		return "go-meta/generated/routepages/" + dynamicPackageID(dir)
+	}
 	if dir == "." || dir == "/" {
 		return "go-meta/app"
 	}
 	return "go-meta/app/" + dir
+}
+
+func dynamicSourceDir(dir string) bool {
+	for _, segment := range strings.Split(dir, "/") {
+		if strings.HasPrefix(segment, "[") && strings.HasSuffix(segment, "]") {
+			return true
+		}
+	}
+	return false
+}
+
+func dynamicPackageID(dir string) string {
+	return fmt.Sprintf("p%x", sha256.Sum256([]byte(dir)))
 }
 
 // layoutImportPath returns the Go import path of the package containing a
@@ -246,6 +263,9 @@ func layoutSources(m routing.Manifest) []string {
 // DocsLayout.
 func layoutSymbol(sourceFile string) string {
 	dir := path.Dir(sourceFile)
+	if dynamicSourceDir(dir) {
+		return "Layout"
+	}
 	if dir == "." || dir == "/" {
 		return "Layout"
 	}
@@ -266,6 +286,9 @@ func layoutSymbol(sourceFile string) string {
 // DashboardSettings).
 func pageSymbol(r routing.Route) string {
 	dir := path.Dir(r.SourceFile)
+	if dynamicSourceDir(dir) {
+		return "Page"
+	}
 	if dir == "." || dir == "/" {
 		dir = ""
 	}

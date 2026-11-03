@@ -97,9 +97,11 @@ func devgen(root string, out, errW io.Writer) error {
 	defer releaseDevGenLock(root)
 
 	if needs.templ {
-		if err := runTool(out, errW, root, "go", "tool", "templ", "generate"); err != nil {
+		if err := runTool(out, errW, root, "go", "tool", "templ", "generate", "-ignore-pattern", `[/\\]app[/\\].*\[|[/\\]generated[/\\]routepages[/\\]`); err != nil {
 			return fmt.Errorf("devgen: templ generate failed: %w", err)
 		}
+		// Dynamic templ output is compiled by routegen, including component edits.
+		needs.routes = true
 	}
 	if needs.routes {
 		if err := runTool(out, errW, root, "go", "run", "./cmd/routegen"); err != nil {

@@ -28,7 +28,8 @@ func newApp(assets *httpserver.Assets) *fiber.App {
 func newAppWithDevProxy(assets *httpserver.Assets, privateSocket bool) *fiber.App {
 	config := fiber.Config{
 		// D07: centralized HTML error pages; no stack traces or internals leak.
-		ErrorHandler: render.HTTPErrorHandler,
+		ErrorHandler:  render.HTTPErrorHandler,
+		CaseSensitive: true,
 	}
 	if privateSocket {
 		// The private socket is accessible only to this session's proxy,
@@ -44,6 +45,7 @@ func newAppWithDevProxy(assets *httpserver.Assets, privateSocket bool) *fiber.Ap
 	// Request logging; default config logs method, path, status, latency —
 	// never request or response bodies.
 	fapp.Use(logger.New())
+	fapp.Use(httpserver.ValidatePagePath)
 
 	fapp.Get("/healthz", func(c fiber.Ctx) error {
 		return c.SendString("ok")
@@ -57,9 +59,9 @@ func newAppWithDevProxy(assets *httpserver.Assets, privateSocket bool) *fiber.Ap
 		route := r
 		switch route.Mode {
 		case routing.ModeSSR:
-			fapp.Get(route.Path, render.SSRNavigationHandler(route, assets, routes.SSRPage, routes.BarePage, routes.VisualLayout))
+			fapp.Get(route.Path, httpserver.WithRouteParams(route, render.SSRNavigationHandler(route, assets, routes.SSRPage, routes.BarePage, routes.VisualLayout)))
 		case routing.ModeCSR:
-			fapp.Get(route.Path, render.CSRNavigationHandler(route, assets, routes.VisualLayout))
+			fapp.Get(route.Path, httpserver.WithRouteParams(route, render.CSRNavigationHandler(route, assets, routes.VisualLayout)))
 		}
 	}
 

@@ -42,7 +42,6 @@ func TestUnsupportedVisualLayoutCombinations(t *testing.T) {
 	}{
 		{"same directory ambiguity", fstest.MapFS{"layout.templ": {}, "layout.svelte": {}, "page.svelte": {}}, []string{"conflicting layouts", "layout.templ", "layout.svelte"}},
 		{"templ page in svelte layout", fstest.MapFS{"layout.svelte": {}, "page.templ": {}}, []string{"SSR page", "page.templ", "layout.svelte"}},
-		{"templ layout in dynamic directory", fstest.MapFS{"[id]/layout.templ": {}, "[id]/page.svelte": {}}, []string{"[id]/layout.templ", "Go import paths"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

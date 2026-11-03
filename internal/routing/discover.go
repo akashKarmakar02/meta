@@ -40,6 +40,9 @@ func Discover(fsys fs.FS) ([]Route, error) {
 			return validateSegment(base, p)
 		}
 		dir, base := path.Split(p)
+		if pathHasParamSegment(path.Dir(p)) && strings.HasSuffix(base, ".go") {
+			return fmt.Errorf("routing: Go source %q is inside a dynamic route directory; move helpers to a Go-valid package and import them", p)
+		}
 
 		// page.static.templ is reserved for future static generation:
 		// reject it loudly instead of silently registering or ignoring it.
@@ -69,9 +72,6 @@ func Discover(fsys fs.FS) ([]Route, error) {
 		mode, ok := classifyPage(base)
 		if !ok {
 			return nil
-		}
-		if mode == ModeSSR && pathHasParamSegment(path.Dir(p)) {
-			return fmt.Errorf("routing: SSR page %q is inside a dynamic segment directory: Go import paths cannot contain %q; use page.svelte (CSR) for dynamic routes in Phase 1", p, path.Dir(p))
 		}
 		route, rerr := NewRoute(normalizeDirToPath(dir), p, mode, nil)
 		if rerr != nil {

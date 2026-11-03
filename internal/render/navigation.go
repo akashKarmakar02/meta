@@ -65,7 +65,7 @@ func extractTitle(html string) string {
 // envelopes; the concrete request path is used instead. The hash never
 // reaches the server and is re-attached client-side.
 func requestURL(c fiber.Ctx) string {
-	u := string(c.Request().URI().Path())
+	u := string(c.Request().URI().PathOriginal())
 	if q := string(c.Request().URI().QueryString()); q != "" {
 		u += "?" + q
 	}
@@ -227,7 +227,7 @@ func CSRNavigationHandler(route routing.Route, assets *httpserver.Assets, resolv
 		resolve = resolvers[0]
 	}
 	return func(c fiber.Ctx) error {
-		visual, err := csrVisual(c.RequestCtx(), route, resolve)
+		visual, err := csrVisual(c.RequestCtx(), route, resolve, string(c.Request().URI().PathOriginal()))
 		if err != nil {
 			return err
 		}

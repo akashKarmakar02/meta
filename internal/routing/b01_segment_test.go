@@ -217,18 +217,15 @@ func TestDiscoverRejectsReservedStaticFilename(t *testing.T) {
 	assertErrContains(t, err, "STATIC_NOT_IMPLEMENTED")
 }
 
-// B01: SSR pages inside dynamic directories are still rejected (Phase 1
-// invariant: Go import paths cannot contain brackets).
-func TestDiscoverStillRejectsSSRInsideDynamicDir(t *testing.T) {
+func TestDiscoverSSRInsideDynamicDir(t *testing.T) {
 	dir := t.TempDir()
 	app := filepath.Join(dir, "app")
 	write(t, app, "items/[id]/page.templ")
 
 	_, err := Discover(os.DirFS(app))
-	if err == nil {
-		t.Fatal("Discover accepted SSR page inside a dynamic directory")
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
 	}
-	assertErrContains(t, err, "dynamic segment directory")
 }
 
 func assertErrContains(t *testing.T, err error, substr string) {

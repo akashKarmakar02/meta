@@ -15,8 +15,8 @@ import (
 const routeTrigger = ".go-meta-route-trigger.go"
 const routeReconcileInterval = 2 * time.Second
 
-// routeManifest records only route declarations, not file contents or generated
-// sources. WalkDir sorts entries, so the result is deterministic.
+// routeManifest records route declarations and dynamic templ package inputs,
+// not file contents. WalkDir sorts entries, so the result is deterministic.
 func routeManifest(root string) (string, error) {
 	var paths []string
 	app := filepath.Join(root, "app")
@@ -25,13 +25,21 @@ func routeManifest(root string) (string, error) {
 			return err
 		}
 		if !entry.IsDir() {
+			rel, err := filepath.Rel(app, path)
+			if err != nil {
+				return err
+			}
 			switch entry.Name() {
 			case "page.templ", "page.svelte", "layout.templ", "layout.svelte":
-				rel, err := filepath.Rel(app, path)
-				if err != nil {
-					return err
-				}
 				paths = append(paths, rel)
+			default:
+				for _, segment := range strings.Split(filepath.ToSlash(filepath.Dir(rel)), "/") {
+					if strings.HasPrefix(segment, "[") && strings.HasSuffix(segment, "]") &&
+						(strings.HasSuffix(entry.Name(), ".templ") || strings.HasSuffix(entry.Name(), ".go")) {
+						paths = append(paths, rel)
+						break
+					}
+				}
 			}
 		}
 		return nil

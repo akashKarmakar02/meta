@@ -37,8 +37,10 @@ func csrMountMarkup(route routing.Route) string {
 	return "<div id=\"" + MountID + "\" " + PageRootAttr + " " + RouteAttr + "=\"" + path + "\" " + RouteIDAttr + "=\"" + id + "\"></div>"
 }
 
-func csrVisual(ctx context.Context, route routing.Route, resolve VisualLayoutResolver) (string, error) {
-	markup := csrMountMarkup(route)
+func csrVisual(ctx context.Context, route routing.Route, resolve VisualLayoutResolver, requestedURL string) (string, error) {
+	mountRoute := route
+	mountRoute.Path = requestedURL
+	markup := csrMountMarkup(mountRoute)
 	if resolve == nil {
 		if len(route.Layouts) > 0 && route.Layouts[0].Mode == routing.ModeSSR {
 			return "", fmt.Errorf("missing templ visual-layout resolver for route %q", route.ID)

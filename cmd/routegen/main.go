@@ -46,12 +46,19 @@ func run(appDir, outDir string) error {
 	if err := codegen.VerifySymbols(fsys, manifest); err != nil {
 		return fmt.Errorf("verify SSR page symbols in %s: %w", appDir, err)
 	}
+	packages, err := codegen.GenerateDynamicPackages(appDir, outDir, manifest)
+	if err != nil {
+		return fmt.Errorf("generate dynamic templ packages: %w", err)
+	}
 
 	if err := codegen.WriteRoutesFile(outDir, manifest); err != nil {
 		return err
 	}
 
 	if err := codegen.WriteRouteRegistryTS(outDir, manifest); err != nil {
+		return err
+	}
+	if err := codegen.CleanDynamicPackages(outDir, packages); err != nil {
 		return err
 	}
 

@@ -28,53 +28,31 @@ func ValidateRoutes(routes []Route) error {
 	return validateDynamicAmbiguity(routes)
 }
 
-// validateDynamicAmbiguity enforces the Phase 1 dynamic-route contract:
-//
-//   - A route may contain at most one dynamic segment: /blog/[year]/[slug]
-//     (two parameters) is out of scope for Phase 1.
-//   - No two routes may bind different parameter names to the same position
-//     (e.g. [id] and [slug] under the same parent), because both normalize
-//     to the same URL shape and Fiber could not route between them.
+// validateDynamicAmbiguity rejects repeated names and equivalent URL shapes.
 func validateDynamicAmbiguity(routes []Route) error {
-	type dynamicKey struct {
-		prefix string // static segments before the parameter
-		suffix string // static segments after the parameter
-	}
-	type slotOwner struct {
-		name   string
-		source string
-	}
-	slots := map[dynamicKey]slotOwner{}
+	shapes := map[string]Route{}
 	for _, r := range routes {
 		segs := strings.Split(strings.TrimPrefix(r.Path, "/"), "/")
-		var names []string
-		for _, seg := range segs {
-			if strings.HasPrefix(seg, ":") {
-				names = append(names, seg[1:])
-			}
-		}
-		if len(names) > 1 {
-			return fmt.Errorf(
-				"routing: %s: route %q has %d dynamic segments (%s): Phase 1 supports at most one per route",
-				r.SourceFile, r.Path, len(names), strings.Join(names, ", "),
-			)
-		}
+		names := map[string]bool{}
 		for i, seg := range segs {
-			if !strings.HasPrefix(seg, ":") {
-				continue
+			if strings.HasPrefix(seg, ":") {
+				name := seg[1:]
+				if names[name] {
+					return fmt.Errorf("routing: %s: duplicate parameter name %q in route %q", r.SourceFile, name, r.Path)
+				}
+				names[name] = true
+				segs[i] = ":"
 			}
-			key := dynamicKey{
-				prefix: strings.Join(segs[:i], "/"),
-				suffix: strings.Join(segs[i+1:], "/"),
-			}
-			if prev, ok := slots[key]; ok && prev.name != seg[1:] {
-				return fmt.Errorf(
-					"routing: ambiguous dynamic segments [%s] (%s) and [%s] (%s): both match the same URL shape under %q: use one parameter name per position",
-					prev.name, prev.source, seg[1:], r.SourceFile, "/"+key.prefix,
-				)
-			}
-			slots[key] = slotOwner{name: seg[1:], source: r.SourceFile}
 		}
+		// Fiber's route parser supports at most 30 parameters per route.
+		if len(names) > 30 {
+			return fmt.Errorf("routing: %s: route %q has %d parameters; Fiber supports at most 30", r.SourceFile, r.Path, len(names))
+		}
+		shape := strings.Join(segs, "/")
+		if prev, ok := shapes[shape]; ok {
+			return fmt.Errorf("routing: ambiguous dynamic segments in routes %q (%s) and %q (%s): both match the same URL shape", prev.Path, prev.SourceFile, r.Path, r.SourceFile)
+		}
+		shapes[shape] = r
 	}
 	return nil
 }
@@ -84,9 +62,6 @@ func validateDynamicAmbiguity(routes []Route) error {
 func validateLayoutChain(r Route) error {
 	if len(r.Layouts) > 1 {
 		return fmt.Errorf("routing: route %q has multiple visual layouts: select only the nearest layout", r.Path)
-	}
-	if len(r.Layouts) == 1 && r.Layouts[0].Mode == ModeSSR && pathHasParamSegment(r.Layouts[0].SourceFile) {
-		return fmt.Errorf("routing: templ layout %q is inside a dynamic segment directory: Go import paths cannot contain brackets; move the layout outside the dynamic segment or use layout.svelte", r.Layouts[0].SourceFile)
 	}
 	if len(r.Layouts) == 1 && r.Layouts[0].Mode == ModeCSR && r.Mode == ModeSSR {
 		return fmt.Errorf(
