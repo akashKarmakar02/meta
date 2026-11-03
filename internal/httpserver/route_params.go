@@ -8,6 +8,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"go-meta/internal/routing"
+	"go-meta/routeparams"
 )
 
 type routeParamsKey struct{}
@@ -90,14 +91,22 @@ func decodeCatchAll(raw string) (string, error) {
 
 // bridgeParamsToRequestContext publishes the request's decoded parameters on
 // the underlying fasthttp RequestCtx so server-rendered templ pages can read
-// them from the render context (B03). The typed, query-aware route context is
-// deliberately deferred to B04/B05; this is only the minimal request-scoped
-// parameter bridge a catch-all SSR page needs to display its captured value.
+// them from the render context. It attaches two forms:
+//
+//   - a request-safe routeparams.Params (via routeparams.Attach), the
+//     recommended typed accessor (routeparams.FromContext); and
+//   - the B03 legacy string bridge (ctx.SetUserValue(name, value)), retained so
+//     pages written before the typed API keep working.
+//
+// Both are request-scoped: fasthttp clears the RequestCtx user values when the
+// pooled request is reset, so values never leak between requests. The broader
+// query-aware route context is deferred to B05.
 func bridgeParamsToRequestContext(c fiber.Ctx, params map[string]string) {
 	ctx := c.RequestCtx()
 	if ctx == nil {
 		return
 	}
+	routeparams.Attach(ctx, routeparams.NewParams(params))
 	for key, value := range params {
 		ctx.SetUserValue(key, value)
 	}

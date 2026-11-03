@@ -1,14 +1,26 @@
 package docsslug
 
-import "fmt"
+import "go-meta/routeparams"
 
-// B03 SSR catch-all page. The captured one-or-more-segment value is published
-// on the render context by the request-local parameter bridge (B04/B05's typed
-// API is out of scope), so the page reads it back with ctx.Value("slug").
+// B04 SSR catch-all page. The captured one-or-more-segment value is exposed
+// through the typed request-local parameter API (routeparams.FromContext).
+//
+// The value is a slash-joined string: /docs/getting-started/installation
+// yields "getting-started/installation". The page also demonstrates the
+// missing-parameter path (Get on a name that was never captured) so the
+// missing-vs-invalid error model is visible in a real render.
 templ Page() {
+	{{
+		params := routeparams.FromContext(ctx)
+		slug, present := params.Get("slug")
+		missing, mErr := params.Int64("nope")
+	}}
 	<main data-go-page-docs-slug>
 		<h1>Docs</h1>
-		<p data-catchall-slug>{ fmt.Sprint(ctx.Value("slug")) }</p>
+		<p data-catchall-slug>{ slug }</p>
+		<p data-catchall-present>{ present }</p>
+		<p data-missing-value>{ missing }</p>
+		<p data-missing-error>{ mErr.Error() }</p>
 		<nav data-docs-slug-nav>
 			<a href="/docs">Index</a>
 			<a href="/docs/intro">Intro</a>

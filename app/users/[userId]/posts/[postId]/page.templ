@@ -1,0 +1,43 @@
+package userspost
+
+import (
+	"fmt"
+	"go-meta/routeparams"
+)
+
+// Page is the B04 nested-dynamic SSR fixture. It reads both named parameters
+// through the typed routeparams API and demonstrates the missing/invalid
+// distinction: numeric values render as numbers, and a non-numeric segment
+// renders the conversion error instead of a silent zero.
+templ Page() {
+	{{
+		params := routeparams.FromContext(ctx)
+		uid, uidErr := params.Int64("userId")
+		pid, pidErr := params.Int64("postId")
+
+		var uidText, uidErrText string
+		if uidErr != nil {
+			uidErrText = uidErr.Error()
+		} else {
+			uidText = fmt.Sprint(uid)
+		}
+		var pidText, pidErrText string
+		if pidErr != nil {
+			pidErrText = pidErr.Error()
+		} else {
+			pidText = fmt.Sprint(pid)
+		}
+	}}
+	<main data-go-page-users-post>
+		<h1>User post</h1>
+		<p data-user-id>{uidText}</p>
+		<p data-user-id-error>{uidErrText}</p>
+		<p data-post-id>{pidText}</p>
+		<p data-post-id-error>{pidErrText}</p>
+		<nav data-users-nav>
+			<a href="/users/42/posts/7">User 42, post 7</a>
+			<a href="/users/43/posts/8">User 43, post 8</a>
+			<a href="/users/42/posts/7/comments">User 42, post 7 (with comments)</a>
+		</nav>
+	</main>
+}
