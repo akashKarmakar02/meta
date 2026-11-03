@@ -8,6 +8,10 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 // arrives with E09.
 export default defineConfig({
   plugins: [svelte()],
+  // The explicit public port disables Vite's direct-port WebSocket fallback.
+  ...(process.env.GO_META_PUBLIC_PORT ? {
+    server: { ws: { clientPort: Number(process.env.GO_META_PUBLIC_PORT) } },
+  } : {}),
   build: {
     manifest: true,
     outDir: 'dist/client',

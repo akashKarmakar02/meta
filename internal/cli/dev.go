@@ -21,14 +21,14 @@ func init() {
 		Short: "Start the development server",
 		Usage: `Start the development server.
 
-meta dev discovers the project root, checks prerequisites, and runs the
-Go backend under Air (github.com/air-verse/air) for automatic rebuild
-and restart on Go source changes (P2-A02).
+meta dev discovers the project root, starts Vite and runs the Go backend
+under Air (github.com/air-verse/air) for automatic rebuild and restart.
 
 Current scope:
   - Go backend hot reload via Air and Svelte HMR via Vite.
   - templ and route metadata regenerate before backend builds.
-  - Vite listens on 127.0.0.1:5173; a unified origin arrives in A05.
+  - The public development origin is http://localhost:3000 by default.
+  - Vite and the backend use private loopback ports.
 
 Usage:
   meta dev [--dir <path>]
@@ -37,15 +37,13 @@ Flags:
   --dir <path>    Project root directory (skips discovery)
 
 Environment:
-  PORT            Server port override (default :3000), passed through
-                  to the server process
+  PORT            Public loopback port (default 3000)
   GO_META_VITE_PORT  Vite port override (default 5173)
 
 Exit status:
   0  interrupted development session (Ctrl+C)
-  1  missing Air executable, missing Air configuration, missing client
-     bundle, Air failing to start or exiting unexpectedly, or an invalid
-     project root.
+  1  missing dependencies or configuration, a port conflict, a process
+     failing to start or exiting unexpectedly, or an invalid project root.
 `,
 		Run: runDev,
 	})
@@ -118,21 +116,23 @@ func workingDirFrom(ctx context.Context) string {
 // unit-testable without a real Air binary: resolving Air, launching
 // processes, and receiving interruption signals.
 type devDeps struct {
-	lookAir  func() (string, error)
-	lookNode func() (string, error)
-	runner   runner
-	signals  func() (<-chan os.Signal, func())
-	grace    time.Duration // override for the shutdown grace period in tests
+	lookAir    func() (string, error)
+	lookNode   func() (string, error)
+	runner     runner
+	signals    func() (<-chan os.Signal, func())
+	grace      time.Duration // override for the shutdown grace period in tests
+	startProxy func(string, io.Writer) (*devProxy, error)
 }
 
 // prodDeps is the production wiring. Tests may swap this variable (with
 // cleanup) rather than threading a second parameter through runDev.
 var prodDeps = devDeps{
-	lookAir:  airLookPath,
-	lookNode: nodeLookPath,
-	runner:   execRunner{},
-	signals:  watchInterrupt,
-	grace:    airShutdownGrace,
+	lookAir:    airLookPath,
+	lookNode:   nodeLookPath,
+	runner:     execRunner{},
+	signals:    watchInterrupt,
+	grace:      airShutdownGrace,
+	startProxy: startDevProxy,
 }
 
 func nodeLookPath() (string, error) {
@@ -161,7 +161,7 @@ func viteCommand(root string, lookNode func() (string, error)) (string, []string
 		return "", nil, "", fmt.Errorf("meta dev: invalid GO_META_VITE_PORT %q", port)
 	}
 	origin := "http://127.0.0.1:" + strconv.Itoa(n)
-	return node, []string{vite, "--host", "127.0.0.1", "--port", strconv.Itoa(n), "--strictPort"}, origin, nil
+	return node, []string{vite, "--host", "127.0.0.1", "--port", strconv.Itoa(n), "--strictPort", "--base", vitePrefix}, origin, nil
 }
 
 // watchInterrupt subscribes to termination signals.
@@ -296,10 +296,26 @@ func runDevWith(c *Context, deps devDeps) error {
 	}
 	defer stopReconcile()
 
+	var proxy *devProxy
+	var proxyWait <-chan error
+	if node != "" && deps.startProxy != nil {
+		proxy, err = deps.startProxy(origin, c.Stderr)
+		if err != nil {
+			return err
+		}
+		defer proxy.Close()
+		proxyWait = proxy.done
+		fmt.Fprintf(c.Stdout, "Development origin: http://localhost:%s\n", proxy.publicPort)
+	}
+
 	var vite process
 	var viteWait chan error
 	if node != "" {
-		vite, err = deps.runner.Start(withWorkingDir(context.Background(), root), c.Stderr, node, viteArgs...)
+		viteCtx := withWorkingDir(context.Background(), root)
+		if proxy != nil {
+			viteCtx = context.WithValue(viteCtx, ctxKeyEnv, []string{"GO_META_PUBLIC_PORT=" + proxy.publicPort})
+		}
+		vite, err = deps.runner.Start(viteCtx, c.Stderr, node, viteArgs...)
 		if err != nil {
 			return fmt.Errorf("meta dev: failed to start Vite: %w", err)
 		}
@@ -323,7 +339,11 @@ func runDevWith(c *Context, deps devDeps) error {
 	}
 	airCtx := withWorkingDir(context.Background(), root)
 	if origin != "" {
-		airCtx = context.WithValue(airCtx, ctxKeyEnv, []string{"GO_META_VITE_ORIGIN=" + origin})
+		env := []string{"GO_META_VITE_ORIGIN=" + origin}
+		if proxy != nil {
+			env = append(env, "GO_META_DEV_SOCKET="+proxy.backendSocket)
+		}
+		airCtx = context.WithValue(airCtx, ctxKeyEnv, env)
 	}
 	proc, err := deps.runner.Start(airCtx, c.Stderr, airPath, config)
 	if err != nil {
@@ -355,6 +375,11 @@ func runDevWith(c *Context, deps devDeps) error {
 			return fmt.Errorf("meta dev: Vite exited unexpectedly")
 		}
 		return fmt.Errorf("meta dev: Vite exited unexpectedly: %w", viteErr)
+
+	case proxyErr := <-proxyWait:
+		stop(proc, waitCh, os.Interrupt)
+		stop(vite, viteWait, os.Interrupt)
+		return fmt.Errorf("meta dev: development proxy exited unexpectedly: %w", proxyErr)
 
 	case sig := <-sigCh:
 		fmt.Fprintf(c.Stderr, "meta dev: received %v, stopping development backend\n", sig)

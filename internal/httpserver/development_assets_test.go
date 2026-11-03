@@ -10,7 +10,7 @@ func TestDevelopmentAssets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.DevClientURL != "http://127.0.0.1:5173/@vite/client" || a.EntryScriptURL != "http://127.0.0.1:5173/frontend/entry.ts" {
+	if a.DevClientURL != "/_go_meta_vite/@vite/client" || a.EntryScriptURL != "/_go_meta_vite/frontend/entry.ts" {
 		t.Fatalf("unexpected assets: %+v", a)
 	}
 	for _, origin := range []string{"https://example.com:5173", "http://evil.example:5173", "http://127.0.0.1:5173/path", "http://user@127.0.0.1:5173"} {

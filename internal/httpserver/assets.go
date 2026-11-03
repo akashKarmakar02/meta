@@ -45,7 +45,7 @@ func DevelopmentAssets(origin string) (Assets, error) {
 	if err != nil || host != "127.0.0.1" || portErr != nil || portNumber < 1 || portNumber > 65535 {
 		return Assets{}, fmt.Errorf("Vite development origin must use 127.0.0.1 and an explicit port")
 	}
-	return Assets{DevClientURL: origin + "/@vite/client", EntryScriptURL: origin + "/" + viteEntryKey}, nil
+	return Assets{DevClientURL: "/_go_meta_vite/@vite/client", EntryScriptURL: "/_go_meta_vite/" + viteEntryKey}, nil
 }
 
 // viteManifestChunk mirrors the fields go-meta consumes from Vite's

@@ -26,7 +26,7 @@ func TestViteCommand(t *testing.T) {
 	}
 	t.Setenv("GO_META_VITE_PORT", "12345")
 	node, args, origin, err := viteCommand(root, look)
-	if err != nil || node != "/node" || origin != "http://127.0.0.1:12345" || strings.Join(args, " ") != file+" --host 127.0.0.1 --port 12345 --strictPort" {
+	if err != nil || node != "/node" || origin != "http://127.0.0.1:12345" || strings.Join(args, " ") != file+" --host 127.0.0.1 --port 12345 --strictPort --base /_go_meta_vite/" {
 		t.Fatalf("command: %s %q %s %v", node, args, origin, err)
 	}
 	t.Setenv("GO_META_VITE_PORT", "no")

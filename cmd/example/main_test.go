@@ -28,6 +28,32 @@ func TestHealthz(t *testing.T) {
 	}
 }
 
+func TestPrivateDevProxyClientIP(t *testing.T) {
+	for _, private := range []bool{false, true} {
+		app := newAppWithDevProxy(nil, private)
+		cfg := app.Config()
+		if cfg.TrustProxy != private || cfg.TrustProxyConfig.UnixSocket != private {
+			t.Fatalf("private=%t, trust config=%+v", private, cfg.TrustProxyConfig)
+		}
+		app.Get("/client-ip", func(c fiber.Ctx) error { return c.SendString(c.IP()) })
+		req := httptest.NewRequest("GET", "/client-ip", nil)
+		req.Header.Set("X-Forwarded-For", "203.0.113.42")
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The test request is not from the trusted private Unix socket.
+		if string(body) == "203.0.113.42" {
+			t.Errorf("private=%t accepted spoofed IP", private)
+		}
+	}
+}
+
 func TestUnknownRoute404(t *testing.T) {
 	app := newApp(nil)
 	resp, err := app.Test(httptest.NewRequest("GET", "/nope", nil))

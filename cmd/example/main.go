@@ -3,6 +3,7 @@ package main
 
 import (
 	"log"
+	"net"
 	"os"
 
 	"github.com/gofiber/fiber/v3"
@@ -21,10 +22,22 @@ import (
 // loads the manifest and fails explicitly on missing/invalid manifests
 // rather than serving shells that cannot boot (E08 contract).
 func newApp(assets *httpserver.Assets) *fiber.App {
-	fapp := fiber.New(fiber.Config{
+	return newAppWithDevProxy(assets, false)
+}
+
+func newAppWithDevProxy(assets *httpserver.Assets, privateSocket bool) *fiber.App {
+	config := fiber.Config{
 		// D07: centralized HTML error pages; no stack traces or internals leak.
 		ErrorHandler: render.HTTPErrorHandler,
-	})
+	}
+	if privateSocket {
+		// The private socket is accessible only to this session's proxy,
+		// which discards incoming forwarded headers and sets this itself.
+		config.ProxyHeader = "X-Forwarded-For"
+		config.TrustProxy = true
+		config.TrustProxyConfig.UnixSocket = true
+	}
+	fapp := fiber.New(config)
 
 	// Recover converts panics into 500 responses instead of killing the server.
 	fapp.Use(recover.New())
@@ -65,7 +78,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("load client assets: %v", err)
 	}
-	app := newApp(&assets)
+	socket := os.Getenv("GO_META_DEV_SOCKET")
+	app := newAppWithDevProxy(&assets, devOrigin != "" && socket != "")
 	// E09: serve the hashed production bundle at the same /assets prefix
 	// the shells reference. Fails explicitly when the build output is
 	// missing rather than serving pages that cannot boot.
@@ -73,6 +87,25 @@ func main() {
 		if err := httpserver.MountAssets(app, "dist/client"); err != nil {
 			log.Fatalf("mount client assets: %v", err)
 		}
+	}
+	if devOrigin != "" && socket != "" {
+		// The CLI owns this private directory; Air may leave a stale socket
+		// after stopping the preceding backend during a rebuild.
+		if info, err := os.Lstat(socket); err == nil {
+			if info.Mode()&os.ModeSocket == 0 {
+				log.Fatal("development socket path is not a socket")
+			}
+			if err := os.Remove(socket); err != nil {
+				log.Fatalf("remove stale development socket: %v", err)
+			}
+		} else if !os.IsNotExist(err) {
+			log.Fatalf("inspect development socket: %v", err)
+		}
+		listener, err := net.Listen("unix", socket)
+		if err != nil {
+			log.Fatalf("listen on development socket: %v", err)
+		}
+		log.Fatal(app.Listener(listener))
 	}
 	// PORT overrides the default :3000 (E2E runs the same binary on a
 	// scratch port; production picks its own through the environment).

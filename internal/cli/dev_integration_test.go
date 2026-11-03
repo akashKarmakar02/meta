@@ -44,6 +44,7 @@ func TestDevAirIntegration(t *testing.T) {
 	t.Chdir(root) // root discovery must resolve to the fixture, not this repo
 	port := freeTCPPort(t)
 	t.Setenv("PORT", port)
+	t.Setenv("GOFLAGS", "-buildvcs=false")
 
 	// Run meta dev's core directly (same process, real execRunner), so the
 	// test can interrupt it via the injected signal channel instead of
