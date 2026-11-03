@@ -80,7 +80,10 @@ func newConfiguredApp(assets *httpserver.Assets, privateSocket bool, registry *l
 		route := r
 		switch route.Mode {
 		case routing.ModeSSR:
-			fapp.Get(routing.FiberRegistrationPath(route.Path), httpserver.WithRouteParams(route, render.SSRNavigationHandler(route, assets, routes.SSRPage, routes.BarePage, routes.VisualLayout)))
+			// C03: run the route's registered loader (if any) before rendering,
+			// attaching the typed result to the render context. WithLoader is a
+			// no-op when the registry is nil or the route has no binding.
+			fapp.Get(routing.FiberRegistrationPath(route.Path), httpserver.WithRouteParams(route, httpserver.WithLoader(registry, route, render.SSRNavigationHandler(route, assets, routes.SSRPage, routes.BarePage, routes.VisualLayout))))
 		case routing.ModeCSR:
 			fapp.Get(routing.FiberRegistrationPath(route.Path), httpserver.WithRouteParams(route, render.CSRNavigationHandler(route, assets, routes.VisualLayout)))
 		}

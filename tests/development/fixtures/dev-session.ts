@@ -42,7 +42,7 @@ export class DevSession {
     const fixtureEnv = { ...process.env, GOFLAGS: '-buildvcs=false' };
     // A fresh checkout-shaped copy: sources and configs only; node_modules
     // is symlinked so the fixture does not re-install the dependency tree.
-    for (const name of ['.air.toml', 'go.mod', 'go.sum', 'package.json', 'vite.config.ts', 'tsconfig.json', 'app', 'cmd', 'internal', 'frontend', 'generated', 'routeparams', 'routecontext', 'loader']) {
+    for (const name of ['.air.toml', 'go.mod', 'go.sum', 'package.json', 'vite.config.ts', 'tsconfig.json', 'app', 'cmd', 'internal', 'frontend', 'generated', 'routeparams', 'routecontext', 'loader', 'loaderdata']) {
       cpSync(path.join(source, name), path.join(this.root, name), { recursive: true });
     }
     symlinkSync(path.join(source, 'node_modules'), path.join(this.root, 'node_modules'), 'dir');

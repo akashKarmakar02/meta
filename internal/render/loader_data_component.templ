@@ -1,0 +1,42 @@
+package render
+
+import (
+	"fmt"
+
+	"go-meta/loaderdata"
+	"go-meta/routeparams"
+	"go-meta/routecontext"
+)
+
+// loaderDataComponent reads all three request-scoped categories from the
+// render context — the route context, the typed params, and the loader result
+// — and renders them together, proving they coexist in one templ component.
+templ loaderDataComponent() {
+	{{
+		route, routeOK := routecontext.FromContext(ctx)
+		params := routeparams.FromContext(ctx)
+		uid, uidErr := params.Int64("userId")
+		post, postOK := loaderdata.Get[loaderDataProbe](ctx)
+
+		var routeID, uidText, uidErrText, postText string
+		if routeOK {
+			routeID = route.RouteID
+		}
+		if uidErr != nil {
+			uidErrText = uidErr.Error()
+		} else {
+			uidText = fmt.Sprint(uid)
+		}
+		if postOK {
+			postText = fmt.Sprintf("id=%d title=%s", post.ID, post.Title)
+		} else {
+			postText = "absent"
+		}
+	}}
+	<main data-testid="loader-data">
+		<span data-route-id>{routeID}</span>
+		<span data-user-id>{uidText}</span>
+		<span data-user-id-error>{uidErrText}</span>
+		<span data-post>{postText}</span>
+	</main>
+}

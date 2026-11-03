@@ -166,9 +166,10 @@ shared state captured by a loader.
 optional error classifications usable with `errors.Is`; ordinary and wrapped
 errors, including their causes, remain intact. Do not send raw internal errors
 to clients. C05 will decide HTTP and navigation mappings and redirect handling;
-no redirect outcome is defined here. C02 registration adapts a typed loader at the runtime boundary; C03 can connect
-typed data to templ, and C04 can define serialization. None of those rendering
-integrations or automatic execution is implemented yet.
+no redirect outcome is defined here. C02 registration adapts a typed loader at
+the runtime boundary; C03 connects typed data to templ and runs SSR loaders
+automatically (see "Executing SSR loaders (C03)"); C04 will decide what may be
+serialized for clients.
 
 ## Registering loaders (C02)
 
@@ -210,11 +211,11 @@ The application stores the validated registry for future dispatch integration.
 
 `loader.Bind` checks each function's Go result type at the call site and adapts
 it once to a runtime handle, allowing distinct result types in the same
-registry. Explicit `Registered.Execute` returns a type-erased value and the
-original error, and requires the matching route snapshot; it is intended as the
-future integration boundary. Registration and lookup never run loaders, and C02
-adds no loader data to SSR or navigation responses. C03 will decide how templ
-receives data; C04 will decide what may be serialized for clients.
+registry. `Registered.Execute` returns a type-erased value and the original
+error, and requires the matching route snapshot; C03 uses it as the dispatch
+boundary to run SSR loaders and deliver typed data to templ. Registration and
+lookup never run loaders, and C02 adds no loader data to SSR or navigation
+responses. C04 will decide what may be serialized for clients.
 
 `meta dev` rebuilds after edits to this ordinary Go package. Route creation,
 rename, and deletion still use the route reconciler and generator. A binding
@@ -223,6 +224,77 @@ or removed; duplicate and unknown bindings likewise fail startup, rather than
 silently selecting one. Missing Go symbols fail compilation. Fixing the Go
 source triggers another rebuild. There are no generated loader imports or
 loader-specific generated artifacts to clean up.
+
+## Executing SSR loaders (C03)
+
+For every matched **SSR** request, the framework now runs the route's registered
+loader **exactly once, before the page renders**, and makes its typed result
+available to the templ page and layout. CSR routes are not touched: a registered
+CSR loader is never executed by C03 (that is C04).
+
+A loader is defined and registered exactly as in C02. The result reaches templ
+through the `go-meta/loaderdata` package, which mirrors `routeparams` and
+`routecontext`: a private context key, no Fiber or fasthttp dependency, and a
+strongly typed read.
+
+```go
+// app/posts/[postId]/page.templ
+package posts
+
+import (
+    "fmt"
+
+    "go-meta/app/loaders"
+    "go-meta/loaderdata"
+)
+
+templ Page() {
+    {{
+        post, ok := loaderdata.Get[loaders.PostData](ctx)
+        var idText, missing string
+        if ok {
+            idText = fmt.Sprint(post.ID)
+        } else {
+            missing = "No loader data for this route."
+        }
+    }}
+    <main>
+        <p data-post-id>{idText}</p>
+        <p data-post-missing>{missing}</p>
+    </main>
+}
+```
+
+`loaderdata.Get[T](ctx)` returns the result only when its dynamic type is
+exactly `T`; `ok` is true for a valid result (including a zero value or a nil
+pointer of type `T`) and false otherwise. It never panics. `loaderdata.Has(ctx)`
+reports whether any loader ran, so a page can tell "no loader for this route"
+apart from "a loader ran but I asked for the wrong type". Retrieving a type the
+loader did not return (even one with identical fields) reports `ok=false`; there
+is no implicit coercion and no developer-written `.(T)` assertion.
+
+The loader runs with the B05 request-lifetime context and the same route
+snapshot the page reads, so `routecontext.FromContext(ctx)`,
+`routeparams.FromContext(ctx)`, and `loaderdata.Get[T](ctx)` all coexist in one
+component. The result is attached to the render context (not the pooled request
+object) and is released with the request; it never leaks across requests.
+
+Both SSR response modes carry the rendered data: a full-document request returns
+the rendered HTML, and a navigation-envelope request returns the same rendered
+HTML inside the existing version-1 envelope (no new `data` field, no version
+bump). A route with no registered loader renders exactly as before.
+
+**Failure behavior (temporary).** If a loader returns an error, the request stops
+before rendering: the original error is logged server-side and the client receives
+a generic `500`. C03 deliberately does **not** map loader sentinels to specific
+statuses (`404`/`401`/`403`/`400`/redirect) — that is C05. Cancellation errors
+are not logged as failures. No raw internal error text is sent to the client.
+
+**What C03 does not do.** No CSR execution or transport (C04), no JSON
+serialization of results, no caching, prefetching, retries, or concurrent
+multi-loader orchestration, no streaming SSR, and no redirect/status mapping
+(C05). The loader is never invoked at startup, registration, code generation, or
+reconciliation — only during a matched SSR render.
 
 ## Toolchain requirements
 

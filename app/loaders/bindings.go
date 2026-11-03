@@ -5,4 +5,8 @@ import "go-meta/loader"
 
 // Bindings returns application loader bindings. Route IDs are page source
 // paths relative to app/, such as "users/[userId]/page.templ".
-func Bindings() []loader.Binding { return nil }
+func Bindings() []loader.Binding {
+	return []loader.Binding{
+		loader.Bind("posts/[postId]/page.templ", LoadPost),
+	}
+}

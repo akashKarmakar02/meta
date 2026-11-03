@@ -14,12 +14,15 @@ import (
 )
 
 func TestC02RegistryUsesGeneratedHTTPIdentities(t *testing.T) {
-	var calls atomic.Int32
+	// C03 executes SSR loaders during dispatch, so the SSR and CSR counters are
+	// tracked separately: SSR loaders now run, CSR loaders still must not.
+	var ssrCalls, csrCalls atomic.Int32
 	ssr := "users/[userId]/posts/[postId]/page.templ"
 	csr := "products/[id]/page.svelte"
 	catch := "docs/[...slug]/page.templ"
-	load := func(context.Context, routecontext.Route) (int, error) { calls.Add(1); return 1, nil }
-	registry, err := newLoaderRegistry([]loader.Binding{loader.Bind(ssr, load), loader.Bind(csr, load), loader.Bind(catch, load)})
+	ssrLoad := func(context.Context, routecontext.Route) (int, error) { ssrCalls.Add(1); return 1, nil }
+	csrLoad := func(context.Context, routecontext.Route) (int, error) { csrCalls.Add(1); return 1, nil }
+	registry, err := newLoaderRegistry([]loader.Binding{loader.Bind(ssr, ssrLoad), loader.Bind(csr, csrLoad), loader.Bind(catch, ssrLoad)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +70,13 @@ func TestC02RegistryUsesGeneratedHTTPIdentities(t *testing.T) {
 			}
 		})
 	}
-	if calls.Load() != 0 {
-		t.Fatalf("HTTP invoked loader %d times", calls.Load())
+	// C03: SSR loaders (the users and docs catch-all routes) now execute during
+	// dispatch — 4 SSR requests each hit a bound SSR route, so 8 runs. CSR
+	// loaders must still never run (C04 territory).
+	if ssrCalls.Load() != 8 {
+		t.Fatalf("SSR loader ran %d times, want 8", ssrCalls.Load())
+	}
+	if csrCalls.Load() != 0 {
+		t.Fatalf("CSR loader ran %d times, want 0", csrCalls.Load())
 	}
 }

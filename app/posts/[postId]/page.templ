@@ -1,0 +1,37 @@
+package posts
+
+import (
+	"fmt"
+
+	"go-meta/app/loaders"
+	"go-meta/loaderdata"
+)
+
+// Page is the C03 SSR loader example. It reads the typed PostData result that
+// the framework attached to the render context after running the registered
+// loader, and renders a visible value from it. When no loader ran (the route
+// has no binding, or the result is absent) it renders an explicit fallback
+// instead of a blank page.
+//
+// The conditional is written inside the templ Go block (the B04 pattern)
+// rather than as a templ if directive, matching the rest of the app.
+templ Page() {
+	{{
+		post, ok := loaderdata.Get[loaders.PostData](ctx)
+		var idText, titleText, contentText, missing string
+		if ok {
+			idText = fmt.Sprint(post.ID)
+			titleText = post.Title
+			contentText = post.Content
+		} else {
+			missing = "No loader data for this route."
+		}
+	}}
+	<main data-go-page-post>
+		<h1>Post</h1>
+		<p data-post-id>{idText}</p>
+		<p data-post-title>{titleText}</p>
+		<p data-post-content>{contentText}</p>
+		<p data-post-missing>{missing}</p>
+	</main>
+}
