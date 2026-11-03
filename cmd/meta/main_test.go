@@ -33,7 +33,7 @@ func TestCLISmoke(t *testing.T) {
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n\ngo 1.26\n\ntool github.com/a-h/templ/cmd/templ\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

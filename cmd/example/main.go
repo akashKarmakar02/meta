@@ -91,15 +91,10 @@ func main() {
 	if devOrigin != "" && socket != "" {
 		// The CLI owns this private directory; Air may leave a stale socket
 		// after stopping the preceding backend during a rebuild.
-		if info, err := os.Lstat(socket); err == nil {
-			if info.Mode()&os.ModeSocket == 0 {
-				log.Fatal("development socket path is not a socket")
-			}
-			if err := os.Remove(socket); err != nil {
-				log.Fatalf("remove stale development socket: %v", err)
-			}
-		} else if !os.IsNotExist(err) {
-			log.Fatalf("inspect development socket: %v", err)
+		// RemoveStaleSocket only ever removes an actual Unix socket at this
+		// exact path (never a regular file or a symlink target).
+		if err := httpserver.RemoveStaleSocket(socket); err != nil {
+			log.Fatalf("remove stale development socket: %v", err)
 		}
 		listener, err := net.Listen("unix", socket)
 		if err != nil {

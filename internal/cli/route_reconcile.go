@@ -41,7 +41,8 @@ func routeManifest(root string) (string, error) {
 
 // startRouteReconciler owns a single ticker for the lifetime of meta dev.
 // A changed manifest writes a watched file, asking Air to run its usual build.
-// Failed scans and writes leave the previous snapshot intact and are retried.
+// Failed scans and writes leave the previous snapshot intact and are retried;
+// notices print through devOutput so they carry the [meta] tag.
 func startRouteReconciler(root string, errW io.Writer) (func(), error) {
 	manifest, err := routeManifest(root)
 	if err != nil {

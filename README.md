@@ -30,26 +30,87 @@ files in the same directory are an error.
 
 ## Development
 
-Install Node.js and npm, run `npm ci`, install Air, and build the CLI with
-`go build -o bin/meta ./cmd/meta`. Start the backend and Vite together with
-`bin/meta dev`. Air regenerates routes and templates before backend builds;
-Vite serves the existing frontend entry and Svelte HMR through a local proxy. No
-`dist/client` build is needed in this mode.
+### Requirements
 
-Open `http://localhost:3000` (`PORT` overrides the public port). `meta dev`
-owns that loopback listener and forwards application requests to Fiber over a
-private Unix socket in a session-owned directory. The reserved `/_go_meta_vite/` prefix forwards Vite's
-module graph and HMR WebSocket to `127.0.0.1:5173` (`GO_META_VITE_PORT`
-overrides its port). Both public and Vite ports fail clearly if occupied.
+- Go 1.26+ (`go version`) — module toolchain per `go.mod`.
+- Node.js with npm (for Vite/Svelte HMR in development only).
+- [Air](https://github.com/air-verse/air) for Go hot reload:
+  `go install github.com/air-verse/air@latest`
+  (looked up in `PATH`, then `$GOPATH/bin`; no second discovery mechanism).
+- templ generator via the go.mod tool directive:
+  `go get -tool github.com/a-h/templ/cmd/templ@latest`
+- npm dependencies: `npm ci`.
+
+Production needs none of these — it is Go-only and serves prebuilt
+`dist/client` assets.
+
+### Running
+
+```bash
+go build -o bin/meta ./cmd/meta
+bin/meta dev
+```
+
+`meta dev` prints a compact banner (project root, public URL, which tools
+are active), starts the public proxy, Vite, and Air, and prints a single
+`Ready: http://localhost:3000` line only after both `/healthz` (through the
+proxy → private socket → Fiber) and a Vite module under `/_go_meta_vite/`
+actually answer — never before.
+
+Environment:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `PORT` | `3000` | Public loopback port browsers use |
+| `GO_META_VITE_PORT` | `5173` | Internal Vite port (bound to 127.0.0.1 only) |
+
+Both ports fail with the named service and reason if occupied; `meta dev`
+never silently picks another port. The private Fiber backend listens on a
+Unix socket inside a session-owned 0700 temp directory removed at shutdown.
+
+What runs:
+
+- Application HTTP: proxy → private Unix socket → Fiber.
+- Frontend modules and the HMR WebSocket: `/_go_meta_vite/` → Vite.
+- Go edits: Air rebuilds and restarts Fiber; the proxy stays up.
+- templ and route metadata: regenerated automatically before each build;
+  route additions, deletions, and renames reconcile without restarts.
+
+### Troubleshooting
+
+- **Air not installed** — `meta dev` prints the install command
+  (`go install github.com/air-verse/air@latest`).
+- **`node_modules` missing** — `cd <project> && npm ci`.
+- **Port occupied** — the failing service, address, and reason are printed
+  (`address already in use`); set `PORT`/`GO_META_VITE_PORT` or stop the
+  other process. `meta dev` never falls back to another port.
+- **Go compile error** — Air prints the full compiler diagnostic; the last
+  working binary keeps serving until the error is fixed. Fix and save to
+  rebuild automatically.
+- **templ syntax error** — the templ diagnostic streams through Air's output;
+  previously generated artifacts stay valid.
+- **Svelte/Vite error** — Vite shows its HMR overlay; save a corrected file
+  to recover.
+- **Proxy answers 503** — the backend is restarting (Air rebuild). The proxy
+  recovers automatically; browsers can refresh shortly. Navigation envelope
+  requests get 503 plain text (never a 200 error page).
+- **Stale route after filesystem changes** — the periodic reconciler syncs
+  within a few seconds; only route files/directories under `app/` matter.
+- **Clean shutdown** — Ctrl+C stops Air, Vite, and the proxy, removing the
+  private socket directory; repeated start/stop cycles are supported.
+
+The reserved prefixes do not overlap: `/_go_meta_vite/` belongs to Vite
+(development only); `/_meta/` (e.g. `/_meta/image`) is application-owned and
+always forwarded to Go; unknown routes keep Go's 404 (never a Vite SPA
+fallback).
+
 The proxy strips cookies and authorization from Vite requests, rejects
 non-local Host headers, and does not expose a configurable upstream. Vite's
 filesystem restrictions remain enabled. This is local development software:
 do not expose it on a LAN or tunnel it to untrusted users. Remote-device
 development is not supported by this configuration.
 
-Production continues to serve the built manifest and does not run Node or
-enable the development proxy. A06 owns richer diagnostics. Run the isolated
-real-browser development test with
+Run the isolated real-browser development suite with
 `npm exec playwright -- test -c playwright.dev.config.ts`.
 
 ## Commands (from a clean checkout)

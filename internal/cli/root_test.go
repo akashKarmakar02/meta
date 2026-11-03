@@ -151,7 +151,8 @@ func chdirTemp(t *testing.T) string {
 }
 
 // makeProject creates a minimal valid go-meta project tree under a temp
-// dir and returns its root path.
+// dir and returns its root path. The go.mod carries the templ tool
+// directive meta dev's pre-flight check looks for.
 func makeProject(t *testing.T) string {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "myapp")
@@ -160,14 +161,17 @@ func makeProject(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/myapp\n\ngo 1.26\n"), 0o644); err != nil {
+	gomod := "module example.com/myapp\n\ngo 1.26\n\ntool github.com/a-h/templ/cmd/templ\n"
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(gomod), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return root
 }
 
-// makeFullProject creates a project that satisfies meta dev's A02
+// makeFullProject creates a project that satisfies meta dev's A02+A06
 // prerequisites: root + app/ + .air.toml + dist/client bundle manifest.
+// node_modules is created on demand (makeNodeModules) because only the
+// Vite-path tests need it.
 func makeFullProject(t *testing.T) string {
 	t.Helper()
 	root := makeProject(t)
@@ -181,6 +185,19 @@ func makeFullProject(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return root
+}
+
+// makeNodeModules installs the npm-dependency marker viteCommand requires,
+// for tests that exercise the Vite startup path.
+func makeNodeModules(t *testing.T, root string) {
+	t.Helper()
+	vite := filepath.Join(root, "node_modules", "vite", "bin", "vite.js")
+	if err := os.MkdirAll(filepath.Dir(vite), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(vite, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestFindRootUpwardFromProjectRoot(t *testing.T) {

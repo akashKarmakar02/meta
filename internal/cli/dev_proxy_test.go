@@ -173,7 +173,14 @@ func TestDevProxyPortConflictAndShutdown(t *testing.T) {
 	}
 	port := fmt.Sprint(occupied.Addr().(*net.TCPAddr).Port)
 	t.Setenv("PORT", port)
-	if _, err := startDevProxy("http://127.0.0.1:5173", io.Discard); err == nil || !strings.Contains(err.Error(), "public port") {
+	err = func() error {
+		p, err := startDevProxy("http://127.0.0.1:5173", io.Discard)
+		if p != nil {
+			defer p.Close()
+		}
+		return err
+	}()
+	if err == nil || !strings.Contains(err.Error(), "cannot start public development server") || !strings.Contains(err.Error(), "address already in use") || !strings.Contains(err.Error(), "127.0.0.1:"+port) {
 		t.Fatalf("occupied port: %v", err)
 	}
 	_ = occupied.Close()

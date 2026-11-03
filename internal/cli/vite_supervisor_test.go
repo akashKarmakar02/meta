@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -47,13 +46,7 @@ func TestDevSupervisesViteAndAir(t *testing.T) {
 		t.Run(exit, func(t *testing.T) {
 			root := makeFullProject(t)
 			t.Chdir(root)
-			file := filepath.Join(root, "node_modules/vite/bin/vite.js")
-			if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(file, nil, 0644); err != nil {
-				t.Fatal(err)
-			}
+			makeNodeModules(t, root)
 			v := &supervisedFake{done: make(chan struct{})}
 			a := &supervisedFake{done: make(chan struct{})}
 			runner := &twoRunner{vite: v, air: a, calls: make(chan string, 2)}
@@ -114,13 +107,7 @@ func TestDevSupervisesViteAndAir(t *testing.T) {
 func TestDevViteStartupFailure(t *testing.T) {
 	root := makeFullProject(t)
 	t.Chdir(root)
-	file := filepath.Join(root, "node_modules/vite/bin/vite.js")
-	if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(file, nil, 0644); err != nil {
-		t.Fatal(err)
-	}
+	makeNodeModules(t, root)
 	err := runDevWith(&Context{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}, devDeps{
 		lookAir:  func() (string, error) { return "air", nil },
 		lookNode: func() (string, error) { return "node", nil },

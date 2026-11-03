@@ -123,7 +123,7 @@ func TestDevInvalidProjectDirectory(t *testing.T) {
 }
 
 // TestDevPrerequisitesTable exercises prerequisite checking against a
-// project missing exactly one A02 requirement at a time.
+// project missing exactly one requirement at a time (A02 + A06 §5).
 func TestDevPrerequisitesTable(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -135,18 +135,44 @@ func TestDevPrerequisitesTable(t *testing.T) {
 			setup: func(t *testing.T) string {
 				root := makeProject(t)
 				writeClientBundle(t, root)
+				makeNodeModules(t, root)
 				return root
 			},
 			wantErr: "no Air configuration found",
 		},
 		{
-			name: "missing client bundle",
+			// No Node on the machine: the fallback needs a prebuilt client
+			// bundle, so its absence is the actionable error.
+			name: "missing client bundle without node",
 			setup: func(t *testing.T) string {
 				root := makeProject(t)
 				writeAirConfig(t, root)
 				return root
 			},
 			wantErr: "client bundle not found",
+		},
+		{
+			name: "missing node_modules",
+			setup: func(t *testing.T) string {
+				root := makeProject(t)
+				writeAirConfig(t, root)
+				writeClientBundle(t, root)
+				return root
+			},
+			wantErr: "node_modules not installed",
+		},
+		{
+			name: "missing templ tool directive",
+			setup: func(t *testing.T) string {
+				root := makeFullProject(t)
+				gomod := filepath.Join(root, "go.mod")
+				if err := os.WriteFile(gomod, []byte("module example.com/myapp\n\ngo 1.26\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				makeNodeModules(t, root)
+				return root
+			},
+			wantErr: "does not declare the templ generator",
 		},
 	}
 
@@ -156,17 +182,24 @@ func TestDevPrerequisitesTable(t *testing.T) {
 			t.Chdir(root)
 
 			var stdout, stderr bytes.Buffer
-			err := runDevWith(&Context{Stdout: &stdout, Stderr: &stderr}, devDeps{
-				lookAir: func() (string, error) { return "/usr/bin/air", nil },
-				runner:  &fakeRunner{},
-				signals: immediateSignals,
-				grace:   time.Second,
-			})
+			deps := devDeps{
+				lookAir:  func() (string, error) { return "/usr/bin/air", nil },
+				lookNode: func() (string, error) { return "node", nil },
+				runner:   &fakeRunner{},
+				signals:  immediateSignals,
+				grace:    time.Second,
+			}
+			if tt.name == "missing client bundle without node" {
+				// The client-bundle requirement only applies when Node is
+				// absent and meta dev would serve the prebuilt fallback.
+				deps.lookNode = nil
+			}
+			err := runDevWith(&Context{Stdout: &stdout, Stderr: &stderr}, deps)
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("error = %v, want substring %q", err, tt.wantErr)
 			}
 			stdoutStr := stdout.String()
-			for _, want := range []string{"Project:", "Backend:", "Watching:", "Starting development backend"} {
+			for _, want := range []string{"go-meta development", "Project:", "Backend:", "Starting development services"} {
 				if strings.Contains(stdoutStr, want) {
 					t.Errorf("stdout = %q, should not claim startup before prerequisite check (%q present)", stdoutStr, want)
 				}
@@ -258,14 +291,21 @@ func TestDevStartOutput(t *testing.T) {
 
 	out := stdout.String()
 	for _, want := range []string{
-		"Project: " + root,
-		"Backend: Air",
-		"Watching: Go sources",
-		"Starting development backend...",
+		"go-meta development",
+		"Project:    " + root,
+		"Local:      http://localhost:3000",
+		"Backend:    Air",
+		"Generation: automatic",
+		"Starting development services...",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("stdout = %q, want %q", out, want)
 		}
+	}
+	// The banner must not claim readiness: the Ready line prints only
+	// after bounded probes succeed (A06 §4).
+	if strings.Contains(out, "Ready:") {
+		t.Errorf("stdout = %q, readiness claimed before probes", out)
 	}
 }
 
