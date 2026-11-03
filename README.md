@@ -165,11 +165,13 @@ shared state captured by a loader.
 `ErrNotFound`, `ErrUnauthorized`, `ErrForbidden`, and `ErrInvalidInput` are
 optional error classifications usable with `errors.Is`; ordinary and wrapped
 errors, including their causes, remain intact. Do not send raw internal errors
-to clients. C05 will decide HTTP and navigation mappings and redirect handling;
-no redirect outcome is defined here. C02 registration adapts a typed loader at
-the runtime boundary; C03 connects typed data to templ and runs SSR loaders
-automatically (see "Executing SSR loaders (C03)"); C04 runs CSR loaders and
-serializes their results to JSON for clients (see "Executing CSR loaders (C04)").
+to clients. The HTTP and navigation mappings for these sentinels, plus the
+`Redirect` outcome, are defined in
+"Loader failures, redirects, and cancellation (C05)". C02 registration adapts a
+typed loader at the runtime boundary; C03 connects typed data to templ and runs
+SSR loaders automatically (see "Executing SSR loaders (C03)"); C04 runs CSR
+loaders and serializes their results to JSON for clients (see "Executing CSR
+loaders (C04)").
 
 ## Registering loaders (C02)
 
@@ -285,11 +287,13 @@ the rendered HTML, and a navigation-envelope request returns the same rendered
 HTML inside the existing version-1 envelope (no new `data` field, no version
 bump). A route with no registered loader renders exactly as before.
 
-**Failure behavior (temporary).** If a loader returns an error, the request stops
-before rendering: the original error is logged server-side and the client receives
-a generic `500`. C03 deliberately does **not** map loader sentinels to specific
-statuses (`404`/`401`/`403`/`400`/redirect) — that is C05. Cancellation errors
-are not logged as failures. No raw internal error text is sent to the client.
+**Failure behavior.** If a loader returns an error, the request stops before
+rendering. The full status mapping, redirect handling, and logging policy are
+defined in "Loader failures, redirects, and cancellation (C05)": the C01
+sentinels map to `404`/`401`/`403`/`400`, a redirect outcome to `302`,
+cancellation to `499` (not logged), a deadline to `504`, and anything else to a
+generic `500` whose real cause is logged server-side. No raw internal error text
+is ever sent to the client.
 
 **What C03 does not do.** No CSR execution or transport (C04), no JSON
 serialization of results, no caching, prefetching, retries, or concurrent
@@ -381,18 +385,87 @@ preserved: a stale navigation's data is never mounted, applied to props, or
 committed to history, because the client only consumes a response after the
 freshness check.
 
-**Failure behavior (temporary).** A loader error or a JSON serialization failure
-(preventing a successful publication with partial data) stops the request before
-the page is published: the original error is logged server-side and the client
-receives a generic `500`, which the navigation engine treats as a failed
-navigation (hard-navigation fallback). C04 does **not** map loader sentinels to
-specific statuses or redirects — that is C05.
+**Failure behavior.** A loader error or a JSON serialization failure (which
+would prevent a successful publication with partial data) stops the request
+before the page is published: no loader data is embedded or placed in the
+envelope. The status mapping and redirect handling are defined in "Loader
+failures, redirects, and cancellation (C05)"; a loader error is a non-2xx
+response, which the navigation engine treats as a failed navigation
+(hard-navigation fallback to the status page).
 
 **What C04 does not do.** No C05 error/redirect mapping, no C06 integration gate,
 no caching, prefetching, retries, or concurrent multi-loader orchestration, no
 streaming, no server actions, no client-side route matching, no generated
 Go→TypeScript types, and no client-side schema validation (pages declare their
 type; the transport boundary is `unknown`).
+
+## Loader failures, redirects, and cancellation (C05)
+
+C05 gives every loader outcome a single, predictable HTTP and navigation
+behavior. The mapping lives in one place — the loader dispatch
+(`internal/httpserver/loader_dispatch.go`) — so SSR and CSR, direct and
+soft-navigation requests all behave identically. A loader returns one of the
+C01 sentinels, a `loader.Redirect` outcome, a `context` error, or an arbitrary
+error; the dispatch classifies it and responds **before the page renders or its
+data is published**. A failing loader never leaves a half-rendered page: the
+response is a status page (or redirect), never a page with missing data.
+
+**HTTP status mapping.** Classification uses `errors.Is`, so an error *wrapped*
+around a sentinel (or a `context` error) maps to the same outcome as the bare
+sentinel. A `*loader.RedirectError` is checked first with `errors.As` because it
+is a control-flow outcome, not a failure.
+
+| Loader outcome | Status | Logged? | Notes |
+| --- | --- | --- | --- |
+| `loader.Redirect(target)` | `302 Found` | no | Validated root-relative `Location`; empty body. A successful outcome, not a failure. |
+| `loader.ErrNotFound` | `404` | no | Page does not render. |
+| `loader.ErrUnauthorized` | `401` | no | |
+| `loader.ErrForbidden` | `403` | no | |
+| `loader.ErrInvalidInput` | `400` | no | |
+| `context.Canceled` | `499` | **no** | Client aborted the request (closed the tab, navigated away). Not a server failure, so it is deliberately not logged. |
+| `context.DeadlineExceeded` | `504` | yes | The loader ran past its deadline. |
+| anything else | `500` | yes | The real cause is logged server-side; the client sees only a generic message. |
+
+`499` ("client closed request") is the nginx convention; it is not an official
+IANA status, so it is named as a constant rather than a bare literal. Every
+status page is generic by design — it says what happened at the HTTP level
+without revealing which loader failed or why.
+
+**Redirects are root-relative and validated.** A loader redirect must name a
+same-origin, path-only target (e.g. `/login`). The dispatch rejects anything
+that could take the user off-origin or run a different scheme: absolute URLs
+(`https://…`), protocol-relative targets (`//host/…`), a backslash-sneaked
+absolute URL (`/\host` normalizes to `//host` in browsers), non-path values
+(query-only, fragment-only, relative), and control characters (header
+injection). An invalid target is a loader bug, not a client condition: it fails
+closed as a `500` with no `Location` header rather than emitting a redirect the
+client could follow off-origin. This is the open-redirect / XSS defense for
+loader redirects.
+
+**Navigation behavior.** A `302` is a bare response (no body). On a **direct
+load** the browser follows it transparently. During **soft navigation** the
+client's `fetch` (default `redirect: 'follow'`) follows a same-origin redirect
+with the navigation header preserved, so the target returns its normal envelope
+and the pipeline applies it as if the user had navigated there directly — no
+protocol change is needed. A loader **error** during soft navigation is a
+non-2xx response, which the navigation engine treats as a failed navigation and
+resolves with the full-document fallback to the destination (the status page),
+so the user is never stranded on stale content.
+
+**Cancellation and stale navigation.** The loader runs with the B05
+request-lifetime context. A newer soft navigation aborts the previous one's
+in-flight fetch (`beginNavigation`), and the monotonic navigation-token model
+re-checks currency after every await, so a **stale loader response — including a
+stale redirect — can never commit** browser state (DOM, history, title, or
+scroll). Client-disconnect cancellation is **deliberately not promised**: this
+Fiber stack does not wire a browser disconnect into the request context, so the
+server may finish a loader the client has abandoned; the guarantee is that the
+client never applies a result it no longer owns.
+
+**What C05 does not do.** No C06 integration gate, no caching, no server
+actions, no middleware extensions, and no additional routing syntax. The
+navigation envelope stays version-1 and backward-compatible: C05 adds no fields
+and no version bump.
 
 ## Toolchain requirements
 

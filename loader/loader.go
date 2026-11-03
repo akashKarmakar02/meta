@@ -28,6 +28,24 @@ var (
 	ErrNilLoader  = errors.New("loader: nil loader")
 )
 
+// RedirectError is a control-flow outcome, not a failure: a loader returns it
+// (in the error slot) to ask the dispatch to redirect the request to Location
+// instead of rendering. It carries no data result. The dispatch validates the
+// location (root-relative only) and responds with a 3xx before rendering. It
+// is never logged as a loader failure.
+type RedirectError struct {
+	// Location is the redirect target. It must be a root-relative path
+	// (e.g. "/login"); the dispatch rejects absolute URLs, protocol-relative
+	// targets, and other non-root-relative values.
+	Location string
+}
+
+func (e *RedirectError) Error() string { return "loader: redirect to " + e.Location }
+
+// Redirect returns a RedirectError for the given root-relative location. A
+// loader returns it to redirect the request.
+func Redirect(location string) error { return &RedirectError{Location: location} }
+
 // Execute calls load once, synchronously, with ctx and the matched route
 // snapshot. The caller must supply the snapshot associated with ctx. A nil
 // context is rejected. If ctx is already cancelled, Execute returns its error

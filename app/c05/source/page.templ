@@ -1,0 +1,26 @@
+package source
+
+// C05Source is the SSR fixture that hosts the plain same-origin links the C05
+// browser tests click. It has no registered loader, so it renders normally in
+// the real app (it is only a navigation source). The links let a real-browser
+// test start soft navigations to each C05 target:
+//
+//   - "redirect-ssr"  → /c05/redirectSsr   (loader redirects to /about)
+//   - "redirect-csr"  → /c05/redirectCsr   (loader redirects to /dashboard)
+//   - "slow"          → /c05/slowRedirect  (loader sleeps, then → /docs)
+//   - "not-found"     → /c05/notFound      (loader reports not found)
+//
+// The stale-redirect test clicks "slow" and, while that fetch is in flight,
+// clicks "target" (/about). The second navigation aborts the first and the
+// first's stale redirect (to /docs) must never commit — the page ends on
+// /about, not /docs.
+templ C05Source() {
+	<main data-go-page="c05-source">
+		<h1>C05 source</h1>
+		<a data-go-c05-redirect-ssr href="/c05/redirectSsr">redirect-ssr</a>
+		<a data-go-c05-redirect-csr href="/c05/redirectCsr">redirect-csr</a>
+		<a data-go-c05-slow href="/c05/slowRedirect">slow</a>
+		<a data-go-c05-not-found href="/c05/notFound">not-found</a>
+		<a data-go-c05-target href="/about">target</a>
+	</main>
+}

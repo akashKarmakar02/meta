@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http/httptest"
 	"strconv"
@@ -172,12 +173,13 @@ func TestC04CSRLoaderReceivesParamsAndQuery(t *testing.T) {
 }
 
 // TestC04CSRLoaderFailureStopsPublication proves a loader error prevents a
-// successful CSR response: a generic 500, no shell/envelope with missing data,
-// and no raw error text leaked.
+// successful CSR response: a 5xx, no shell/envelope with missing data, and no
+// raw error text leaked. C05 maps a generic (unclassified) loader error to
+// 500; the deadline/cancellation cases are covered by the C05 tests.
 func TestC04CSRLoaderFailureStopsPublication(t *testing.T) {
 	registry, err := newLoaderRegistry([]loader.Binding{
 		loader.Bind("dashboard/[teamId]/page.svelte", func(context.Context, routecontext.Route) (map[string]string, error) {
-			return nil, context.DeadlineExceeded
+			return nil, errors.New("upstream timeout: internal detail")
 		}),
 	})
 	if err != nil {
@@ -188,7 +190,7 @@ func TestC04CSRLoaderFailureStopsPublication(t *testing.T) {
 	if code != 500 {
 		t.Fatalf("status=%d, want 500", code)
 	}
-	if strings.Contains(body, "DeadlineExceeded") || strings.Contains(body, "deadline") {
+	if strings.Contains(body, "upstream timeout") || strings.Contains(body, "internal detail") {
 		t.Fatalf("raw loader error leaked: %s", body)
 	}
 }

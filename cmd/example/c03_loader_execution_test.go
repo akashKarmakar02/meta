@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http/httptest"
 	"strings"
@@ -111,10 +112,10 @@ func TestC03SSRExecutesRegisteredLoaderEndToEnd(t *testing.T) {
 // and concurrent requests are isolated.
 func TestC03LoaderExecutionCountAndIsolation(t *testing.T) {
 	var ssrCalls, csrCalls atomic.Int32
-	var captured routecontext.Route
+	var captured atomic.Pointer[routecontext.Route]
 	ssrLoad := func(_ context.Context, r routecontext.Route) (int, error) {
 		ssrCalls.Add(1)
-		captured = r
+		captured.Store(&r)
 		return 1, nil
 	}
 	csrLoad := func(context.Context, routecontext.Route) (int, error) {
@@ -138,10 +139,14 @@ func TestC03LoaderExecutionCountAndIsolation(t *testing.T) {
 	if ssrCalls.Load() != 1 {
 		t.Fatalf("SSR loader ran %d times, want 1", ssrCalls.Load())
 	}
-	if captured.RouteID != "about/page.templ" {
-		t.Fatalf("loader route ID=%q", captured.RouteID)
+	cap := captured.Load()
+	if cap == nil {
+		t.Fatal("loader never captured a route snapshot")
 	}
-	if tags := captured.Query.Values("tag"); len(tags) != 2 || tags[0] != "x" || tags[1] != "y" {
+	if cap.RouteID != "about/page.templ" {
+		t.Fatalf("loader route ID=%q", cap.RouteID)
+	}
+	if tags := cap.Query.Values("tag"); len(tags) != 2 || tags[0] != "x" || tags[1] != "y" {
 		t.Fatalf("loader query=%v", tags)
 	}
 
@@ -195,11 +200,13 @@ func TestC03LoaderExecutionCountAndIsolation(t *testing.T) {
 
 // TestC03LoaderFailureStopsRenderAndHidesError binds a failing loader to an
 // SSR route and proves the page does not render and the client sees only a
-// generic error, never the loader's message.
+// generic error, never the loader's message. C05 maps a generic (unclassified)
+// loader error to 500; the deadline/cancellation cases are covered by the C05
+// tests.
 func TestC03LoaderFailureStopsRenderAndHidesError(t *testing.T) {
 	registry, err := newLoaderRegistry([]loader.Binding{
 		loader.Bind("about/page.templ", func(context.Context, routecontext.Route) (int, error) {
-			return 0, context.DeadlineExceeded
+			return 0, errors.New("database connection refused: internal detail")
 		}),
 	})
 	if err != nil {
@@ -213,7 +220,7 @@ func TestC03LoaderFailureStopsRenderAndHidesError(t *testing.T) {
 	if strings.Contains(body, "About") && strings.Contains(body, "data-go-page") {
 		t.Errorf("page rendered despite loader failure: %s", body)
 	}
-	for _, secret := range []string{"DeadlineExceeded", "deadline", "panic"} {
+	for _, secret := range []string{"database connection", "internal detail", "panic"} {
 		if strings.Contains(body, secret) {
 			t.Errorf("internal error %q leaked: %s", secret, body)
 		}

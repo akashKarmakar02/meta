@@ -1,0 +1,14 @@
+package redirectssr
+
+// C05RedirectSsr is the SSR fixture for loader redirects. Its registered
+// loader (LoadC05RedirectSSR) always redirects to /about, so in the real app
+// this component never renders — the 302 fires before rendering. The content
+// below only matters for the no-loader test app (newApp(nil)), where the
+// route renders normally so the route-iterating contract tests still see a
+// valid document.
+templ C05RedirectSsr() {
+	<main data-go-page="c05-redirect-ssr">
+		<h1>C05 SSR redirect source</h1>
+		<p>This page's loader redirects to /about.</p>
+	</main>
+}
