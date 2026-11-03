@@ -68,7 +68,7 @@ does not signal client disconnects; it signals server shutdown instead, and
 that signal is not automatically propagated to Fiber's user context. Do not
 retain Fiber or fasthttp objects for background work. Retain a route snapshot
 and use a separately owned context for work that must outlive the request.
-This is route metadata access, not the future Phase C loader API.
+This is route metadata access; the C01 loader contract below can consume it explicitly.
 
 Routes may include multiple single-segment parameters, for example
 `users/[userId]/posts/[postId]/page.templ` matches `/users/42/posts/99`.
@@ -119,6 +119,57 @@ module, not the concrete URL) and read the destination from the page root's
 `data-go-route` attribute. Encoded slashes, backslashes, dot segments, invalid
 percent escapes and invalid UTF-8 are rejected in catch-all values, exactly as
 in single-segment parameters.
+
+## Server-side loader contract (C01)
+
+`go-meta/loader` defines `Loader[T]`, a synchronous function receiving a
+standard `context.Context` and the matched `routecontext.Route`, and
+`loader.Execute`, which invokes it explicitly and returns the same typed value
+and error. For example:
+
+```go
+import (
+    "context"
+    "go-meta/loader"
+    "go-meta/routecontext"
+)
+
+type User struct { ID int64; Tab string; Tags []string }
+
+func loadUser(ctx context.Context, route routecontext.Route) (User, error) {
+    id, err := route.Params.Int64("userId")
+    if err != nil { return User{}, err }
+    return User{ID: id, Tab: route.Query.Get("tab"), Tags: route.Query.Values("tag")}, nil
+}
+
+// Inside matched-route processing, obtain route from routecontext.FromContext(ctx).
+// user, err := loader.Execute(ctx, route, loadUser)
+```
+
+A loader can return any Go type, including a slice or a zero value; a nil error
+is distinct from an error. `Execute` calls it once, checks an already-cancelled
+context before calling, and preserves its result and error verbatim. A nil
+context or loader produces `loader.ErrNilContext` or `loader.ErrNilLoader`.
+Cancellation during the call is cooperative: the loader must pass its context to
+blocking work and return before dispatch finishes. `Execute` does not start a
+goroutine, retry, cache, or override a result after cancellation.
+
+The caller must pass the snapshot belonging to the supplied context. Route
+metadata and query values remain safe to retain; the request context is
+cancelled when dispatch returns. It inherits parent cancellation and deadlines
+when supplied, but this Fiber stack does not guarantee cancellation when a
+browser disconnects. Background work needs an independently owned context;
+never retain Fiber or fasthttp request objects. Applications must synchronize
+shared state captured by a loader.
+
+`ErrNotFound`, `ErrUnauthorized`, `ErrForbidden`, and `ErrInvalidInput` are
+optional error classifications usable with `errors.Is`; ordinary and wrapped
+errors, including their causes, remain intact. Do not send raw internal errors
+to clients. C05 will decide HTTP and navigation mappings and redirect handling;
+no redirect outcome is defined here. Future C02 registration can adapt a typed
+loader at the runtime boundary, C03 can connect typed data to templ, and C04 can
+define serialization. None of those integrations or automatic execution is
+implemented by C01.
 
 ## Toolchain requirements
 
