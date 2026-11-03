@@ -10,6 +10,9 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/logger"
 	"github.com/gofiber/fiber/v3/middleware/recover"
 
+	"go-meta/app/loaders"
+	"go-meta/loader"
+
 	routes "go-meta/generated"
 	"go-meta/internal/httpserver"
 	"go-meta/internal/render"
@@ -26,6 +29,21 @@ func newApp(assets *httpserver.Assets) *fiber.App {
 }
 
 func newAppWithDevProxy(assets *httpserver.Assets, privateSocket bool) *fiber.App {
+	return newConfiguredApp(assets, privateSocket, nil)
+}
+
+const loaderRegistryKey = "go-meta/loader-registry"
+
+func newLoaderRegistry(bindings []loader.Binding) (*loader.Registry, error) {
+	routes := routes.RegisterRoutes()
+	ids := make([]string, len(routes))
+	for i, route := range routes {
+		ids[i] = route.ID
+	}
+	return loader.NewRegistry(ids, bindings...)
+}
+
+func newConfiguredApp(assets *httpserver.Assets, privateSocket bool, registry *loader.Registry) *fiber.App {
 	config := fiber.Config{
 		// D07: centralized HTML error pages; no stack traces or internals leak.
 		ErrorHandler:  render.HTTPErrorHandler,
@@ -39,6 +57,9 @@ func newAppWithDevProxy(assets *httpserver.Assets, privateSocket bool) *fiber.Ap
 		config.TrustProxyConfig.UnixSocket = true
 	}
 	fapp := fiber.New(config)
+	if registry != nil {
+		fapp.State().Set(loaderRegistryKey, registry)
+	}
 
 	// Recover converts panics into 500 responses instead of killing the server.
 	fapp.Use(recover.New())
@@ -69,8 +90,11 @@ func newAppWithDevProxy(assets *httpserver.Assets, privateSocket bool) *fiber.Ap
 }
 
 func main() {
+	registry, err := newLoaderRegistry(loaders.Bindings())
+	if err != nil {
+		log.Fatalf("loader registration: %v", err)
+	}
 	var assets httpserver.Assets
-	var err error
 	devOrigin := os.Getenv("GO_META_VITE_ORIGIN")
 	if devOrigin != "" {
 		assets, err = httpserver.DevelopmentAssets(devOrigin)
@@ -81,7 +105,7 @@ func main() {
 		log.Fatalf("load client assets: %v", err)
 	}
 	socket := os.Getenv("GO_META_DEV_SOCKET")
-	app := newAppWithDevProxy(&assets, devOrigin != "" && socket != "")
+	app := newConfiguredApp(&assets, devOrigin != "" && socket != "", registry)
 	// E09: serve the hashed production bundle at the same /assets prefix
 	// the shells reference. Fails explicitly when the build output is
 	// missing rather than serving pages that cannot boot.

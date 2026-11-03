@@ -166,10 +166,63 @@ shared state captured by a loader.
 optional error classifications usable with `errors.Is`; ordinary and wrapped
 errors, including their causes, remain intact. Do not send raw internal errors
 to clients. C05 will decide HTTP and navigation mappings and redirect handling;
-no redirect outcome is defined here. Future C02 registration can adapt a typed
-loader at the runtime boundary, C03 can connect typed data to templ, and C04 can
-define serialization. None of those integrations or automatic execution is
-implemented by C01.
+no redirect outcome is defined here. C02 registration adapts a typed loader at the runtime boundary; C03 can connect
+typed data to templ, and C04 can define serialization. None of those rendering
+integrations or automatic execution is implemented yet.
+
+## Registering loaders (C02)
+
+Declare bindings in `app/loaders/bindings.go`, a Go-safe package outside any
+bracket-named directory. Use the page's source path relative to `app/` as its
+stable ID, including `page.templ` or `page.svelte`:
+
+```go
+package loaders
+
+import (
+    "context"
+    "go-meta/loader"
+    "go-meta/routecontext"
+)
+
+type UserData struct { ID int64 `json:"id"` }
+
+func loadUser(_ context.Context, route routecontext.Route) (UserData, error) {
+    id, err := route.Params.Int64("userId")
+    return UserData{ID: id}, err
+}
+
+func Bindings() []loader.Binding {
+    return []loader.Binding{
+        loader.Bind("users/[userId]/page.templ", loadUser),
+    }
+}
+```
+
+The same mechanism supports Svelte pages and catch-alls, for example
+`dashboard/page.svelte` and `docs/[...slug]/page.templ`. Concrete URLs such as
+`/users/42` are not registration keys. At startup the application builds an
+immutable registry against the generated route IDs; duplicate, empty, unknown,
+and nil bindings fail with an error. A known route without a binding simply has
+no loader. `Registry.HasRoute` distinguishes that case from an unknown ID;
+`Registry.Lookup` is safe concurrently and never executes a loader.
+The application stores the validated registry for future dispatch integration.
+
+`loader.Bind` checks each function's Go result type at the call site and adapts
+it once to a runtime handle, allowing distinct result types in the same
+registry. Explicit `Registered.Execute` returns a type-erased value and the
+original error, and requires the matching route snapshot; it is intended as the
+future integration boundary. Registration and lookup never run loaders, and C02
+adds no loader data to SSR or navigation responses. C03 will decide how templ
+receives data; C04 will decide what may be serialized for clients.
+
+`meta dev` rebuilds after edits to this ordinary Go package. Route creation,
+rename, and deletion still use the route reconciler and generator. A binding
+whose route was renamed or removed fails startup with its old ID until corrected
+or removed; duplicate and unknown bindings likewise fail startup, rather than
+silently selecting one. Missing Go symbols fail compilation. Fixing the Go
+source triggers another rebuild. There are no generated loader imports or
+loader-specific generated artifacts to clean up.
 
 ## Toolchain requirements
 
