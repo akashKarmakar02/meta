@@ -1,4 +1,5 @@
-// D02: reserved, method-restricted JSON HTTP endpoints for registered actions.
+// D02/D03: reserved, method-restricted JSON and form HTTP endpoints for
+// registered actions.
 package httpserver
 
 import (
@@ -6,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"log"
 	"net/http"
 	"net/url"
@@ -14,6 +16,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 
 	"go-meta/action"
+	"go-meta/formcsrf"
 	"go-meta/routecontext"
 	"go-meta/routeparams"
 )
@@ -37,6 +40,11 @@ const DefaultMaxActionBodyBytes = 1 << 20
 type ActionEndpointConfig struct {
 	TrustedOrigin string
 	MaxBodyBytes  int64
+	// CSRF is the form-CSRF token manager. It is required for
+	// application/x-www-form-urlencoded submissions (double-submit cookie
+	// verification); JSON submissions never consult it. Nil keeps the JSON
+	// path fully functional and fails form requests closed.
+	CSRF *formcsrf.Manager
 }
 
 // MountActions registers POST /_meta/actions/{actionID} on app. A nil registry
@@ -69,13 +77,103 @@ func dispatchAction(c fiber.Ctx, registry *action.Registry, cfg ActionEndpointCo
 		return actionError(c, fiber.StatusNotFound, "unknown action")
 	}
 	if !sameOrigin(c, cfg.TrustedOrigin) {
-		return actionError(c, http.StatusForbidden, "cross-origin action request rejected")
+		if contentTypeOf(c.Get(fiber.HeaderContentType)) == "application/json" {
+			return actionError(c, http.StatusForbidden, "cross-origin action request rejected")
+		}
+		return formErrorPage(c, http.StatusForbidden, "Requests from other sites are not accepted.")
 	}
-	// Content-Type gate runs before reading the body: c.Body() would otherwise
-	// try to parse a multipart payload just to measure it.
-	if !isJSONContentType(c.Get(fiber.HeaderContentType)) {
-		return actionError(c, http.StatusUnsupportedMediaType, "Content-Type must be application/json")
+	switch contentTypeOf(c.Get(fiber.HeaderContentType)) {
+	case "application/json":
+		return dispatchJSONAction(c, registry, cfg, id)
+	case "application/x-www-form-urlencoded":
+		return dispatchFormAction(c, registry, cfg, id)
+	default:
+		// Content-Type gate runs before reading the body: c.Body() would
+		// otherwise try to parse a multipart payload just to measure it.
+		return actionError(c, http.StatusUnsupportedMediaType, "unsupported content type for actions")
 	}
+}
+
+// contentTypeOf extracts the media type from a Content-Type header value,
+// lowercased, ignoring any parameters such as charset. An empty header
+// yields "".
+func contentTypeOf(v string) string {
+	if v == "" {
+		return ""
+	}
+	mediaType := v
+	if i := strings.IndexByte(mediaType, ';'); i >= 0 {
+		mediaType = mediaType[:i]
+	}
+	return strings.ToLower(strings.TrimSpace(mediaType))
+}
+
+// dispatchFormAction is the D03 browser-native path. Execution order:
+// body-size gate → parse form values → CSRF verify (field must match the
+// signed cookie, both verified by the manager) → registry lookup →
+// form-enabled gate → typed decode → Execute once → safe 303 PRG redirect.
+// The action never runs before every gate passes; the JSON path stays
+// byte-for-byte compatible with D02.
+func dispatchFormAction(c fiber.Ctx, registry *action.Registry, cfg ActionEndpointConfig, id string) error {
+	if int64(len(c.Body())) > cfg.MaxBodyBytes {
+		return formErrorPage(c, http.StatusRequestEntityTooLarge, "The submission was too large.")
+	}
+	values, err := parseURLEncodedForm(string(c.Body()))
+	if err != nil {
+		return formErrorPage(c, http.StatusBadRequest, "The submitted form could not be read.")
+	}
+	// CSRF verification happens before registry lookup and decoding: without a
+	// valid token no information about the binding or input shapes is revealed
+	// and nothing executes. Double-submit: the hidden field must equal the
+	// signed _meta_csrf cookie and both must carry a valid signature.
+	binding, ok := registry.Lookup(id)
+	if !ok {
+		// Unknown-but-valid IDs answer identically to malformed ones: a safe
+		// 404 with no information about the registry.
+		return formErrorPage(c, fiber.StatusNotFound, "Unknown action.")
+	}
+	if !binding.FormCapable() {
+		// The action exists but has opted out of form submissions. Answering
+		// with 415 (not a look-alike 404) tells a browser form author their
+		// form targets the wrong transport, without leaking anything about
+		// other bindings.
+		return formErrorPage(c, http.StatusUnsupportedMediaType, "This form is not available.")
+	}
+	if cfg.CSRF == nil {
+		log.Printf("go-meta: form action %s rejected: no CSRF manager configured", id)
+		return formErrorPage(c, http.StatusInternalServerError, "This form is not available right now.")
+	}
+	formToken := values.Get(formcsrf.FieldName)
+	if formToken == "" {
+		return formErrorPage(c, http.StatusForbidden, "Missing CSRF token. Reload the page and try again.")
+	}
+	cookieToken := c.Cookies(formcsrf.CookieName)
+	if !cfg.CSRF.Verify(formToken, cookieToken) {
+		return formErrorPage(c, http.StatusForbidden, "Invalid CSRF token. Reload the page and try again.")
+	}
+	delete(values, formcsrf.FieldName)
+	input, derr := binding.DecodeForm(values)
+	if derr != nil {
+		return handleActionError(c, id, fmt.Errorf("%w: %v", action.ErrInvalidInput, derr), true)
+	}
+	route := actionRouteSnapshot(c, id)
+	if _, err = binding.InvokeForm(c.Context(), route, input); err != nil {
+		return handleActionError(c, id, err, true)
+	}
+	// Post/Redirect/Get with the binding's trusted destination. Result values
+	// are not placed in the redirect URL (D04 may extend this).
+	dest := binding.SuccessURL()
+	if loc, ok := validFormRedirectLocation(dest); ok {
+		c.Set(fiber.HeaderCacheControl, "no-store")
+		return c.Redirect().Status(fiber.StatusSeeOther).To(loc)
+	}
+	log.Printf("go-meta: action %s has invalid redirect target %q", id, dest)
+	return formErrorPage(c, http.StatusInternalServerError, "Something went wrong. Please try again.")
+}
+
+// dispatchJSONAction is the D02 path, unchanged in behavior: body-size gate →
+// registry lookup → strict JSON decode → Execute once → JSON response.
+func dispatchJSONAction(c fiber.Ctx, registry *action.Registry, cfg ActionEndpointConfig, id string) error {
 	if int64(len(c.Body())) > cfg.MaxBodyBytes {
 		return actionError(c, http.StatusRequestEntityTooLarge, "request body too large")
 	}
@@ -87,7 +185,7 @@ func dispatchAction(c fiber.Ctx, registry *action.Registry, cfg ActionEndpointCo
 	route := actionRouteSnapshot(c, id)
 	result, err := binding.Invoke(c.Context(), route, c.Body())
 	if err != nil {
-		return handleActionError(c, id, err)
+		return handleActionError(c, id, err, false)
 	}
 	data, err := json.Marshal(result)
 	if err != nil {
@@ -133,47 +231,57 @@ func parseActionQuery(c fiber.Ctx) url.Values {
 	return query
 }
 
-// handleActionError maps action errors to the D02 HTTP contract using
-// errors.Is, logging only genuine failures server-side. It never leaks the
-// underlying error to the client. The mapping parallels C05's loader mapping
-// for the shared vocabulary while remaining separate: action errors never
-// reuse loader types or endpoints.
-func handleActionError(c fiber.Ctx, id string, err error) error {
+// handleActionError maps action errors to the HTTP contract using errors.Is,
+// logging only genuine failures server-side. It never leaks the underlying
+// error to the client. The mapping parallels C05's loader mapping for the
+// shared vocabulary while remaining separate: action errors never reuse loader
+// types or endpoints. htmlMode selects the browser-form response shape; JSON
+// clients keep the D02 JSON contract.
+func handleActionError(c fiber.Ctx, id string, err error, htmlMode bool) error {
 	switch {
 	case errors.Is(err, context.Canceled):
 		// The client aborted mid-action; not logged (C05 policy). The action
 		// may have committed its effect — cancellation is not a rollback.
+		if htmlMode {
+			return formErrorPage(c, statusClientClosedRequest, "The request was canceled.")
+		}
 		return actionError(c, statusClientClosedRequest, "client canceled request")
 	case errors.Is(err, context.DeadlineExceeded):
 		log.Printf("go-meta: action %s exceeded its deadline: %v", id, err)
+		if htmlMode {
+			return formErrorPage(c, http.StatusGatewayTimeout, "The request timed out.")
+		}
 		return actionError(c, http.StatusGatewayTimeout, "action timed out")
 	case errors.Is(err, action.ErrInvalidInput):
-		// Includes strict JSON decode failures from the adapter. Expected
-		// client error: not logged, never retried.
+		// Includes strict JSON/form decode failures from the adapter.
+		// Expected client error: not logged, never retried. D04 will add
+		// field-level feedback for forms.
+		if htmlMode {
+			return formErrorPage(c, http.StatusBadRequest, "Some form fields could not be read correctly.")
+		}
 		return actionError(c, http.StatusBadRequest, "invalid input")
 	case errors.Is(err, action.ErrUnauthorized):
+		if htmlMode {
+			return formErrorPage(c, http.StatusUnauthorized, "You need to sign in to do that.")
+		}
 		return actionError(c, http.StatusUnauthorized, "unauthorized")
 	case errors.Is(err, action.ErrForbidden):
+		if htmlMode {
+			return formErrorPage(c, http.StatusForbidden, "You are not allowed to do that.")
+		}
 		return actionError(c, http.StatusForbidden, "forbidden")
 	case errors.Is(err, action.ErrNotFound):
+		if htmlMode {
+			return formErrorPage(c, http.StatusNotFound, "Not found.")
+		}
 		return actionError(c, http.StatusNotFound, "not found")
 	default:
 		log.Printf("go-meta: action %s failed: %v", id, err)
+		if htmlMode {
+			return formErrorPage(c, http.StatusInternalServerError, "Something went wrong. Please try again.")
+		}
 		return actionError(c, http.StatusInternalServerError, "action failed")
 	}
-}
-
-// isJSONContentType accepts application/json with an optional charset
-// parameter. Any other media type is rejected with 415 — in particular HTML
-// form content types (urlencoded/multipart/text/plain) can never execute an
-// action, which closes the "simple request" CSRF vector alongside the Origin
-// check.
-func isJSONContentType(ct string) bool {
-	mt := strings.TrimSpace(strings.ToLower(ct))
-	if i := strings.IndexByte(mt, ';'); i >= 0 {
-		mt = mt[:i]
-	}
-	return strings.TrimSpace(mt) == "application/json"
 }
 
 // sameOrigin enforces the D02 origin/CSRF boundary for the JSON endpoint:
@@ -227,4 +335,41 @@ func actionError(c fiber.Ctx, status int, msg string) error {
 	c.Set(fiber.HeaderContentType, "application/json")
 	c.Set(fiber.HeaderCacheControl, "no-store")
 	return c.Status(status).SendString(fmt.Sprintf(`{"ok":false,"error":%q}`, msg))
+}
+
+// csrfFormField is the fixed name of the hidden CSRF input rendered by
+// formcsrf.HiddenInput. The framework reserves this field name.
+const csrfFormField = "_csrf"
+
+// formErrorPage answers a browser-native form failure with a minimal, safe
+// HTML page: static text only, no reflection of user input, no internal
+// details. D04 will add field-level feedback and value preservation.
+func formErrorPage(c fiber.Ctx, status int, msg string) error {
+	c.Set(fiber.HeaderContentType, "text/html; charset=utf-8")
+	c.Set(fiber.HeaderCacheControl, "no-store")
+	body := "<!doctype html><html><head><meta charset=\"utf-8\"><title>Submission failed</title></head>" +
+		"<body><h1>Submission failed</h1><p>" + html.EscapeString(msg) + "</p>" +
+		"<p><a href=\"/\">Go to the home page</a></p></body></html>"
+	return c.Status(status).SendString(body)
+}
+
+// parseURLEncodedForm parses an application/x-www-form-urlencoded body with
+// standard url.Values semantics: repeated keys accumulate in order, percent
+// escapes decode, '+' decodes as space, missing '=' yields an empty value.
+// Malformed percent encodings are rejected rather than silently corrected.
+func parseURLEncodedForm(body string) (url.Values, error) {
+	if body == "" {
+		return url.Values{}, nil
+	}
+	return url.ParseQuery(body)
+}
+
+// validFormRedirectLocation applies the C05 safe-redirect policy to a form
+// success destination: same-origin absolute-path targets only, no scheme,
+// host, protocol-relative, back-targeting, or double-slash forms.
+func validFormRedirectLocation(dest string) (string, bool) {
+	if validRedirectLocation(dest) {
+		return dest, true
+	}
+	return "", false
 }

@@ -76,7 +76,7 @@ func decodeActionEnvelope(t *testing.T, body string) (ok bool, data map[string]a
 // TestD02HappyPath covers the D02 acceptance outcome: a valid same-origin
 // JSON POST executes the typed action once and returns {"ok":true,"data":…}.
 func TestD02HappyPath(t *testing.T) {
-	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin)
+	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin, nil)
 	appactions.Reset()
 
 	code, body, ct := postAction(app, "/_meta/actions/demo.createPost", d02TrustedOrigin, "application/json", `{"title":"Hello"}`)
@@ -101,7 +101,7 @@ func TestD02HappyPath(t *testing.T) {
 // TestD02NullPointerResult proves a legitimate nil pointer output marshals to
 // JSON null, distinct from an error response.
 func TestD02NullPointerResult(t *testing.T) {
-	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin)
+	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin, nil)
 	appactions.Reset()
 
 	code, body, _ := postAction(app, "/_meta/actions/demo.echo", d02TrustedOrigin, "application/json", `{"message":""}`)
@@ -117,7 +117,7 @@ func TestD02NullPointerResult(t *testing.T) {
 // multiple values, unknown fields, and empty bodies — every one rejected 400
 // without executing the action.
 func TestD02DecodingFailuresNeverExecute(t *testing.T) {
-	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin)
+	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin, nil)
 	appactions.Reset()
 
 	badBodies := []string{
@@ -147,7 +147,7 @@ func TestD02DecodingFailuresNeverExecute(t *testing.T) {
 // execute a JSON action — the "simple request" CSRF vector is closed at the
 // content-type gate in addition to the origin gate.
 func TestD02UnsupportedContentType(t *testing.T) {
-	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin)
+	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin, nil)
 	appactions.Reset()
 
 	for _, ct := range []string{
@@ -176,7 +176,7 @@ func TestD02UnsupportedContentType(t *testing.T) {
 // before invocation; the default-limit test below exercises a clearly
 // oversized body against the default 1 MiB.
 func TestD02BodySizeLimit(t *testing.T) {
-	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin)
+	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin, nil)
 	appactions.Reset()
 
 	big := `{"title":"` + strings.Repeat("a", 2<<20) + `"}` // 2 MiB > 1 MiB default
@@ -197,7 +197,7 @@ func TestD02BodySizeLimit(t *testing.T) {
 // slashes, traversal, URL-encoded spellings), and case mismatch. All answer
 // the same safe 404 with no registry information.
 func TestD02UnknownAndMalformedIDs(t *testing.T) {
-	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin)
+	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin, nil)
 	appactions.Reset()
 
 	// Path-traversal spellings ("..", "%2e%2e") are rejected even earlier by
@@ -229,7 +229,7 @@ func TestD02UnknownAndMalformedIDs(t *testing.T) {
 // TestD02GetNeverExecutes proves only POST reaches the handler: GET, HEAD,
 // OPTIONS, PUT, PATCH, DELETE all fall through to routing without executing.
 func TestD02GetNeverExecutes(t *testing.T) {
-	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin)
+	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin, nil)
 	appactions.Reset()
 
 	for _, method := range []string{"GET", "HEAD", "OPTIONS", "PUT", "PATCH", "DELETE"} {
@@ -249,7 +249,7 @@ func TestD02GetNeverExecutes(t *testing.T) {
 // cross-origin, missing, malformed, protocol-relative, path-suffixed, wrong
 // scheme, wrong port.
 func TestD02OriginPolicy(t *testing.T) {
-	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin)
+	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin, nil)
 	appactions.Reset()
 
 	cases := []struct {
@@ -280,7 +280,7 @@ func TestD02OriginPolicy(t *testing.T) {
 // TestD02SpoofedForwardingHeaders proves X-Forwarded-* cannot move the trusted
 // origin: it is never consulted.
 func TestD02SpoofedForwardingHeaders(t *testing.T) {
-	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin)
+	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin, nil)
 	appactions.Reset()
 
 	req := httptest.NewRequest("POST", "/_meta/actions/demo.createPost", strings.NewReader(`{"title":"x"}`))
@@ -305,7 +305,7 @@ func TestD02SpoofedForwardingHeaders(t *testing.T) {
 // TestD02ErrorMapping verifies each D01 sentinel maps to its HTTP status and
 // that internal details never leak to the client.
 func TestD02ErrorMapping(t *testing.T) {
-	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin)
+	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin, nil)
 
 	cases := []struct {
 		input string
@@ -336,7 +336,7 @@ func TestD02ErrorMapping(t *testing.T) {
 // TestD02ExactlyOnceNoRetry proves one accepted request executes exactly once,
 // repeated requests each execute once more, and nothing retries internally.
 func TestD02ExactlyOnceNoRetry(t *testing.T) {
-	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin)
+	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin, nil)
 	appactions.Reset()
 
 	for i := 1; i <= 3; i++ {
@@ -363,7 +363,7 @@ func TestD02LoaderIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	app := newConfiguredAppWithActions(nil, false, lreg, newD02Registry(t), d02TrustedOrigin)
+	app := newConfiguredAppWithActions(nil, false, lreg, newD02Registry(t), d02TrustedOrigin, nil)
 	appactions.Reset()
 
 	req := httptest.NewRequest("GET", "/posts/7", nil)
@@ -391,7 +391,7 @@ func TestD02LoaderIsolation(t *testing.T) {
 // TestD02ConcurrentRequestsIsolated fires concurrent POSTs and proves each
 // response carries its own input's echo — no cross-request leakage.
 func TestD02ConcurrentRequestsIsolated(t *testing.T) {
-	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin)
+	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin, nil)
 	appactions.Reset()
 
 	var wg sync.WaitGroup
@@ -441,7 +441,7 @@ func TestD02ConcurrentRequestsIsolated(t *testing.T) {
 // origin gate and the body gate executes nothing — checks are ordered before
 // invocation.
 func TestD02SecurityChecksBeforeMutation(t *testing.T) {
-	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin)
+	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin, nil)
 	appactions.Reset()
 
 	huge := `{"title":"` + strings.Repeat("a", 2<<20) + `"}`
@@ -457,7 +457,7 @@ func TestD02SecurityChecksBeforeMutation(t *testing.T) {
 // TestD02UnconfiguredOriginFailsClosed proves an empty trusted origin rejects
 // everything rather than everything passing.
 func TestD02UnconfiguredOriginFailsClosed(t *testing.T) {
-	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), "")
+	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), "", nil)
 	appactions.Reset()
 	code, _, _ := postAction(app, "/_meta/actions/demo.createPost", d02TrustedOrigin, "application/json", `{"title":"x"}`)
 	if code != 403 {
@@ -471,7 +471,7 @@ func TestD02UnconfiguredOriginFailsClosed(t *testing.T) {
 // TestD02NilRegistryReservesNamespace proves the endpoint namespace stays
 // framework-owned even with no actions registered.
 func TestD02NilRegistryReservesNamespace(t *testing.T) {
-	app := newConfiguredAppWithActions(nil, false, nil, nil, d02TrustedOrigin)
+	app := newConfiguredAppWithActions(nil, false, nil, nil, d02TrustedOrigin, nil)
 	code, body, _ := postAction(app, "/_meta/actions/demo.createPost", d02TrustedOrigin, "application/json", `{"title":"x"}`)
 	if code != 404 {
 		t.Fatalf("nil registry: code=%d want 404 (%s)", code, body)
@@ -482,7 +482,7 @@ func TestD02NilRegistryReservesNamespace(t *testing.T) {
 // on ctx.Done(), the deadline fires, and the dispatch maps the outcome without
 // retrying. The client-visible status is checked where app.Test surfaces it.
 func TestD02DeadlineCancellation(t *testing.T) {
-	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin)
+	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin, nil)
 	appactions.Reset()
 
 	code, body, _ := postAction(app, "/_meta/actions/demo.slow", d02TrustedOrigin, "application/json", `{"message":"wait"}`)
@@ -500,7 +500,7 @@ func TestD02DeadlineCancellation(t *testing.T) {
 // the Fiber handler's context: proves cancellation propagates into the action
 // and the committed effect stands (exactly-once, no replay).
 func TestD02ActionContextCancellation(t *testing.T) {
-	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin)
+	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin, nil)
 	appactions.Reset()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -525,7 +525,7 @@ func TestD02ActionContextCancellation(t *testing.T) {
 // TestD02ResponseNotCached asserts the no-store cache policy on both success
 // and error responses.
 func TestD02ResponseNotCached(t *testing.T) {
-	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin)
+	app := newConfiguredAppWithActions(nil, false, nil, newD02Registry(t), d02TrustedOrigin, nil)
 
 	req := httptest.NewRequest("POST", "/_meta/actions/demo.createPost", strings.NewReader(`{"title":"x"}`))
 	req.Header.Set("Origin", d02TrustedOrigin)

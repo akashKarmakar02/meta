@@ -2,6 +2,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"log"
 	"net"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"go-meta/action"
 	"go-meta/app/actions"
 	"go-meta/app/loaders"
+	"go-meta/formcsrf"
 	"go-meta/loader"
 
 	routes "go-meta/generated"
@@ -57,13 +59,23 @@ func newActionRegistry(bindings []action.Binding) (*action.Registry, error) {
 // development and tests pass the concrete origin they serve on. An empty
 // trusted origin fails every action request closed (sameOrigin returns false),
 // so a misconfigured deployment never exposes an open mutation endpoint.
-func newConfiguredAppWithActions(assets *httpserver.Assets, privateSocket bool, loaders *loader.Registry, actions_ *action.Registry, trustedOrigin string) *fiber.App {
-	fapp := newConfiguredApp(assets, privateSocket, loaders)
-	httpserver.MountActions(fapp, actions_, httpserver.ActionEndpointConfig{TrustedOrigin: trustedOrigin})
+func newConfiguredAppWithActions(assets *httpserver.Assets, privateSocket bool, loaders *loader.Registry, actions_ *action.Registry, trustedOrigin string, csrfManager *formcsrf.Manager) *fiber.App {
+	fapp := newConfiguredAppBase(assets, privateSocket, loaders, csrfManager)
+	httpserver.MountActions(fapp, actions_, httpserver.ActionEndpointConfig{TrustedOrigin: trustedOrigin, CSRF: csrfManager})
 	return fapp
 }
 
+// newConfiguredApp builds a server without action endpoints. Kept for tests
+// predating Phase D.
 func newConfiguredApp(assets *httpserver.Assets, privateSocket bool, registry *loader.Registry) *fiber.App {
+	return newConfiguredAppBase(assets, privateSocket, registry, nil)
+}
+
+// newConfiguredAppBase constructs the shared app shell. The CSRF middleware
+// must be registered BEFORE page routes: Fiber matches middleware and routes
+// in registration order, so a Use after route registration would never see
+// page requests.
+func newConfiguredAppBase(assets *httpserver.Assets, privateSocket bool, registry *loader.Registry, csrfManager *formcsrf.Manager) *fiber.App {
 	config := fiber.Config{
 		// D07: centralized HTML error pages; no stack traces or internals leak.
 		ErrorHandler:  render.HTTPErrorHandler,
@@ -87,6 +99,13 @@ func newConfiguredApp(assets *httpserver.Assets, privateSocket bool, registry *l
 	// never request or response bodies.
 	fapp.Use(logger.New())
 	fapp.Use(httpserver.ValidatePagePath)
+
+	// D03: issue a per-browser CSRF cookie + render-context token for pages
+	// that render protected forms. Registered BEFORE page routes; no-op
+	// without a manager (pre-D03 apps are unaffected).
+	if csrfManager != nil {
+		fapp.Use(httpserver.WithFormCSRF(csrfManager))
+	}
 
 	fapp.Get("/healthz", func(c fiber.Ctx) error {
 		return c.SendString("ok")
@@ -136,7 +155,11 @@ func main() {
 		log.Fatalf("load client assets: %v", err)
 	}
 	socket := os.Getenv("GO_META_DEV_SOCKET")
-	app := newConfiguredAppWithActions(&assets, devOrigin != "" && socket != "", registry, actionRegistry, trustedActionOrigin())
+	csrfManager, err := formcsrf.New(formSecret(), nil)
+	if err != nil {
+		log.Fatalf("form csrf manager: %v", err)
+	}
+	app := newConfiguredAppWithActions(&assets, devOrigin != "" && socket != "", registry, actionRegistry, trustedActionOrigin(), csrfManager)
 	// E09: serve the hashed production bundle at the same /assets prefix
 	// the shells reference. Fails explicitly when the build output is
 	// missing rather than serving pages that cannot boot.
@@ -174,6 +197,19 @@ func main() {
 // explicit value is the only safe configuration). The default covers the
 // development and example-server shape: the public origin the server itself
 // serves on.
+// formSecret returns the form-CSRF signing secret. Production sets
+// GO_META_FORM_SECRET; otherwise a random per-process secret is generated.
+func formSecret() []byte {
+	if s := os.Getenv("GO_META_FORM_SECRET"); s != "" {
+		return []byte(s)
+	}
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		log.Fatal("go-meta: cannot generate form CSRF secret")
+	}
+	return buf
+}
+
 func trustedActionOrigin() string {
 	if v := os.Getenv("GO_META_TRUSTED_ORIGIN"); v != "" {
 		return v

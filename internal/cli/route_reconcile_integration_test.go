@@ -35,7 +35,7 @@ func TestRouteReconciliationAir(t *testing.T) {
 		t.Skip("Vite dependencies unavailable; run npm ci")
 	}
 	root := t.TempDir()
-	for _, name := range []string{".air.toml", "go.mod", "go.sum", "package.json", "vite.config.ts", "app", "cmd", "internal", "frontend", "generated", "routeparams", "routecontext", "loader", "loaderdata", "action"} {
+	for _, name := range []string{".air.toml", "go.mod", "go.sum", "package.json", "vite.config.ts", "app", "cmd", "internal", "frontend", "generated", "routeparams", "routecontext", "loader", "loaderdata", "action", "formcsrf"} {
 		cmd := exec.Command("cp", "-a", filepath.Join(repo, name), root)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("copy %s: %v: %s", name, err, out)

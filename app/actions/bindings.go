@@ -12,6 +12,10 @@ package actions
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/url"
+	"strings"
+	"sync"
 	"sync/atomic"
 
 	"go-meta/action"
@@ -21,18 +25,25 @@ import (
 // Calls counts invocations of the demo actions so tests can assert exact
 // execution counts (exactly-once per accepted request, zero on rejections).
 var Calls struct {
-	Create atomic.Int64
-	Echo   atomic.Int64
-	Fail   atomic.Int64
-	Slow   atomic.Int64
+	Create    atomic.Int64
+	Echo      atomic.Int64
+	Fail      atomic.Int64
+	Slow      atomic.Int64
+	Guestbook atomic.Int64
 }
 
-// Reset zeroes the invocation counters (test helper).
+// Reset zeroes the invocation counters and clears the guestbook demo store
+// (test helper).
 func Reset() {
 	Calls.Create.Store(0)
 	Calls.Echo.Store(0)
 	Calls.Fail.Store(0)
 	Calls.Slow.Store(0)
+	Calls.Guestbook.Store(0)
+	guestbookMu.Lock()
+	guestbook = nil
+	guestbookNext.Store(0)
+	guestbookMu.Unlock()
 }
 
 type CreatePostInput struct {
@@ -96,14 +107,90 @@ func Slow(ctx context.Context, _ routecontext.Route, in EchoInput) (EchoInput, e
 	return EchoInput{}, ctx.Err()
 }
 
+// GuestbookEntry is one submission to the D03 no-JS form demo. The store is an
+// in-memory demo target: it proves exactly-once execution and shows submitted
+// values on the destination page, but it is not persistence — restarts clear
+// it and it is explicitly not a database.
+type GuestbookEntry struct {
+	Name    string
+	Message string
+}
+
+var (
+	guestbookMu    sync.RWMutex
+	guestbookNext  atomic.Int64
+	guestbookMaxID int64
+)
+
+// Guestbook returns a copy of all entries in insertion order.
+func Guestbook() []GuestbookEntry {
+	guestbookMu.RLock()
+	defer guestbookMu.RUnlock()
+	out := make([]GuestbookEntry, len(guestbook))
+	copy(out, guestbook)
+	return out
+}
+
+var guestbook []GuestbookEntry
+
+// SubmitGuestbook is the D03 form-action fixture: typed url-encoded input,
+// concurrency-safe in-memory mutation, PRG redirect destination /guestbook.
+func SubmitGuestbook(_ context.Context, _ routecontext.Route, in GuestbookEntry) (struct{}, error) {
+	Calls.Guestbook.Add(1)
+	if strings.TrimSpace(in.Name) == "" || strings.TrimSpace(in.Message) == "" {
+		return struct{}{}, fmt.Errorf("%w: name and message are required", action.ErrInvalidInput)
+	}
+	if len(in.Name) > 80 {
+		return struct{}{}, fmt.Errorf("%w: name must be at most 80 characters", action.ErrInvalidInput)
+	}
+	if len(in.Message) > 500 {
+		return struct{}{}, fmt.Errorf("%w: message must be at most 500 characters", action.ErrInvalidInput)
+	}
+	guestbookMu.Lock()
+	defer guestbookMu.Unlock()
+	id := guestbookNext.Add(1)
+	if id > guestbookMaxID {
+		guestbookMaxID = id
+	}
+	guestbook = append(guestbook, GuestbookEntry{Name: in.Name, Message: in.Message})
+	return struct{}{}, nil
+}
+
+// DecodeGuestbookForm is the D03 typed form decoder: explicit conversion of
+// parsed url.Values into GuestbookEntry. Repeated keys, missing fields, and
+// non-ASCII input each have defined behavior here because the application owns
+// all conversion policy.
+func DecodeGuestbookForm(values url.Values) (GuestbookEntry, error) {
+	var in GuestbookEntry
+	names := values["name"]
+	messages := values["message"]
+	if len(names) > 1 {
+		return in, fmt.Errorf("field %q may only appear once", "name")
+	}
+	if len(messages) > 1 {
+		return in, fmt.Errorf("field %q may only appear once", "message")
+	}
+	if len(names) == 0 {
+		return in, fmt.Errorf("field %q is required", "name")
+	}
+	if len(messages) == 0 {
+		return in, fmt.Errorf("field %q is required", "message")
+	}
+	in.Name = names[0]
+	in.Message = messages[0]
+	return in, nil
+}
+
 // Bindings returns application action bindings. D02 registration is explicit:
 // nothing executes here, and duplicate IDs fail at registry construction with
-// an actionable startup diagnostic.
+// an actionable startup diagnostic. BindForm opts a binding into D03 HTML form
+// submission with a typed decoder and a trusted PRG destination.
 func Bindings() []action.Binding {
 	return []action.Binding{
 		action.Bind("demo.createPost", CreatePost),
 		action.Bind("demo.echo", EchoPointer),
 		action.Bind("demo.fail", Fail),
 		action.Bind("demo.slow", Slow),
+		action.BindForm("guestbook.submit", SubmitGuestbook, DecodeGuestbookForm, "/guestbook"),
 	}
 }

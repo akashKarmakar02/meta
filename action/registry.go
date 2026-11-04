@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 
 	"go-meta/routecontext"
 )
@@ -26,6 +27,13 @@ var (
 // MaxIDLen bounds action IDs so they stay valid single path segments and
 // cannot be used to probe path handling with very long inputs.
 const MaxIDLen = 128
+
+// csrfFieldName is the single form field name reserved for the framework's
+// CSRF token. It is stripped before application decoders run, so decoders
+// only ever see their own fields. The value lives here rather than importing
+// formcsrf, which would create a cycle risk between the two public packages;
+// the transport layer verifies the token before DecodeForm is reached.
+const csrfFieldName = "_csrf"
 
 // ValidID reports whether id satisfies the action ID grammar: 1–128 ASCII
 // characters, each a letter, digit, underscore, dot, or hyphen; must start and
@@ -55,8 +63,8 @@ func isIDRune(c byte) bool {
 }
 
 // Binding associates one stable action ID with a typed action. Construct it
-// with Bind; its zero value is invalid. Binding performs type erasure exactly
-// once, at the adapter closure: application code never sees any.
+// with Bind or BindForm; its zero value is invalid. Binding performs type
+// erasure exactly once, at the adapter closure: application code never sees any.
 //
 // The adapter owns input decoding for transport callers. Invoke decodes a JSON
 // request body into the action's concrete input type (strictly: unknown
@@ -64,8 +72,11 @@ func isIDRune(c byte) bool {
 // exactly once, and returns the type-erased output. A decode failure returns
 // an error wrapping ErrInvalidInput and never invokes the action.
 type Binding struct {
-	id     string
-	invoke func(context.Context, routecontext.Route, []byte) (any, error)
+	id         string
+	invoke     func(context.Context, routecontext.Route, []byte) (any, error)
+	decodeForm func(url.Values) (any, error)
+	invokeForm func(context.Context, routecontext.Route, any) (any, error)
+	successURL string
 }
 
 // Bind adapts a typed Action[I, O] to the registry boundary without invoking
@@ -82,6 +93,38 @@ func Bind[I, O any](id string, act Action[I, O]) Binding {
 		}
 		return Execute(ctx, route, in, act)
 	}}
+}
+
+// FormDecoder converts parsed url-encoded form values into the action's
+// concrete input type. It runs after CSRF verification and before execution; a
+// non-nil error aborts the submission with 400 and never executes the action.
+// Applications own all conversion policy (missing vs empty, repeated values,
+// numeric parsing) so no reflection or schema system is needed.
+type FormDecoder[I any] func(values url.Values) (I, error)
+
+// BindForm registers an action that is additionally callable through
+// browser-native url-encoded form submissions. decoder converts form values
+// into I; successURL is the Post/Redirect/Get destination served as a 303
+// See Other after a successful execution. It must be an absolute same-origin
+// path starting with "/" and not "//". The JSON behavior matches Bind
+// exactly.
+func BindForm[I, O any](id string, act Action[I, O], decoder FormDecoder[I], successURL string) Binding {
+	b := Bind(id, act)
+	if act == nil || decoder == nil {
+		return b
+	}
+	b.decodeForm = func(values url.Values) (any, error) {
+		return decodeFormInput(values, decoder)
+	}
+	b.invokeForm = func(ctx context.Context, route routecontext.Route, input any) (any, error) {
+		in, ok := input.(I)
+		if !ok {
+			return nil, fmt.Errorf("%w: decoded form input has wrong type", ErrInvalidInput)
+		}
+		return Execute(ctx, route, in, act)
+	}
+	b.successURL = successURL
+	return b
 }
 
 // decodeInput strictly decodes a JSON body into a fresh I. Pointer inputs are
@@ -119,6 +162,68 @@ func (b Binding) Invoke(ctx context.Context, route routecontext.Route, body []by
 		return nil, ErrNilAction
 	}
 	return b.invoke(ctx, route, body)
+}
+
+// InvokeDecoded executes the bound action once with an already-decoded input
+// value, which must have been produced by DecodeForm for this binding. The
+// transport uses it for form submissions where decoding and execution are
+// separate steps around CSRF verification. The JSON path stays on Invoke.
+func (b Binding) InvokeDecoded(ctx context.Context, route routecontext.Route, input any) (any, error) {
+	if b.invokeForm == nil {
+		return nil, fmt.Errorf("%w: action %q does not accept form submissions", ErrInvalidInput, b.id)
+	}
+	return b.invokeForm(ctx, route, input)
+}
+
+// decodeFormInput runs the application's typed decoder against parsed form
+// values. The CSRF field (csrfFieldName, "_csrf") is removed before the
+// decoder runs so application decoders never see framework internals.
+func decodeFormInput[I any](values url.Values, decoder FormDecoder[I]) (I, error) {
+	filtered := make(url.Values, len(values))
+	for k, vs := range values {
+		if k == csrfFieldName {
+			continue
+		}
+		filtered[k] = vs
+	}
+	return decoder(filtered)
+}
+
+// FormCapable reports whether this binding accepts url-encoded form
+// submissions. Only BindForm-created bindings do.
+func (b Binding) FormCapable() bool {
+	return b.decodeForm != nil && b.successURL != ""
+}
+
+// DecodeForm converts parsed url-encoded values into the action's typed input.
+// The returned value is only valid for FormCapable bindings; otherwise
+// ErrInvalidInput is returned.
+func (b Binding) DecodeForm(values url.Values) (any, error) {
+	if !b.FormCapable() {
+		return nil, fmt.Errorf("%w: action %q does not accept form submissions", ErrInvalidInput, b.id)
+	}
+	return b.decodeForm(values)
+}
+
+// SuccessURL returns the configured Post/Redirect/Get destination of a
+// form-capable binding.
+func (b Binding) SuccessURL() string {
+	return b.successURL
+}
+
+// InvokeForm executes the bound action with an already-decoded form input.
+// The input must have been produced by DecodeForm for the same binding;
+// it returns an error for bindings that are not form-capable.
+func (b Binding) InvokeForm(ctx context.Context, route routecontext.Route, input any) (any, error) {
+	if b.invokeForm == nil {
+		return nil, fmt.Errorf("%w: action %q is not form-capable", ErrInvalidInput, b.id)
+	}
+	return b.invokeForm(ctx, route, input)
+}
+
+// ID returns the binding's action ID.
+func (b Binding) ID() string {
+	return b.id
 }
 
 // Registry is an immutable collection of validated action bindings. Lookup is

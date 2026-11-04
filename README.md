@@ -774,8 +774,63 @@ Action dispatch never runs page loaders, and page rendering never runs
 actions. Navigation envelopes, CSR loader data, and stale-navigation
 logic are unchanged from Phase C.
 
-Roadmap: D03 adds HTML form parsing, D04 typed validation errors, D05
-enhanced client-side submissions, D06 the integration gate.
+Roadmap: D04 typed validation errors, D05 enhanced client-side submissions,
+D06 the integration gate.
+
+## Standard HTML forms (D03)
+
+Actions registered with `action.BindForm` can also be submitted by ordinary
+browser-native HTML forms — no JavaScript required. Form submission is
+explicit opt-in per action: JSON-only bindings stay JSON-only, and form-only
+bindings refuse JSON bodies.
+
+### Binding a form action
+
+```go
+registry, err := action.NewRegistry(
+    action.BindForm("guestbook.submit",
+        guestbookSubmit, // Action[I, O]
+        func(values url.Values) (GuestbookEntry, error) {
+            // decode typed input from form fields
+        },
+        "/guestbook", // PRG redirect destination after success
+    ),
+)
+```
+
+`BindForm` keeps the same `Action[I, O]` contract; only the transport
+differs. The decoder receives every field — repeated keys arrive as
+multi-value slices via `values["tags"]`.
+
+### CSRF protection
+
+Forms carry a double-submit HMAC token. The `formcsrf.Manager` (public
+package `go-meta/formcsrf`) issues expiring tokens signed with a server
+secret; `httpserver.WithFormCSRF` mounts issuance on page GETs, storing the
+token in request context where `formcsrf.HiddenField()` renders it as a
+hidden form input. The action endpoint rejects any form whose `_csrf` field
+does not match the `go-meta-csrf` cookie and validate against the secret.
+Missing, tampered, expired, and cross-site tokens are rejected with 403.
+
+### Post/Redirect/Get
+
+Successful form submissions do not render inline responses. The action
+executes once, then the endpoint redirects with 303 to the configured
+destination. Refreshing the destination re-issues a GET — the mutation is
+not repeated. Errors render a minimal HTML page without retry semantics.
+
+### Response shape
+
+| Outcome | Status |
+|---|---|
+| success | 303 redirect to configured location |
+| invalid CSRF token | 403 |
+| form decoding failure | 400 |
+| body over 1 MiB limit | 413 |
+| non-form content type to form action | 415 |
+| unknown action or GET | 404 |
+
+The D02 JSON endpoint behavior is unchanged for JSON-bound actions.
 
 ## Toolchain requirements
 
