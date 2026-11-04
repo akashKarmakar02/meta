@@ -20,8 +20,9 @@ var (
 // Binding associates one declared route ID with a typed loader. Construct it
 // using Bind; its zero value is invalid. Binding does not execute the loader.
 type Binding struct {
-	routeID string
-	invoke  func(context.Context, routecontext.Route) (any, error)
+	routeID   string
+	invoke    func(context.Context, routecontext.Route) (any, error)
+	configErr error
 }
 
 // Bind adapts a typed loader to the registry boundary without invoking it.
@@ -66,6 +67,9 @@ func NewRegistry(routeIDs []string, bindings ...Binding) (*Registry, error) {
 		}
 		if _, ok := found[id]; ok {
 			return nil, fmt.Errorf("%w: %q", ErrDuplicateBinding, id)
+		}
+		if binding.configErr != nil {
+			return nil, fmt.Errorf("loader: route %q: %w", id, binding.configErr)
 		}
 		if binding.invoke == nil {
 			return nil, fmt.Errorf("%w: route %q", ErrNilLoader, id)

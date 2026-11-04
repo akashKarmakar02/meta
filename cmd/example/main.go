@@ -14,6 +14,7 @@ import (
 	"go-meta/action"
 	"go-meta/app/actions"
 	"go-meta/app/loaders"
+	"go-meta/cache"
 	"go-meta/formcsrf"
 	"go-meta/loader"
 
@@ -136,7 +137,13 @@ func newConfiguredAppBase(assets *httpserver.Assets, privateSocket bool, registr
 }
 
 func main() {
-	registry, err := newLoaderRegistry(loaders.Bindings())
+	demoCache, err := cache.NewMemory(cache.MemoryConfig{MaxEntries: 128, MaxBytes: 1 << 20})
+	if err != nil {
+		log.Fatalf("cache configuration: %v", err)
+	}
+	defer demoCache.Close()
+	bindings := append(loaders.Bindings(), loaders.CachedDemoBindings(demoCache)...)
+	registry, err := newLoaderRegistry(bindings)
 	if err != nil {
 		log.Fatalf("loader registration: %v", err)
 	}

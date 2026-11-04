@@ -1,0 +1,14 @@
+package post
+
+import "go-meta/app/loaders"
+import "go-meta/loaderdata"
+
+templ Page() {
+ {{ data, _ := loaderdata.Get[loaders.CacheDemoData](ctx) }}
+ <main data-cache-demo="ssr">
+  <h1>Cached post</h1>
+  <p data-cache-id>{ data.ID }</p>
+  <p data-cache-tab>{ data.Tab }</p>
+  <p data-cache-refreshed>{ data.Refreshed }</p>
+ </main>
+}

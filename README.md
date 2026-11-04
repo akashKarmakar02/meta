@@ -1323,3 +1323,90 @@ full numbers in memory_test.go output) show no pathological behavior: the
 dominant costs are the value copy required by the ownership contract and one
 clock read per expiry check, which is inherent to any TTL cache on this
 machine (time.Now ≈ 2.5μs under this kernel's clocksource).
+
+### Loader caching (E03)
+
+Caching is opt-in per binding. Construct and own one bounded store at
+application startup, and pass it to each loader that can safely share results.
+The existing `Loader[T]`, `Bind`, and registry APIs are unchanged. For example:
+
+```go
+package example
+
+import (
+    "context"
+    "time"
+
+    "go-meta/cache"
+    "go-meta/loader"
+    "go-meta/routecontext"
+)
+
+type Post struct { Title string `json:"title"` }
+
+func BindPost(store cache.Store, load loader.Loader[Post]) loader.Binding {
+    return loader.BindCached("posts/[postId]/page.templ", load, loader.CacheOptions[Post]{
+        Store: store,
+        Policy: cache.Policy{TTL: time.Minute},
+        Codec: loader.JSONCodec[Post](),
+        Scope: func(ctx context.Context, route routecontext.Route) (string, bool, error) {
+            // Only do this for data that is truly public and identical for
+            // every caller. The application must validate private scopes.
+            return "myapp-public-v1", true, nil
+        },
+    })
+}
+```
+
+Supply the binding to `loader.NewRegistry`, which rejects missing store,
+scope or codec and invalid TTL before publishing a registry. Store ownership
+and shutdown remain with the application. `cmd/example/main.go` and
+`app/loaders/cache_demo.go` show a bounded process-local store shared by two
+explicitly public example routes. The cache empties when that process restarts.
+
+The scope callback must affirm that caching is safe for the request and
+identify *all* relevant user, tenant, authorization, locale, feature, header,
+and application/version dependencies. Return `("", false, nil)` to bypass;
+an error fails the request. There is no implicit public or private scope.
+Use an application namespace in the scope when stores are shared between
+applications. Do not put credentials or session tokens in keys: keys are
+readable by the store. A stable identifier or appropriately protected digest
+can be used when its privacy and collision properties suit the application.
+
+`loader.LoaderCacheKey(route, scope)` builds the same exact key used by the
+binding and can be used with `Store.Delete`. It uses `cache.NewKey` with the
+stable route ID, scope, every decoded path parameter and every query value.
+Parameter and query names are sorted; repeated query values keep their original
+order. Missing, empty and repeated values remain distinct. B05 route snapshots,
+not raw URLs, supply the values; malformed queries are rejected by routing.
+The store's key-length limit applies. TTL must be positive and at most
+`cache.MaxTTL`; hits do not extend it.
+
+The typed codec runs before type erasure, so cache hits restore `T` for templ
+and CSR continues using its existing JSON transport. `JSONCodec[T]` is useful
+for JSON-round-trippable types, but is not a universal Go serializer: interface
+fields, unexported fields, custom marshaling and time representations may lose
+information. Before writing, the adapter decodes and checks `reflect.DeepEqual`
+against the original; a lossy or failed round trip renders the original result
+without caching. A custom `Codec[T]` can be supplied; its implementation must
+be concurrency-safe, return owned encoded bytes and independently owned mutable
+results, and version its format in the scope when needed. Equality
+checks cannot prove the behavior of a stateful or nondeterministic codec.
+Decoded cache entries must be trusted as store data, not as authentication.
+
+Only successful loader results are candidates. Errors, redirects and canceled
+requests are never cached. An operational read failure bypasses the cache; an
+operational write failure or serialization failure returns the original typed
+result. Cancellation, invalid keys and invalid policies propagate. A corrupt
+entry that fails decoding is deleted and the loader runs once; failed deletion
+is reported and a successful write can replace it. Optional `OnEvent` receives
+hit, miss, bypass, closed-store and failure categories without keys or values; its callback
+must be concurrency-safe. CSR still returns its existing error if its own JSON
+serialization fails.
+
+Memory bounds come from `cache.MemoryConfig`, and E03 caches loader data only,
+not HTML, CSRF tokens or navigation envelopes. Concurrent misses may run the
+loader more than once; there is no coalescing, background refresh, or automatic
+action invalidation. E04 handles invalidation orchestration and E05 handles
+singleflight. Cache lookup and encoding can cost more than a cheap loader;
+measure your workload rather than caching by default.

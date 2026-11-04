@@ -1,13 +1,10 @@
 // Package cache defines go-meta's public caching contract: cache keys,
 // entries, policies, error categories, and the Store interface.
 //
-// P2-E01 specifies this contract deliberately WITHOUT implementing storage.
-// There is no in-memory engine here (E02), no loader integration (E03), no
-// invalidation orchestration (E04), and no singleflight coalescing (E05).
-// Nothing in this package caches anything by itself, and no loader, action,
-// route, or HTTP handler anywhere in go-meta calls into it yet. Caching in
-// go-meta is strictly opt-in: a caller that constructs no store and passes no
-// policy gets exactly the pre-cache Phase C/D behavior.
+// The package provides the Store contract and the bounded Memory implementation.
+// Loader integration is explicitly opt-in through package loader. There is no
+// invalidation orchestration (E04) or singleflight coalescing (E05). Applications
+// that do not configure a cached binding retain the pre-cache behavior.
 //
 // # Why bytes
 //
@@ -96,9 +93,7 @@
 //
 // # Future work
 //
-// E02 implements a bounded in-memory TTL Store over this interface. E03
-// integrates it with loaders — including query- and scope-aware key
-// construction — without changing Loader[T]. E04 adds explicit invalidation
+// E04 adds explicit invalidation
 // building on Delete and, if needed, a higher-level index; it must not require
 // breaking changes to Store. E05 wraps misses with singleflight coordination
 // outside the store; the store itself never invokes loader functions.

@@ -14,7 +14,7 @@ import (
 	"go-meta/routecontext"
 )
 
-// WithLoader executes a route's registered loader exactly once, before the
+// WithLoader resolves a route's registered loader result once, before the
 // page renders, and attaches the result to the request. It is the C03/C04/C05
 // integration point: it sits between WithRouteParams (which builds the
 // request-lifetime context and route snapshot) and the render handler.
