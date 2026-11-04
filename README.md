@@ -551,6 +551,104 @@ streaming, and prefetching remain out of scope (Phase E or later).
   Go→TypeScript types yet. Phase D adds server actions and enhanced forms;
   Phase E adds the cache layer (TTL, invalidation) on top of this contract.
 
+## Server action contract (D01)
+
+A **server action** is an application-defined *mutation* with typed input and
+output. It is deliberately not a loader: a loader reads data for a rendering
+request; an action changes application state on an explicit request. D01
+defines only the Go contract — the `go-meta/action` package. Nothing in D01
+exposes actions over HTTP, registers them anywhere, or executes them outside an
+explicit `action.Execute` call.
+
+```go
+package app
+
+import (
+    "context"
+
+    "go-meta/action"
+    "go-meta/routecontext"
+)
+
+type CreatePostInput struct {
+    Title   string
+    Content string
+}
+
+type CreatePostResult struct{ ID int64 }
+
+func CreatePost(ctx context.Context, r routecontext.Route, in CreatePostInput) (CreatePostResult, error) {
+    if in.Title == "" {
+        return CreatePostResult{}, action.ErrInvalidInput
+    }
+    // persist...
+    return CreatePostResult{ID: 42}, nil
+}
+
+// result, err := action.Execute(ctx, route, in, CreatePost)
+```
+
+`Action[I, O]` is a generic function type — any Go type works as input or
+output (structs, pointers, slices, scalars, named types, empty structs), stays
+fully typed at the call site, and requires no `any`, type assertions, or
+reflection. The package imports only the standard library and `routecontext`;
+it has no Fiber, fasthttp, JavaScript, or Node dependency.
+
+**Execution semantics.** `Execute` runs the action synchronously on the
+calling goroutine, exactly **once** — exactly-once invocation by the helper,
+not exactly-once delivery over a network. It rejects nil contexts and nil
+actions (`ErrNilContext`, `ErrNilAction`), refuses to invoke on an
+already-cancelled or expired context, and passes input and route through
+unmodified (ordinary aliasing rules apply to pointer inputs). Panics are never
+recovered. No retries, no caching, no background goroutines, no package-level
+state — independent executions are safe to run concurrently.
+
+**Mutation and idempotency.** Actions are **not guaranteed idempotent** —
+creating a post twice may create two posts. The framework never retries,
+never replays after cancellation, and never rolls back. Cancellation is not a
+transaction boundary: a committed side effect stands even if the context is
+cancelled afterwards. Transaction boundaries and application-level idempotency
+are the action's responsibility. Actions never run implicitly — not during
+code generation, startup, registration, route discovery, page rendering,
+loader lookup, CSR bootstrap, soft navigation, prefetching, or any ordinary
+GET request.
+
+**Route context.** The action receives the B05 `routecontext.Route` snapshot
+for its request — stable route ID, declared pattern, typed path parameters
+(`r.Params.Int64("postId")`), and query values (`r.Query.Get("notify")`). It
+does not reparse URLs or touch Fiber request buffers. `Execute` accepts any
+snapshot the caller supplies; D02's transport layer may pass one describing an
+action endpoint's own route identity rather than a page route's.
+
+**Cancellation.** Standard `context.Context` semantics: parent cancellation
+and deadlines propagate, already-cancelled contexts prevent invocation, and
+cancellation during execution is cooperative — `Execute` waits for the action
+to return and preserves its outcome.
+
+**Errors.** Ordinary Go errors, compatible with `errors.Is`/`errors.As`,
+wrapped causes preserved. The package defines sentinels that parallel the C01
+loader set — `ErrNotFound`, `ErrUnauthorized`, `ErrForbidden`,
+`ErrInvalidInput` — so both contracts classify with the same vocabulary while
+remaining independently versionable. `Execute` converts nothing to HTTP
+responses, performs no redirects, and hides no retries.
+
+**Future registration (D02).** Application actions stay typed; a runtime
+registry cannot hold generic instantiations directly, but D02 can wrap any
+`Action[I, O]` in a closure over the public type — the signature needs no
+change. Transport decoding (HTTP bodies, forms) remains separate from business
+execution. D03 adds standard HTML form parsing, D04 typed field-validation
+errors (extending `ErrInvalidInput` without changing `Action[I, O]`), D05
+enhanced client-side submissions, D06 the integration gate.
+
+**Security.** Defining an action exposes nothing. This contract provides no
+authentication, authorization, CSRF protection, input validation, rate
+limiting, transaction safety, or replay protection. Before any sensitive
+mutation becomes browser-reachable, D02+ must restrict endpoints to
+appropriate methods, reject cross-origin or unauthorized submissions, define a
+CSRF policy, bound request-body sizes, validate untrusted input, avoid
+exposing internal errors, and prevent accidental invocation from page loads
+or prefetches.
+
 ## Toolchain requirements
 
 - **Go 1.26+** is required. The Fiber v3 documentation lists Go 1.26 as the
