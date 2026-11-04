@@ -1220,3 +1220,106 @@ built so that private results are not accidentally shared.
   (content digest) rather than pinned by TTL.
 - No namespace-wide invalidation primitive (E04 decides if one is needed).
 - Keys are bounded at 2048 bytes; larger identities must digest their payload.
+
+## In-memory TTL cache (E02)
+
+E02 implements the E01 `cache.Store` contract as a bounded, concurrency-safe
+in-memory cache: `cache.Memory`, constructed with `cache.NewMemory`.
+
+```go
+import "go-meta/cache"
+
+store, err := cache.NewMemory(cache.MemoryConfig{
+    MaxEntries:    10000,             // live-entry bound
+    MaxBytes:      32 << 20,          // total accounted bytes
+    MaxEntryBytes: 1 << 20,           // per-entry bound; 0 = no separate limit
+})
+if err != nil { ... }
+defer store.Close()
+
+key, _ := cache.NewKey("loader:user-profile", "42", "tab=posts")
+_ = store.Set(ctx, key, cache.Entry{Value: data}, cache.Policy{TTL: 5 * time.Minute})
+if entry, hit, err := store.Get(ctx, key); err == nil && hit {
+    // entry.Value is a private copy
+}
+_ = store.Delete(ctx, key)
+```
+
+There is no global singleton and no environment configuration — each store owns
+independent state. No loader or action uses this cache yet; constructing one
+changes nothing until E03 wires it in.
+
+### Configuration
+
+All limits are required positive except `MaxEntryBytes` (0 disables the
+separate limit). There are no implicit defaults: zero or negative values are
+construction errors (`ErrInvalidConfig`), as is `MaxEntryBytes > MaxBytes` or a
+`MaxBytes` too small for one minimal entry. Both `MaxEntries` and `MaxBytes`
+are enforced simultaneously; either may trigger eviction.
+
+### What byte accounting measures
+
+Accounted size is `len(key) + len(value) + 64` bytes of fixed per-entry
+overhead. **This is not a strict bound on process RSS or Go heap usage** — map
+growth slack, allocator headers, and the runtime's own overhead sit on top of
+it. The bound is exact only against the formula.
+
+### Eviction: LRU
+
+Get and Set both refresh recency. When either capacity limit is exceeded on
+admission, the store first sweeps expired entries (O(entries), charged to
+Sets that need room), then evicts least-recently-used **live** entries until
+the new entry fits — never the key being Set. Updates replace in place; they
+never create duplicate entries. Eviction is fully deterministic.
+
+### TTL: fixed, not sliding
+
+TTL runs from the successful Set to `stored+TTL`, half-open: at exactly the
+deadline the entry is expired and reads as a miss, never stale. Reads never
+extend a deadline. Replacement sets a new deadline and value atomically.
+Expiry is lazy: an expired entry found by Get is removed and reported as a
+miss; entries may stay allocated until some operation touches them — there
+is no background sweeper, and physical reclamation follows the Go collector,
+not the TTL boundary.
+
+### Ownership and concurrency
+
+Copy-in/copy-out is mandatory and tested: after Set, caller mutations don't
+reach the store; after Get, mutating returned bytes doesn't affect future
+reads. All operations take one mutex; individual operations are atomic and
+readers observe whole entries — old or new, never partial. Safe for
+concurrent Get/Set/Delete/Close from many goroutines; verified under the race
+detector. Per-process consistency only, not distributed linearizability.
+
+### Contexts, errors, and lifecycle
+
+The error precedence on every operation is: nil context → already-canceled
+context → invalid key → invalid policy → closed store → size checks → mutation.
+A rejected Set (bad key/policy/oversized/closed/canceled) changes nothing —
+including the previous entry under the same key. Cancellation checked before
+the critical section prevents every mutation; cancellation observed after the
+mutex release cannot undo a completed write (linearization point = mutex
+release). `Close()` releases everything, is idempotent and concurrency-safe,
+and all later operations return `ErrClosed`. Bytes already handed out by
+earlier Gets stay with their callers, and released memory is not zeroed —
+values are not encrypted and are not securely erased. There is no reopen;
+build a new store.
+
+### Security notes
+
+The cache is process-local. It provides no user/tenant isolation beyond key
+namespacing — namespaces prevent key *collisions*, not unauthorized *access*;
+correctly scoped keys remain the caller's responsibility (see the E01
+section). Values may hold private data; keys may reveal identifiers if logged.
+E02 itself caches no errors, redirects, or action responses.
+
+### Handoff
+
+E03 will integrate this store with Phase C loaders without changing
+`Loader[T]` — typed values serialize to bytes at that boundary. E04 builds
+exact-key invalidation on `Delete`. E05 coordinates concurrent misses outside
+the store. Benchmarks (hit 2.6μs, miss 25ns, set 5.4μs, mixed 96B/op median;
+full numbers in memory_test.go output) show no pathological behavior: the
+dominant costs are the value copy required by the ownership contract and one
+clock read per expiry check, which is inherent to any TTL cache on this
+machine (time.Now ≈ 2.5μs under this kernel's clocksource).
