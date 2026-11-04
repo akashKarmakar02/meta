@@ -2,9 +2,9 @@
 // entries, policies, error categories, and the Store interface.
 //
 // The package provides the Store contract and the bounded Memory implementation.
-// Loader integration is explicitly opt-in through package loader. There is no
-// invalidation orchestration (E04) or singleflight coalescing (E05). Applications
-// that do not configure a cached binding retain the pre-cache behavior.
+// Loader integration, invalidation orchestration, and singleflight coalescing
+// are explicitly opt-in through package loader. Applications that do not
+// configure a cached binding retain the pre-cache behavior.
 //
 // # Why bytes
 //

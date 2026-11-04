@@ -114,6 +114,17 @@ func (f *CacheFence) storeIfCurrent(kf *keyFence, gen uint64, ctx context.Contex
 	return store.Set(ctx, key, entry, policy)
 }
 
+// deleteIfCurrent removes a corrupt entry only while the observed generation
+// is current. A stale flight must never delete a newer generation's fill.
+func (f *CacheFence) deleteIfCurrent(kf *keyFence, gen uint64, ctx context.Context, store cache.Store, key cache.Key) error {
+	kf.mu.Lock()
+	defer kf.mu.Unlock()
+	if kf.gen != gen {
+		return ErrStaleFill
+	}
+	return store.Delete(ctx, key)
+}
+
 // invalidate bumps the generation and deletes the entry in one critical
 // section on the record, totally ordered against any concurrent fill write on
 // the same key. It takes and releases its own reference around the section so

@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/logger"
@@ -149,7 +150,11 @@ func main() {
 		log.Fatalf("cache invalidator: %v", err)
 	}
 	actions.DemoInvalidator = demoInvalidator
-	bindings := append(loaders.Bindings(), loaders.CachedDemoBindings(demoCache, demoInvalidator)...)
+	demoFlights, err := loader.NewFlightGroup(demoInvalidator, 5*time.Second)
+	if err != nil {
+		log.Fatalf("cache flights: %v", err)
+	}
+	bindings := append(loaders.Bindings(), loaders.CachedDemoBindingsWithFlights(demoCache, demoInvalidator, demoFlights)...)
 	registry, err := newLoaderRegistry(bindings)
 	if err != nil {
 		log.Fatalf("loader registration: %v", err)

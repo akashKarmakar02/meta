@@ -12,6 +12,7 @@ import (
 
 	"go-meta/cache"
 	"go-meta/routecontext"
+	"go-meta/routeparams"
 )
 
 // Codec serializes and restores a loader result. Callbacks must be safe for
@@ -49,6 +50,8 @@ const (
 	CacheInvalidated         CacheEvent = "invalidated"
 	CacheInvalidationFailed  CacheEvent = "invalidation_failed"
 	CacheStaleFillSuppressed CacheEvent = "stale_fill_suppressed"
+	CacheFlightCreated       CacheEvent = "flight_created"
+	CacheFlightJoined        CacheEvent = "flight_joined"
 )
 
 // CacheOptions explicitly configures one loader's cache. Scope must affirm
@@ -70,6 +73,10 @@ type CacheOptions[T any] struct {
 	// a binding without it stays outside the stale-fill guarantee. The
 	// invalidator's store must equal Store; NewRegistry rejects a mismatch.
 	Invalidator *Invalidator
+	// Flights opts into process-local coalescing. The group must use this same
+	// invalidator. Shared loaders receive only route metadata and the group's
+	// deadline, not request-specific context values.
+	Flights *FlightGroup
 }
 
 var ErrInvalidCacheConfig = errors.New("loader: invalid cache configuration")
@@ -126,10 +133,15 @@ func BindCached[T any](routeID string, load Loader[T], opts CacheOptions[T]) Bin
 		binding.configErr = fmt.Errorf("%w: %w", ErrInvalidCacheConfig, err)
 		return binding
 	}
+	if opts.Flights != nil && (opts.Invalidator == nil || opts.Flights.invalidator != opts.Invalidator || opts.Flights.timeout <= 0) {
+		binding.configErr = fmt.Errorf("%w: flight group must share the binding invalidator", ErrInvalidCacheConfig)
+		return binding
+	}
+	identity := &flightBinding{marker: 1}
 	// E04: an attached invalidator must coordinate the very same store this
 	// binding writes to; a mismatch would fence some writes while invalidations
 	// deleted from elsewhere — rejected at construction.
-	if opts.Invalidator != nil && opts.Invalidator.store != opts.Store {
+	if opts.Invalidator != nil && !sameStore(opts.Invalidator.store, opts.Store) {
 		binding.configErr = fmt.Errorf("%w: cache options attach an invalidator built for a different store", ErrInvalidCacheConfig)
 		return binding
 	}
@@ -195,7 +207,16 @@ func BindCached[T any](routeID string, load Loader[T], opts CacheOptions[T]) Bin
 				return value, nil
 			}
 			emit(CacheDecodeError)
-			if deleteErr := opts.Store.Delete(ctx, key); deleteErr != nil {
+			var deleteErr error
+			if opts.Invalidator != nil {
+				deleteErr = opts.Invalidator.fence.deleteIfCurrent(fillKF, fillGen, ctx, opts.Store, key)
+			} else {
+				deleteErr = opts.Store.Delete(ctx, key)
+			}
+			if errors.Is(deleteErr, ErrStaleFill) {
+				deleteErr = nil
+			}
+			if deleteErr != nil {
 				if ctx.Err() != nil {
 					return nil, ctx.Err()
 				}
@@ -209,6 +230,73 @@ func BindCached[T any](routeID string, load Loader[T], opts CacheOptions[T]) Bin
 			}
 		} else {
 			emit(CacheMiss)
+		}
+		if opts.Flights != nil {
+			result, claimed, waitErr := opts.Flights.wait(ctx, key, fillKF, fillGen, identity, emit, func(shared context.Context) flightResult {
+				shared = routecontext.WithContext(shared, route)
+				shared = routeparams.WithContext(shared, route.Params)
+				// A fill may have completed after the original cache miss.
+				recheck, found, readErr := opts.Store.Get(shared, key)
+				if shared.Err() != nil {
+					return flightResult{err: shared.Err()}
+				}
+				if errors.Is(readErr, context.Canceled) || errors.Is(readErr, context.DeadlineExceeded) || errors.Is(readErr, cache.ErrInvalidKey) || errors.Is(readErr, cache.ErrInvalidPolicy) {
+					return flightResult{err: readErr}
+				}
+				if readErr != nil {
+					if errors.Is(readErr, cache.ErrClosed) {
+						emit(CacheClosed)
+					}
+					emit(CacheReadError)
+				} else if found {
+					decoded, decodeErr := opts.Codec.Decode(bytes.Clone(recheck.Value))
+					if shared.Err() != nil {
+						return flightResult{err: shared.Err()}
+					}
+					if decodeErr == nil {
+						emit(CacheHit)
+						return flightResult{value: decoded, encoded: bytes.Clone(recheck.Value), shareable: true}
+					}
+					emit(CacheDecodeError)
+					deleteErr := opts.Invalidator.fence.deleteIfCurrent(fillKF, fillGen, shared, opts.Store, key)
+					if shared.Err() != nil {
+						return flightResult{err: shared.Err()}
+					}
+					if errors.Is(deleteErr, context.Canceled) || errors.Is(deleteErr, context.DeadlineExceeded) || errors.Is(deleteErr, cache.ErrInvalidKey) || errors.Is(deleteErr, cache.ErrInvalidPolicy) {
+						return flightResult{err: deleteErr}
+					}
+					if deleteErr != nil && !errors.Is(deleteErr, ErrStaleFill) {
+						if errors.Is(deleteErr, cache.ErrClosed) {
+							emit(CacheClosed)
+						}
+						emit(CacheDeleteError)
+					}
+				}
+				return sharedFill(shared, route, key, fillKF, fillGen, opts, load, emit)
+			})
+			if waitErr != nil {
+				return nil, waitErr
+			}
+			if result.err != nil {
+				return nil, result.err
+			}
+			if !result.shareable {
+				if claimed {
+					return result.value, nil
+				}
+				// A codec cannot safely copy this result. Other waiters each
+				// execute once independently, preserving E03 result semantics.
+				return Execute(ctx, route, load)
+			}
+			decoded, decodeErr := opts.Codec.Decode(bytes.Clone(result.encoded))
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if decodeErr != nil {
+				emit(CacheDecodeError)
+				return nil, fmt.Errorf("loader: shared result decode: %w", decodeErr)
+			}
+			return decoded, nil
 		}
 		value, err := Execute(ctx, route, load)
 		if err != nil {
@@ -275,4 +363,64 @@ func nilStore(store cache.Store) bool {
 	default:
 		return false
 	}
+}
+
+// sharedFill executes and writes once for a flight, using only the flight's
+// independent, bounded context. Successful results are encoded once and each
+// waiter decodes its own copy.
+func sharedFill[T any](ctx context.Context, route routecontext.Route, key cache.Key, fence *keyFence, generation uint64, opts CacheOptions[T], load Loader[T], emit func(CacheEvent)) flightResult {
+	value, err := Execute(ctx, route, load)
+	if err != nil {
+		return flightResult{err: err}
+	}
+	if err := ctx.Err(); err != nil {
+		return flightResult{err: err}
+	}
+	encoded, err := opts.Codec.Encode(value)
+	if ctx.Err() != nil {
+		return flightResult{err: ctx.Err()}
+	}
+	if err != nil {
+		emit(CacheEncodeError)
+		return flightResult{value: value}
+	}
+	restored, err := opts.Codec.Decode(bytes.Clone(encoded))
+	if ctx.Err() != nil {
+		return flightResult{err: ctx.Err()}
+	}
+	if err != nil || !reflect.DeepEqual(value, restored) {
+		emit(CacheEncodeError)
+		return flightResult{value: value}
+	}
+	err = opts.Invalidator.fence.storeIfCurrent(fence, generation, ctx, opts.Store, key, cache.Entry{Value: encoded}, opts.Policy)
+	if errors.Is(err, ErrStaleFill) {
+		emit(CacheStaleFillSuppressed)
+		return flightResult{encoded: bytes.Clone(encoded), shareable: true}
+	}
+	if ctx.Err() != nil {
+		return flightResult{err: ctx.Err()}
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, cache.ErrInvalidKey) || errors.Is(err, cache.ErrInvalidPolicy) {
+		return flightResult{err: err}
+	}
+	if err != nil {
+		if errors.Is(err, cache.ErrClosed) {
+			emit(CacheClosed)
+		}
+		emit(CacheWriteError)
+	}
+	return flightResult{encoded: bytes.Clone(encoded), shareable: true}
+}
+
+// sameStore avoids panicking on interface values whose dynamic type is not
+// comparable; such stores cannot safely participate in a coordinated domain.
+func sameStore(a, b cache.Store) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	ta, tb := reflect.TypeOf(a), reflect.TypeOf(b)
+	if ta != tb || !ta.Comparable() || !reflect.ValueOf(a).Comparable() || !reflect.ValueOf(b).Comparable() {
+		return false
+	}
+	return a == b
 }

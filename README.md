@@ -1499,3 +1499,63 @@ idempotent. Invalidating a missing key succeeds as a no-op.
 E04 does not implement singleflight: concurrent misses after invalidation each
 execute the loader (E05 will coalesce them). Invalidation affects only the
 current process's store — no cross-process or distributed invalidation.
+
+### E05: opt-in coalescing of cached loader misses
+
+A process-local `FlightGroup` lets concurrent misses for an explicitly cached
+binding share work. Construct it with the same invalidator as the binding:
+
+```go
+inv, err := loader.NewInvalidator(store)
+if err != nil { return err }
+group, err := loader.NewFlightGroup(inv, 5*time.Second)
+if err != nil { return err }
+binding := loader.BindCached("posts/[id]/page.templ", loadPost,
+    loader.CacheOptions[Post]{
+        Store: store, Invalidator: inv, Flights: group,
+        Policy: cache.Policy{TTL: time.Minute},
+        Scope: publicPostScope, Codec: loader.JSONCodec[Post](),
+    })
+_ = binding
+```
+
+The scope callback remains mandatory and must identify every security-relevant
+input. Never share a scope between tenants or principals unless their results
+are interchangeable. Coalescing is an explicit additional promise: shared work
+runs under a fresh, bounded context containing the route snapshot and route
+parameters, **not** any request's authentication, transaction, tracing or
+other context values. Use ordinary `BindCached` without `Flights` for loaders
+that require those values. A group is owned by the application, does not close
+its store, and may serve multiple bindings. Only executions of the same binding
+and complete E03 cache key can join. Independent bindings remain independent.
+
+Cache hits bypass the group. A miss first joins or creates a flight and the
+owner checks the store again before loading, avoiding a second fill if another
+request just finished. Each waiter can cancel or reach its deadline independently;
+the shared context has the configured maximum duration and is canceled when
+all waiters leave. Loaders, stores and codecs must honor cancellation: Go
+cannot forcibly stop an uncooperative callback. Work retains no Fiber request
+or response objects. No goroutines are started until a miss, and completed
+flight metadata is removed. Panic values are hidden behind `ErrFlightPanic`.
+Errors and redirects are shared with existing waiters but never cached.
+
+Shared results are encoded once, validated by the existing round-trip check,
+and independently decoded for each waiter. Custom codecs must produce
+independently owned mutable values on each decode. If encoding or round-trip
+validation cannot safely copy a successful result, one waiter receives that
+result and other waiters execute independently, preserving successful loader
+semantics. Codec failures are not cached. A successful flight attempts one
+fenced cache write; ordinary store errors retain the E03 bypass behavior.
+`CacheFlightCreated` and `CacheFlightJoined` events report admission without
+exposing keys or values, and callbacks run outside coordinator locks.
+
+A flight holds an E04 fence reference until its work exits. Its identity includes
+that record, its generation and binding identity. Invalidation linearizes at
+the generation bump: a request acquiring its fence after successful
+invalidation cannot join the old flight. Requests overlapping invalidation may
+still receive their historical result; the old generation cannot write it into
+the invalidated cache. Failed invalidation can leave the previous cache entry;
+check its error and retry. Cleanup compares the actual flight identity and
+cannot remove a replacement. The coordinator is process-local: it does not
+coalesce across instances, deduplicate actions, or provide background refresh.
+The example's `?slow=1` adds a bounded delay to make concurrent fills visible.

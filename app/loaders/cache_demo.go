@@ -17,7 +17,17 @@ type CacheDemoData struct {
 	Refreshed string `json:"refreshed"`
 }
 
-func loadCacheDemo(_ context.Context, route routecontext.Route) (CacheDemoData, error) {
+func loadCacheDemo(ctx context.Context, route routecontext.Route) (CacheDemoData, error) {
+	// A bounded delay makes concurrent cache fills observable in this demo.
+	if route.Query.Get("slow") == "1" {
+		timer := time.NewTimer(250 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			return CacheDemoData{}, ctx.Err()
+		}
+	}
 	id, _ := route.Params.Get("id")
 	refreshed := time.Now().UTC().Format(time.RFC3339Nano)
 	if d, ok := demoVersion.Load(id); ok {
@@ -50,6 +60,15 @@ func DemoVersion(id string) (string, bool) {
 // The invalidator (E04) fences fills against coordinated invalidations; every
 // cached binding over this store attaches it.
 func CachedDemoBindings(store cache.Store, invalidator *loader.Invalidator) []loader.Binding {
+	return cachedDemoBindings(store, invalidator, nil)
+}
+
+// CachedDemoBindingsWithFlights also opts the demonstration bindings into E05.
+func CachedDemoBindingsWithFlights(store cache.Store, invalidator *loader.Invalidator, group *loader.FlightGroup) []loader.Binding {
+	return cachedDemoBindings(store, invalidator, group)
+}
+
+func cachedDemoBindings(store cache.Store, invalidator *loader.Invalidator, group *loader.FlightGroup) []loader.Binding {
 	options := loader.CacheOptions[CacheDemoData]{
 		Store:  store,
 		Policy: cache.Policy{TTL: 2 * time.Second},
@@ -59,6 +78,7 @@ func CachedDemoBindings(store cache.Store, invalidator *loader.Invalidator) []lo
 		Codec:       loader.JSONCodec[CacheDemoData](),
 		Invalidator: invalidator,
 	}
+	options.Flights = group
 	return []loader.Binding{
 		loader.BindCached("cache-demo/post/[id]/page.templ", loadCacheDemo, options),
 		loader.BindCached("cache-demo/team/[id]/page.svelte", loadCacheDemo, options),
