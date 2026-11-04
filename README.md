@@ -1050,3 +1050,50 @@ application state before trying again. Duplicate suppression is per form and
 is not server-side idempotency. D05 does not provide automatic loader
 revalidation, optimistic updates, uploads, or offline retry; D06 remains the
 separate integration and security gate.
+
+### Phase D integration gate (D06)
+
+D06 verified all three transports end to end through one registry and
+dispatch pipeline, hardened origin matching, and closed documentation gaps.
+Verified behaviors worth knowing when deploying or extending actions:
+
+- **Origin matching normalizes default ports.** `http://host` matches a
+  trusted `http://host:80`, and `https://host` matches `https://host:443`;
+  scheme and host compare case-insensitively; a genuinely different port,
+  scheme, or host still fails closed with 403. Never derive the trusted
+  origin from `X-Forwarded-*` headers — configure `GO_META_TRUSTED_ORIGIN`
+  to the public origin behind your proxy.
+- **Enhanced forms rejected cross-origin receive JSON 403**, not the HTML
+  error page, because the client requested JSON processing via
+  `X-Go-Meta-Action: 1`. The header itself never bypasses any check.
+- **CSRF token replay within the TTL is expected and documented.** The
+  signed double-submit token binds authenticity (HMAC over the shared
+  secret), not browser identity or single use: a token/cookie pair stolen
+  together replays until expiry. Cookie theft mitigation is the deployment's
+  HTTPS + `__Host-` prefix policy, not the signature. Set
+  `GO_META_FORM_SECRET` to one persistent 32+ byte value across instances
+  and restarts; tokens signed by a different secret fail verification, so
+  per-process defaults break multi-instance deployments.
+- **A committed mutation whose destination navigation fails is never
+  retried.** Exactly one action POST occurs; Back/Forward re-issue only
+  GETs because the POST never enters session history as an entry. The
+  recovery link to the trusted destination stays in the form.
+- **Network-level exactly-once semantics are explicitly not promised.**
+  Aborting fetch does not cancel a server-side mutation; ambiguous
+  outcomes show neutral "outcome unknown" messaging, keep user input, and
+  never auto-retry. Actions performing irreversible work should be
+  idempotent at the application level.
+- **Svelte component forms are fully supported** (see
+  `app/d06/form/page.svelte`): client-rendered components read the CSRF
+  token from the `_meta_csrf` cookie for their hidden field, feedback is
+  isolated per component instance, unmount aborts pending submissions, and
+  re-entry remounts cleanly without duplicate listeners.
+- **The error matrix is consistent across transports:** validation →
+  structured 422 (JSON shape for JSON/enhanced, HTML for native); malformed
+  transport input → 400; unauthorized/forbidden/not-found → 401/403/404;
+  internal errors → generic 500 with no detail leaked; CSRF failure → safe
+  403 (JSON for the enhanced marker, HTML natively).
+
+Phase D does not include automatic loader revalidation after mutations,
+cache invalidation, uploads, optimistic updates, or idempotency keys — those
+remain future roadmap work (Phases E/G).

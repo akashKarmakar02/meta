@@ -81,7 +81,11 @@ func dispatchAction(c fiber.Ctx, registry *action.Registry, cfg ActionEndpointCo
 		return actionError(c, fiber.StatusNotFound, "unknown action")
 	}
 	if !sameOrigin(c, cfg.TrustedOrigin) {
-		if contentTypeOf(c.Get(fiber.HeaderContentType)) == "application/json" {
+		if contentTypeOf(c.Get(fiber.HeaderContentType)) == "application/json" || enhancedForm(c) {
+			// The enhanced-form marker requests JSON processing; answering it
+			// with JSON keeps the client's error path out of HTML parsing
+			// (D06 error-consistency matrix). The header itself is never
+			// authorization — every other gate still applies.
 			return actionError(c, http.StatusForbidden, "cross-origin action request rejected")
 		}
 		return formErrorPage(c, http.StatusForbidden, "Requests from other sites are not accepted.")
@@ -388,7 +392,44 @@ func sameOrigin(c fiber.Ctx, trusted string) bool {
 	if !validOriginFormat(origin) {
 		return false
 	}
-	return strings.EqualFold(origin, trusted)
+	return sameOriginValue(origin, trusted)
+}
+
+// sameOriginValue compares two origin strings with default-port normalization:
+// "http://host", "http://host:80", "https://host:443" are equivalent (the
+// D06 audit found the raw comparison missed the browser's default-port
+// omission). Scheme and host compare case-insensitively per URL semantics.
+func sameOriginValue(origin, trusted string) bool {
+	o, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	t, err := url.Parse(trusted)
+	if err != nil {
+		return false
+	}
+	if !strings.EqualFold(o.Scheme, t.Scheme) {
+		return false
+	}
+	if !strings.EqualFold(o.Hostname(), t.Hostname()) {
+		return false
+	}
+	op := o.Port()
+	tp := t.Port()
+	if op == "" {
+		op = defaultPortFor(o.Scheme)
+	}
+	if tp == "" {
+		tp = defaultPortFor(t.Scheme)
+	}
+	return op == tp
+}
+
+func defaultPortFor(scheme string) string {
+	if scheme == "https" {
+		return "443"
+	}
+	return "80"
 }
 
 // validOriginFormat reports whether an Origin value parses as a plain http(s)

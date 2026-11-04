@@ -53,4 +53,36 @@ describe('enhanced forms', () => {
     finish(new Response(JSON.stringify({ ok: false, error: 'validation failed', errors: { name: ['wrong'] } }), { status: 422, headers: { 'Content-Type': 'application/json' } }));
     await flush(); expect(second.textContent).not.toContain('wrong'); expect(first.textContent).not.toContain('wrong');
   });
+  it('a committed mutation whose destination navigation fails is not retried', async () => {
+    // The action succeeds (mutation committed); window.location.assign fails,
+    // as when the destination GET errors at the network layer. The stub must
+    // carry origin: safeDestination resolves the absolute URL at assign time.
+    const assign = vi.fn(() => { throw new TypeError('navigation failed'); });
+    Object.defineProperty(window, 'location', { writable: true, value: { assign, origin: 'http://localhost' } });
+    const fetcher = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ ok: true, redirect: '/guestbook' }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    vi.stubGlobal('fetch', fetcher);
+    const f = form(); submit(f); await flush(); await flush();
+    // Exactly one POST fetch — the navigation failure never re-triggers it.
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(assign).toHaveBeenCalledTimes(1);
+    const [first] = assign.mock.calls as unknown as [string][];
+    expect(String(first?.[0])).toContain('/guestbook');
+    // The recovery link to the trusted destination remains in the DOM.
+    const link = f.querySelector('a');
+    expect(link?.textContent).toBe('Continue');
+    expect(String(link?.getAttribute('href'))).toContain('/guestbook');
+    // No automatic retry fired after the failure.
+    await flush(); await flush();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it('a cross-origin or open-redirect destination is never followed', async () => {
+    const assign = vi.fn();
+    Object.defineProperty(window, 'location', { writable: true, value: { assign, origin: 'http://localhost' } });
+    for (const redirect of ['https://evil.example/x', '//evil.example/x', 'javascript:alert(1)', '/ok\\x']) {
+      vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify({ ok: true, redirect }), { status: 200, headers: { 'Content-Type': 'application/json' } }))));
+      const f = form(); submit(f); await flush(); await flush();
+      expect(assign).not.toHaveBeenCalledWith(redirect);
+      f.remove();
+    }
+  });
 });

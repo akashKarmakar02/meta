@@ -60,7 +60,11 @@ cleanup() {
   fi
 }
 
-PORT=$PORT PATH="$SANDBOX_PATH" ./bin/example >/tmp/go-meta-node-free.log 2>&1 &
+# D06: the action endpoint trusts an explicit origin only. The smoke
+# server serves on 127.0.0.1, so configure it as the trusted origin the
+# way a production deployment would.
+PORT=$PORT GO_META_TRUSTED_ORIGIN="$BASE" PATH="$SANDBOX_PATH" \
+  ./bin/example >/tmp/go-meta-node-free.log 2>&1 &
 SERVER_PID=$!
 # Note: curl runs with the normal PATH — it tests the server over HTTP;
 # only the SERVER must be Node-free.
@@ -148,6 +152,80 @@ if [ -z "$asset" ]; then
   fail=1
 else
   check "client asset $asset" 200 "$asset"
+fi
+
+# D06: the full action system works with no Node on PATH. Obtain a CSRF
+# cookie + token from the form page, then exercise all three transports.
+csrf_cookie=$(curl -s -c - "$BASE/guestbook" | grep _meta_csrf | awk '{print $NF}')
+if [ -z "$csrf_cookie" ]; then
+  echo "FAIL: guestbook page issued no CSRF cookie" >&2
+  fail=1
+else
+  # JSON action: success envelope (Origin required).
+  got=$(curl -s -o /tmp/d06-json-body -w '%{http_code}' -X POST \
+    -H 'Content-Type: application/json' -H "Origin: $BASE" -H "Host: localhost:$PORT" \
+    --data '{"title":"node free"}' "$BASE/_meta/actions/demo.createPost")
+  if [ "$got" != "200" ]; then
+    echo "FAIL: JSON action success -> $got (want 200)" >&2
+    fail=1
+  else
+    echo "ok:   JSON action success -> 200"
+  fi
+  # JSON action: structured validation 422 (an empty guestbook name fails
+  # the typed validator with a structured response).
+  got=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+    -H 'Content-Type: application/json' -H "Origin: $BASE" \
+    --data '{"name":" ","message":"x"}' "$BASE/_meta/actions/guestbook.submit")
+  if [ "$got" != "422" ]; then
+    echo "FAIL: JSON action validation -> $got (want 422)" >&2
+    fail=1
+  else
+    echo "ok:   JSON action validation -> 422"
+  fi
+  # Native form POST: 303 PRG on valid CSRF double-submit.
+  got=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -X POST \
+    -H 'Content-Type: application/x-www-form-urlencoded' -H "Origin: $BASE" \
+    -H "Cookie: _meta_csrf=$csrf_cookie" \
+    --data-urlencode "_csrf=$csrf_cookie" --data-urlencode "name=Node" --data-urlencode "message=free of node" \
+    "$BASE/_meta/actions/guestbook.submit")
+  case "$got" in
+    "303 "*) echo "ok:   native form POST -> $got" ;;
+    *) echo "FAIL: native form POST -> $got (want 303 + Location)" >&2; fail=1 ;;
+  esac
+  # Enhanced form POST: JSON 200 with the marker header.
+  got=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+    -H 'Content-Type: application/x-www-form-urlencoded' -H "Origin: $BASE" \
+    -H 'X-Go-Meta-Action: 1' -H "Cookie: _meta_csrf=$csrf_cookie" \
+    --data-urlencode "_csrf=$csrf_cookie" --data-urlencode "name=Enhanced" --data-urlencode "message=node free" \
+    "$BASE/_meta/actions/guestbook.submit")
+  if [ "$got" != "200" ]; then
+    echo "FAIL: enhanced form POST -> $got (want 200)" >&2
+    fail=1
+  else
+    echo "ok:   enhanced form POST -> 200"
+  fi
+  # Trusted-origin rejection: cross-origin Origin fails closed.
+  got=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+    -H 'Content-Type: application/json' -H 'Origin: https://evil.example' \
+    --data '{"title":"x"}' "$BASE/_meta/actions/demo.createPost")
+  if [ "$got" != "403" ]; then
+    echo "FAIL: cross-origin action -> $got (want 403)" >&2
+    fail=1
+  else
+    echo "ok:   cross-origin action rejected -> 403"
+  fi
+  # Invalid CSRF rejection: tampered token fails closed.
+  got=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+    -H 'Content-Type: application/x-www-form-urlencoded' -H "Origin: $BASE" \
+    -H 'X-Go-Meta-Action: 1' -H "Cookie: _meta_csrf=tampered" \
+    --data-urlencode "_csrf=tampered" --data-urlencode "name=X" --data-urlencode "message=Y" \
+    "$BASE/_meta/actions/guestbook.submit")
+  if [ "$got" != "403" ]; then
+    echo "FAIL: tampered CSRF -> $got (want 403)" >&2
+    fail=1
+  else
+    echo "ok:   tampered CSRF rejected -> 403"
+  fi
 fi
 
 if [ "$fail" -ne 0 ]; then
