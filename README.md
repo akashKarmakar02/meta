@@ -1097,3 +1097,126 @@ Verified behaviors worth knowing when deploying or extending actions:
 Phase D does not include automatic loader revalidation after mutations,
 cache invalidation, uploads, optimistic updates, or idempotency keys — those
 remain future roadmap work (Phases E/G).
+
+## Cache contracts and policies (E01)
+
+Phase E adds caching to go-meta. E01 ships the *contract* only: the public
+`go-meta/cache` package defines keys, entries, TTL policies, error categories,
+and the `Store` interface. **No storage engine exists yet** — nothing in the
+framework caches anything, no loader or action behavior changed, and building
+this package adds no runtime component. E02 will implement the bounded
+in-memory store over this interface; E03 integrates loaders; E04 adds
+invalidation; E05 adds singleflight miss coalescing.
+
+### Public package
+
+```go
+import "go-meta/cache"
+
+key, err := cache.NewKey("loader:user-profile", "42", "tab=posts")
+policy := cache.Policy{TTL: 5 * time.Minute}
+err = store.Set(ctx, key, cache.Entry{Value: data}, policy)
+entry, hit, err := store.Get(ctx, key)
+err = store.Delete(ctx, key)
+```
+
+The package imports only the standard library — no Fiber, fasthttp, templ,
+Node, generated registries, or application packages — and is importable by
+external Go modules (verified by an isolated external-module test).
+
+### Key identity and namespaces
+
+- `cache.Key` is a string type with `Validate` rules: non-empty, ≤ 2048 bytes,
+  valid UTF-8, no ASCII control characters, no edge whitespace.
+- `cache.NewKey(namespace, components...)` builds keys with **length-prefixed**
+  components, not separators, so distinct component sequences can never collide:
+  `NewKey("ns", "a:b", "c") ≠ NewKey("ns", "a", "b:c")`. Empty components are
+  distinct from absent ones, and multi-byte UTF-8 is handled exactly.
+- The namespace is the first component and the unit of isolation between
+  logical domains (`loader:user-profile`, `image:thumbnail`); it is bounded at
+  128 bytes and validated like a key. Same components under different
+  namespaces never collide.
+- E03 owns loader-specific key construction (route identity + params + query +
+  scope); E01 provides only the collision-proof primitive.
+
+### Values, ownership, and size
+
+`Entry` holds `Value []byte`. A cached empty or nil value **is a hit**, not a
+miss (a serialized JSON `null` is a real value). Byte values were chosen over
+`any`/generic storage because CSR loader results already cross a byte boundary
+(encoding/json) in this framework, copying semantics are unambiguous, and size
+accounting is exact. Implementations must give entries copy-in/copy-out
+semantics: after `Set`, caller mutations don't affect the store; after `Get`,
+mutating returned bytes doesn't affect future reads. E02 must obey this. E03
+will adapt typed SSR loader values to/from bytes at its boundary without
+changing `Loader[T]` signatures.
+
+### TTL policy
+
+`Policy{TTL}` is the only knob. TTL is measured from `Set` with a monotonic
+clock where available; an entry is served during `[stored, stored+TTL)` and is
+a miss at or after expiry. The zero `Policy` is invalid — **caching is strictly
+opt-in**: no implicit default TTL exists anywhere, and a loader without an
+explicit cache policy executes exactly as in Phase C. Valid TTLs are positive
+and at most `MaxTTL` (24h); zero, negative, non-finite, and over-max values
+are rejected by `Policy.Validate()` with errors wrapping `ErrInvalidPolicy`.
+
+### Hit / miss / error
+
+`Get` distinguishes three outcomes exactly:
+
+| Result | Meaning |
+|---|---|
+| `(entry, true, nil)` | Hit — entry present and unexpired; `Value` may be empty |
+| `(zero, false, nil)` | Miss — never written, deleted, or expired |
+| `(zero, false, err)` | Store error — must not be treated as a miss |
+
+### Concurrency and contexts
+
+Every `Store` implementation must be safe for concurrent `Get`/`Set`/`Delete`
+from many goroutines, including on the same key; individual operations are
+atomic and visible-when-returned. All methods take `context.Context`: nil
+contexts are rejected (`ErrNilContext`), already-canceled contexts return their
+own error without side effects, and no operation spawns background goroutines
+or retains Fiber request objects. Cancellation after a completed `Set` does not
+roll it back.
+
+### Capacity and boundedness
+
+Boundedness is a construction concern of concrete stores. E02 will enforce
+entry-count and byte-size limits at construction, reject oversized entries
+with `ErrEntryTooLarge`, and own its eviction algorithm. Zero/omitted capacity
+values in E02's constructor will be documented errors, not unbounded defaults.
+The contract deliberately has no capacity fields — `Policy` describes one
+entry's lifetime, not the engine's shape.
+
+### Errors and invalidation
+
+Five sentinel categories wrap via `%w` for `errors.Is`/`errors.As`:
+`ErrInvalidKey`, `ErrInvalidPolicy`, `ErrEntryTooLarge`, `ErrClosed`,
+`ErrNilContext`. No HTTP meaning attaches to any of them. `Delete` on a
+missing key is a successful no-op — exact-key invalidation is idempotent, so
+E04 can invalidate speculatively. Namespace- or tag-scoped deletion is not in
+the interface; E04 builds any higher-level index on top of exact-key deletes
+rather than forcing every backend to support scans.
+
+### Sensitive data and negative caching
+
+A key built only from route ID or URL is **not safe for user-specific results**
+— identical URLs do not imply identical authorization. Callers must fold user/
+tenant scope into key components (and hash secrets before putting them in a
+key). Only successful results are cache candidates: loader failures
+(`ErrNotFound`, `ErrUnauthorized`, …), redirects, cancellation, deadline
+expiry, and action mutation responses are never cached automatically. No
+request context or cookie object is retained in entries (bytes cannot hold
+them). Negative caching may arrive later behind its own explicit policy.
+E01 implements no authentication or key derivation — the contract is simply
+built so that private results are not accidentally shared.
+
+### Known limitations
+
+- No storage exists: `Store` has no implementation in this repo yet (E02).
+- `MaxTTL` (24h) intentionally forces long-lived data to be versioned by key
+  (content digest) rather than pinned by TTL.
+- No namespace-wide invalidation primitive (E04 decides if one is needed).
+- Keys are bounded at 2048 bytes; larger identities must digest their payload.
