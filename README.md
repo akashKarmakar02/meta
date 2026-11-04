@@ -647,7 +647,135 @@ mutation becomes browser-reachable, D02+ must restrict endpoints to
 appropriate methods, reject cross-origin or unauthorized submissions, define a
 CSRF policy, bound request-body sizes, validate untrusted input, avoid
 exposing internal errors, and prevent accidental invocation from page loads
-or prefetches.
+or prefetches. D02 delivers the method restriction, origin gate, body limits,
+and strict decoding; authentication and token-based CSRF for credentialed
+sessions remain the responsibility of later tasks.
+
+## Action registration and HTTP endpoints (D02)
+
+D02 makes actions callable over HTTP. Applications register typed actions
+into an immutable registry; the framework exposes them under a reserved,
+method-restricted JSON endpoint namespace.
+
+### Registering actions
+
+Define actions in `app/actions` and bind them under stable dot-separated IDs:
+
+```go
+reg, err := action.NewRegistry(
+    action.Bind("posts.create", CreatePost),
+    action.Bind("posts.delete", DeletePost),
+)
+if err != nil {
+    // Malformed IDs, duplicate IDs, or nil actions fail startup with an
+    // actionable error rather than silently dropping a binding.
+    log.Fatal(err)
+}
+```
+
+`action.Bind` is fully typed: the input and output types come from the
+registered `Action[I, O]`, and type erasure happens once at the transport
+adapter boundary. No `any`, reflection, or Fiber dependency appears in
+application code.
+
+### Action ID grammar
+
+IDs match `^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$`, at most 64 characters:
+ASCII letters, digits, underscores, and hyphens in segments separated by
+single dots. IDs are case-sensitive and independent of page URLs — several
+actions can serve one page, and one action can serve several pages.
+
+### Endpoint format
+
+```http
+POST /_meta/actions/{actionID}
+Content-Type: application/json
+Origin: https://your-app.example.com
+
+{"title":"Hello"}
+```
+
+Success returns the action's typed output as JSON:
+
+```json
+{
+  "ok": true,
+  "data": { "id": 42 }
+}
+```
+
+The example app registers `demo.createPost`, `demo.echo`, `demo.fail`, and
+`demo.slow` under this endpoint for testing.
+
+Only POST dispatches actions. GET, HEAD, OPTIONS, PUT, PATCH, and DELETE
+never execute an action. The `/_meta/actions/*` namespace is
+framework-owned and cannot be shadowed by page routes.
+
+### Input decoding and limits
+
+- Requests must declare `Content-Type: application/json` (charset parameter
+  permitted). Anything else — including HTML form content types — is
+  rejected with 415.
+- Bodies are decoded once, strictly: malformed JSON, trailing values, and
+  unknown fields are rejected with 400. Decoding into the registered
+  concrete input type uses `encoding/json` with `DisallowUnknownFields`.
+- The default request-body limit is 1 MiB, configurable per server via
+  `httpserver.ActionEndpointConfig.MaxBodyBytes`; oversized bodies are
+  rejected with 413 before invocation. Nothing executes when decoding
+  fails.
+
+### Origin and CSRF policy
+
+Every request must originate from the configured trusted origin, compared
+by scheme, host, and effective port:
+
+- A request whose `Origin` header is missing, malformed, or does not
+  exactly match the trusted origin is rejected with 403.
+- No `X-Forwarded-*` or `Host` header can move the trusted origin.
+- Configure production origins explicitly via `GO_META_TRUSTED_ORIGIN`
+  (for example `https://example.com`). The origin check fails closed when
+  unconfigured.
+- In development, `meta dev` serves both Vite and Go on one origin
+  (`http://localhost:3000` by default), so same-origin requests pass.
+
+This is a real CSRF mitigation for the JSON endpoint (a cross-site page
+cannot send a matching `Origin` and cannot use `text/plain` bodies here),
+but it is not a complete session-authentication story. The example app has
+no cookies or sessions; once authentication exists, a token-based CSRF
+mechanism must be added before credentialed mutations are exposed. D03's
+form submissions will require a compatible token path.
+
+### Error mapping
+
+| Action result | HTTP | `error` field |
+|---|---|---|
+| `action.ErrInvalidInput` | 400 | `invalid input` |
+| `action.ErrUnauthorized` | 401 | `unauthorized` |
+| `action.ErrForbidden` | 403 | `forbidden` |
+| `action.ErrNotFound` | 404 | `not found` |
+| any other error | 500 | `action failed` |
+
+Error responses use the same envelope: `{"ok":false,"error":"..."}`. The
+500 message is generic; internal error details are logged server-side and
+never sent to clients. Context cancellation maps to 400 with
+`request cancelled`.
+
+### Idempotency and replay
+
+Each accepted request executes its action exactly once. Two valid POSTs
+perform two mutations; network retries can duplicate work; cancellation
+does not roll back completed effects. The framework performs no retries,
+stores no results, and supplies no transactions — idempotency remains an
+application concern.
+
+### Actions and loaders stay isolated
+
+Action dispatch never runs page loaders, and page rendering never runs
+actions. Navigation envelopes, CSR loader data, and stale-navigation
+logic are unchanged from Phase C.
+
+Roadmap: D03 adds HTML form parsing, D04 typed validation errors, D05
+enhanced client-side submissions, D06 the integration gate.
 
 ## Toolchain requirements
 

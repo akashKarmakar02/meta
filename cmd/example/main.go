@@ -10,6 +10,8 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/logger"
 	"github.com/gofiber/fiber/v3/middleware/recover"
 
+	"go-meta/action"
+	"go-meta/app/actions"
 	"go-meta/app/loaders"
 	"go-meta/loader"
 
@@ -41,6 +43,24 @@ func newLoaderRegistry(bindings []loader.Binding) (*loader.Registry, error) {
 		ids[i] = route.ID
 	}
 	return loader.NewRegistry(ids, bindings...)
+}
+
+// newActionRegistry builds the immutable action registry from the app's
+// bindings. Invalid or duplicate IDs fail here, before any server starts
+// publishing a half-configured backend.
+func newActionRegistry(bindings []action.Binding) (*action.Registry, error) {
+	return action.NewRegistry(bindings...)
+}
+
+// newConfiguredAppWithActions adds D02 action dispatch on top of the loader
+// app. TrustedOrigin is explicit: production sets GO_META_TRUSTED_ORIGIN;
+// development and tests pass the concrete origin they serve on. An empty
+// trusted origin fails every action request closed (sameOrigin returns false),
+// so a misconfigured deployment never exposes an open mutation endpoint.
+func newConfiguredAppWithActions(assets *httpserver.Assets, privateSocket bool, loaders *loader.Registry, actions_ *action.Registry, trustedOrigin string) *fiber.App {
+	fapp := newConfiguredApp(assets, privateSocket, loaders)
+	httpserver.MountActions(fapp, actions_, httpserver.ActionEndpointConfig{TrustedOrigin: trustedOrigin})
+	return fapp
 }
 
 func newConfiguredApp(assets *httpserver.Assets, privateSocket bool, registry *loader.Registry) *fiber.App {
@@ -101,6 +121,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("loader registration: %v", err)
 	}
+	actionRegistry, err := newActionRegistry(actions.Bindings())
+	if err != nil {
+		log.Fatalf("action registration: %v", err)
+	}
 	var assets httpserver.Assets
 	devOrigin := os.Getenv("GO_META_VITE_ORIGIN")
 	if devOrigin != "" {
@@ -112,7 +136,7 @@ func main() {
 		log.Fatalf("load client assets: %v", err)
 	}
 	socket := os.Getenv("GO_META_DEV_SOCKET")
-	app := newConfiguredApp(&assets, devOrigin != "" && socket != "", registry)
+	app := newConfiguredAppWithActions(&assets, devOrigin != "" && socket != "", registry, actionRegistry, trustedActionOrigin())
 	// E09: serve the hashed production bundle at the same /assets prefix
 	// the shells reference. Fails explicitly when the build output is
 	// missing rather than serving pages that cannot boot.
@@ -142,4 +166,20 @@ func main() {
 		addr = ":" + p
 	}
 	log.Fatal(app.Listen(addr))
+}
+
+// trustedActionOrigin resolves the origin action requests must come from.
+// GO_META_TRUSTED_ORIGIN wins (production behind proxies: set it explicitly,
+// e.g. "https://example.com" — forwarded headers are never trusted, so an
+// explicit value is the only safe configuration). The default covers the
+// development and example-server shape: the public origin the server itself
+// serves on.
+func trustedActionOrigin() string {
+	if v := os.Getenv("GO_META_TRUSTED_ORIGIN"); v != "" {
+		return v
+	}
+	if p := os.Getenv("PORT"); p != "" {
+		return "http://localhost:" + p
+	}
+	return "http://localhost:3000"
 }
