@@ -72,11 +72,13 @@ func isIDRune(c byte) bool {
 // exactly once, and returns the type-erased output. A decode failure returns
 // an error wrapping ErrInvalidInput and never invokes the action.
 type Binding struct {
-	id         string
-	invoke     func(context.Context, routecontext.Route, []byte) (any, error)
-	decodeForm func(url.Values) (any, error)
-	invokeForm func(context.Context, routecontext.Route, any) (any, error)
-	successURL string
+	id           string
+	invoke       func(context.Context, routecontext.Route, []byte) (any, error)
+	decodeForm   func(url.Values) (any, error)
+	invokeForm   func(context.Context, routecontext.Route, any) (any, error)
+	successURL   string
+	formFields   []string
+	formRenderer FormRenderer
 }
 
 // Bind adapts a typed Action[I, O] to the registry boundary without invoking
@@ -184,7 +186,7 @@ func decodeFormInput[I any](values url.Values, decoder FormDecoder[I]) (I, error
 		if k == csrfFieldName {
 			continue
 		}
-		filtered[k] = vs
+		filtered[k] = append([]string(nil), vs...)
 	}
 	return decoder(filtered)
 }

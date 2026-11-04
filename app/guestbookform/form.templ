@@ -1,0 +1,41 @@
+package guestbookform
+
+import "go-meta/action"
+import "go-meta/formcsrf"
+
+templ Form(state action.FormState) {
+ <form method="post" action="/_meta/actions/guestbook.submit" data-go-form="guestbook">
+  @formcsrf.HiddenField()
+  if state.Message() != "" {
+   <p role="alert">{ state.Message() }</p>
+  }
+  <label for="guestbook-name">Name</label>
+  if len(state.Errors("name")) > 0 {
+   <input id="guestbook-name" type="text" name="name" required maxlength="80" value={ state.Value("name") } aria-invalid="true" aria-describedby="guestbook-name-error"/>
+   <div id="guestbook-name-error">
+    for _, message := range state.Errors("name") {
+     <p>{ message }</p>
+    }
+   </div>
+  } else {
+   <input id="guestbook-name" type="text" name="name" required maxlength="80" value={ state.Value("name") }/>
+  }
+  <label for="guestbook-message">Message</label>
+  if len(state.Errors("message")) > 0 {
+   <textarea id="guestbook-message" name="message" required maxlength="500" aria-invalid="true" aria-describedby="guestbook-message-error">{ state.Value("message") }</textarea>
+   <div id="guestbook-message-error">
+    for _, message := range state.Errors("message") {
+     <p>{ message }</p>
+    }
+   </div>
+  } else {
+   <textarea id="guestbook-message" name="message" required maxlength="500">{ state.Value("message") }</textarea>
+  }
+  <button type="submit">Sign guestbook</button>
+ </form>
+}
+
+templ Feedback(state action.FormState) {
+ <!doctype html>
+ <html lang="en"><head><meta charset="utf-8"/><title>Guestbook</title></head><body><main><h1>Guestbook</h1>@Form(state)</main></body></html>
+}

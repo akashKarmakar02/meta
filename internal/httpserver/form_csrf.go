@@ -1,6 +1,8 @@
 package httpserver
 
 import (
+	"strings"
+
 	"github.com/gofiber/fiber/v3"
 
 	"go-meta/formcsrf"
@@ -22,14 +24,24 @@ import (
 //
 // Only page GETs pass through here; action submissions verify on POST via the
 // manager directly and never re-issue through this middleware.
-func WithFormCSRF(manager *formcsrf.Manager) fiber.Handler {
+func WithFormCSRF(manager *formcsrf.Manager, trustedOrigin ...string) fiber.Handler {
+	secure := len(trustedOrigin) > 0 && strings.HasPrefix(strings.ToLower(trustedOrigin[0]), "https://")
+	cookieName := formcsrf.CookieName
+	if secure {
+		cookieName = formcsrf.SecureCookieName
+	}
 	return func(c fiber.Ctx) error {
-		cookieToken := c.Cookies(formcsrf.CookieName)
+		if c.Method() != fiber.MethodGet {
+			return c.Next()
+		}
+		c.Set(fiber.HeaderCacheControl, "no-store")
+		cookieToken := c.Cookies(cookieName)
 		token := cookieToken
 		if !manager.ValidToken(token) {
 			token = manager.Issue()
 			c.Cookie(&fiber.Cookie{
-				Name:     formcsrf.CookieName,
+				Name:     cookieName,
+				Secure:   secure,
 				Value:    token,
 				Path:     "/",
 				SameSite: fiber.CookieSameSiteLaxMode,

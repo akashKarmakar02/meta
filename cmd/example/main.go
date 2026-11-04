@@ -60,7 +60,7 @@ func newActionRegistry(bindings []action.Binding) (*action.Registry, error) {
 // trusted origin fails every action request closed (sameOrigin returns false),
 // so a misconfigured deployment never exposes an open mutation endpoint.
 func newConfiguredAppWithActions(assets *httpserver.Assets, privateSocket bool, loaders *loader.Registry, actions_ *action.Registry, trustedOrigin string, csrfManager *formcsrf.Manager) *fiber.App {
-	fapp := newConfiguredAppBase(assets, privateSocket, loaders, csrfManager)
+	fapp := newConfiguredAppBase(assets, privateSocket, loaders, csrfManager, trustedOrigin)
 	httpserver.MountActions(fapp, actions_, httpserver.ActionEndpointConfig{TrustedOrigin: trustedOrigin, CSRF: csrfManager})
 	return fapp
 }
@@ -75,7 +75,7 @@ func newConfiguredApp(assets *httpserver.Assets, privateSocket bool, registry *l
 // must be registered BEFORE page routes: Fiber matches middleware and routes
 // in registration order, so a Use after route registration would never see
 // page requests.
-func newConfiguredAppBase(assets *httpserver.Assets, privateSocket bool, registry *loader.Registry, csrfManager *formcsrf.Manager) *fiber.App {
+func newConfiguredAppBase(assets *httpserver.Assets, privateSocket bool, registry *loader.Registry, csrfManager *formcsrf.Manager, trustedOrigin ...string) *fiber.App {
 	config := fiber.Config{
 		// D07: centralized HTML error pages; no stack traces or internals leak.
 		ErrorHandler:  render.HTTPErrorHandler,
@@ -104,7 +104,7 @@ func newConfiguredAppBase(assets *httpserver.Assets, privateSocket bool, registr
 	// that render protected forms. Registered BEFORE page routes; no-op
 	// without a manager (pre-D03 apps are unaffected).
 	if csrfManager != nil {
-		fapp.Use(httpserver.WithFormCSRF(csrfManager))
+		fapp.Use(httpserver.WithFormCSRF(csrfManager, trustedOrigin...))
 	}
 
 	fapp.Get("/healthz", func(c fiber.Ctx) error {

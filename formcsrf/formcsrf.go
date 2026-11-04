@@ -37,6 +37,9 @@ import (
 // CookieName is the browser cookie holding the signed token.
 const CookieName = "_meta_csrf"
 
+// SecureCookieName is host-bound by browsers on HTTPS, preventing sibling-domain cookie injection.
+const SecureCookieName = "__Host-meta_csrf"
+
 // FieldName is the hidden form input carrying the submitted token.
 const FieldName = "_csrf"
 

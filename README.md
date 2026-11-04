@@ -781,8 +781,7 @@ D06 the integration gate.
 
 Actions registered with `action.BindForm` can also be submitted by ordinary
 browser-native HTML forms — no JavaScript required. Form submission is
-explicit opt-in per action: JSON-only bindings stay JSON-only, and form-only
-bindings refuse JSON bodies.
+explicit opt-in per action: JSON-only bindings stay JSON-only; form-capable bindings also accept JSON.
 
 ### Binding a form action
 
@@ -809,7 +808,7 @@ package `go-meta/formcsrf`) issues expiring tokens signed with a server
 secret; `httpserver.WithFormCSRF` mounts issuance on page GETs, storing the
 token in request context where `formcsrf.HiddenField()` renders it as a
 hidden form input. The action endpoint rejects any form whose `_csrf` field
-does not match the `go-meta-csrf` cookie and validate against the secret.
+does not match the appropriate `_meta_csrf` (HTTP) or `__Host-meta_csrf` (HTTPS) cookie or fails validation against the secret.
 Missing, tampered, expired, and cross-site tokens are rejected with 403.
 
 ### Post/Redirect/Get
@@ -817,7 +816,7 @@ Missing, tampered, expired, and cross-site tokens are rejected with 403.
 Successful form submissions do not render inline responses. The action
 executes once, then the endpoint redirects with 303 to the configured
 destination. Refreshing the destination re-issues a GET — the mutation is
-not repeated. Errors render a minimal HTML page without retry semantics.
+not repeated. Structured validation can render the form again; other errors render a generic page without retry semantics.
 
 ### Response shape
 
@@ -826,11 +825,12 @@ not repeated. Errors render a minimal HTML page without retry semantics.
 | success | 303 redirect to configured location |
 | invalid CSRF token | 403 |
 | form decoding failure | 400 |
+| structured validation failure | 422 |
 | body over 1 MiB limit | 413 |
 | non-form content type to form action | 415 |
 | unknown action or GET | 404 |
 
-The D02 JSON endpoint behavior is unchanged for JSON-bound actions.
+The D02 JSON success and generic-error contracts are unchanged; structured validation adds a 422 response.
 
 ## Toolchain requirements
 
@@ -954,3 +954,60 @@ generate/build/test/clean. Subsequent tasks (route discovery and generation)
 are implemented sequentially per the blueprint's gates.
 
 Gate 0 (runnable health endpoint, Svelte build, templ compile) is green.
+
+### Validation feedback (D04)
+
+Actions and typed form decoders can return `action.NewValidationError` with a
+form message and field messages. Details are copied on construction and when
+read. Wrapped errors support `errors.Is(err, action.ErrInvalidInput)` and
+`errors.As(err, &validation)` where `validation` is `*action.ValidationError`.
+For example:
+
+```go
+return CreatePostResult{}, action.NewValidationError(
+    "Please correct the highlighted fields.",
+    map[string][]string{"title": {"Title is required"}},
+)
+```
+
+A typed decoder may return the same error before the action runs. Ordinary
+decoder failures and malformed requests remain HTTP 400; structured validation
+returns 422. Unauthorized, forbidden, not-found, cancellation, deadline, and
+internal errors retain their existing mappings. JSON validation responses use
+`{"ok":false,"error":"validation failed","message":"...","errors":{"title":["Title is required"]}}`;
+`message` is omitted when empty and `errors` is always an object. Success and
+other error shapes are unchanged. Only intentionally public validation messages
+should be returned; never put internal errors or secrets in them.
+
+For native HTML feedback, attach a renderer and an explicit value allowlist:
+
+```go
+action.BindForm("guestbook.submit", SubmitGuestbook, DecodeGuestbookForm, "/guestbook").
+    WithFormFeedback([]string{"name", "message"}, guestbookform.Feedback)
+```
+
+The callback has type `func(action.FormState) templ.Component` and returns a
+complete HTML document. See `app/guestbookform/form.templ` for labels, visible
+field errors, `aria-invalid`, and `aria-describedby`. It works without
+JavaScript. A binding without a renderer returns a generic 422 page. State is
+request-local; `Value` returns the first value, `Values` returns a copy of all
+values, and `Errors` returns copies of messages. Only allowlisted names are
+available, so passwords, tokens, API keys, authentication codes, payment data,
+and file values must not be allowlisted. `_csrf` is always excluded. Names are
+literal keys: `user.name` and `items[0]` have no special parsing semantics.
+Submitted names containing controls, invalid UTF-8, or more than 256 bytes are
+rejected. Render names and messages using templ escaping and explicit markup.
+
+Feedback uses the verified cookie token through `formcsrf.HiddenField`, so a
+corrected submission can be sent again; it never reuses an unverified submitted
+value. Token-bearing pages and action responses use `Cache-Control: no-store`.
+On HTTPS the configured trusted origin selects the Secure, host-only
+`__Host-meta_csrf` cookie with `Path=/` and `SameSite=Lax`; HTTP development
+uses `_meta_csrf`. Set `GO_META_FORM_SECRET` to the same persistent, secret
+32-byte-or-longer value on every production instance and across restarts;
+otherwise the per-process random key invalidates tokens after restart and
+breaks cross-instance submissions. Configure `GO_META_TRUSTED_ORIGIN` with the
+public HTTPS origin even behind a proxy. Actions should validate before
+irreversible side effects; an error does not roll them back. Successful native
+submissions still use 303 Post/Redirect/Get. D05 remains responsible for
+optional enhanced browser submissions.

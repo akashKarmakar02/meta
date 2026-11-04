@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 
 	"go-meta/action"
+	"go-meta/app/guestbookform"
 	"go-meta/routecontext"
 )
 
@@ -137,14 +138,19 @@ var guestbook []GuestbookEntry
 // concurrency-safe in-memory mutation, PRG redirect destination /guestbook.
 func SubmitGuestbook(_ context.Context, _ routecontext.Route, in GuestbookEntry) (struct{}, error) {
 	Calls.Guestbook.Add(1)
-	if strings.TrimSpace(in.Name) == "" || strings.TrimSpace(in.Message) == "" {
-		return struct{}{}, fmt.Errorf("%w: name and message are required", action.ErrInvalidInput)
+	fields := map[string][]string{}
+	if strings.TrimSpace(in.Name) == "" {
+		fields["name"] = []string{"Name is required"}
+	} else if len(in.Name) > 80 {
+		fields["name"] = []string{"Name must be at most 80 characters"}
 	}
-	if len(in.Name) > 80 {
-		return struct{}{}, fmt.Errorf("%w: name must be at most 80 characters", action.ErrInvalidInput)
+	if strings.TrimSpace(in.Message) == "" {
+		fields["message"] = []string{"Message is required"}
+	} else if len(in.Message) > 500 {
+		fields["message"] = []string{"Message must be at most 500 characters"}
 	}
-	if len(in.Message) > 500 {
-		return struct{}{}, fmt.Errorf("%w: message must be at most 500 characters", action.ErrInvalidInput)
+	if len(fields) > 0 {
+		return struct{}{}, action.NewValidationError("Please correct the highlighted fields.", fields)
 	}
 	guestbookMu.Lock()
 	defer guestbookMu.Unlock()
@@ -191,6 +197,6 @@ func Bindings() []action.Binding {
 		action.Bind("demo.echo", EchoPointer),
 		action.Bind("demo.fail", Fail),
 		action.Bind("demo.slow", Slow),
-		action.BindForm("guestbook.submit", SubmitGuestbook, DecodeGuestbookForm, "/guestbook"),
+		action.BindForm("guestbook.submit", SubmitGuestbook, DecodeGuestbookForm, "/guestbook").WithFormFeedback([]string{"name", "message"}, guestbookform.Feedback),
 	}
 }

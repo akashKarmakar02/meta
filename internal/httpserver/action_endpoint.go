@@ -3,6 +3,7 @@
 package httpserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/gofiber/fiber/v3"
 
@@ -70,6 +73,7 @@ func MountActions(app *fiber.App, registry *action.Registry, cfg ActionEndpointC
 }
 
 func dispatchAction(c fiber.Ctx, registry *action.Registry, cfg ActionEndpointConfig) error {
+	c.Set(fiber.HeaderCacheControl, "no-store")
 	id := strings.TrimPrefix(c.Path(), ActionsPrefix)
 	if !action.ValidID(id) {
 		// Malformed IDs answer exactly like unknown-but-valid IDs: a safe 404
@@ -122,6 +126,11 @@ func dispatchFormAction(c fiber.Ctx, registry *action.Registry, cfg ActionEndpoi
 	if err != nil {
 		return formErrorPage(c, http.StatusBadRequest, "The submitted form could not be read.")
 	}
+	for name := range values {
+		if len(name) > 256 || !utf8.ValidString(name) || strings.IndexFunc(name, unicode.IsControl) >= 0 {
+			return formErrorPage(c, http.StatusBadRequest, "The submitted form could not be read.")
+		}
+	}
 	// CSRF verification happens before registry lookup and decoding: without a
 	// valid token no information about the binding or input shapes is revealed
 	// and nothing executes. Double-submit: the hidden field must equal the
@@ -147,17 +156,29 @@ func dispatchFormAction(c fiber.Ctx, registry *action.Registry, cfg ActionEndpoi
 	if formToken == "" {
 		return formErrorPage(c, http.StatusForbidden, "Missing CSRF token. Reload the page and try again.")
 	}
-	cookieToken := c.Cookies(formcsrf.CookieName)
+	cookieName := formcsrf.CookieName
+	if strings.HasPrefix(strings.ToLower(cfg.TrustedOrigin), "https://") {
+		cookieName = formcsrf.SecureCookieName
+	}
+	cookieToken := c.Cookies(cookieName)
 	if !cfg.CSRF.Verify(formToken, cookieToken) {
 		return formErrorPage(c, http.StatusForbidden, "Invalid CSRF token. Reload the page and try again.")
 	}
 	delete(values, formcsrf.FieldName)
 	input, derr := binding.DecodeForm(values)
 	if derr != nil {
+		var validation *action.ValidationError
+		if errors.As(derr, &validation) && validation != nil {
+			return formValidation(c, binding, values, validation, cookieToken)
+		}
 		return handleActionError(c, id, fmt.Errorf("%w: %v", action.ErrInvalidInput, derr), true)
 	}
 	route := actionRouteSnapshot(c, id)
 	if _, err = binding.InvokeForm(c.Context(), route, input); err != nil {
+		var validation *action.ValidationError
+		if errors.As(err, &validation) && validation != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			return formValidation(c, binding, values, validation, cookieToken)
+		}
 		return handleActionError(c, id, err, true)
 	}
 	// Post/Redirect/Get with the binding's trusted destination. Result values
@@ -252,6 +273,21 @@ func handleActionError(c fiber.Ctx, id string, err error, htmlMode bool) error {
 			return formErrorPage(c, http.StatusGatewayTimeout, "The request timed out.")
 		}
 		return actionError(c, http.StatusGatewayTimeout, "action timed out")
+	case isValidation(err):
+		var validation *action.ValidationError
+		errors.As(err, &validation)
+		data, marshalErr := json.Marshal(struct {
+			OK      bool                `json:"ok"`
+			Error   string              `json:"error"`
+			Message string              `json:"message,omitempty"`
+			Errors  map[string][]string `json:"errors"`
+		}{Error: "validation failed", Message: validation.Message(), Errors: validation.Fields()})
+		if marshalErr != nil {
+			return actionError(c, http.StatusInternalServerError, "action failed")
+		}
+		c.Set(fiber.HeaderContentType, "application/json")
+		c.Set(fiber.HeaderCacheControl, "no-store")
+		return c.Status(http.StatusUnprocessableEntity).Send(data)
 	case errors.Is(err, action.ErrInvalidInput):
 		// Includes strict JSON/form decode failures from the adapter.
 		// Expected client error: not logged, never retried. D04 will add
@@ -282,6 +318,27 @@ func handleActionError(c fiber.Ctx, id string, err error, htmlMode bool) error {
 		}
 		return actionError(c, http.StatusInternalServerError, "action failed")
 	}
+}
+
+func isValidation(err error) bool {
+	var validation *action.ValidationError
+	return errors.As(err, &validation) && validation != nil
+}
+
+func formValidation(c fiber.Ctx, binding action.Binding, values url.Values, validation *action.ValidationError, token string) error {
+	component := binding.FormFeedback(values, validation)
+	if component == nil {
+		return formErrorPage(c, http.StatusUnprocessableEntity, "Please correct the submitted form and try again.")
+	}
+	var buf bytes.Buffer
+	ctx := formcsrf.WithContext(c.Context(), token)
+	if err := component.Render(ctx, &buf); err != nil {
+		log.Printf("go-meta: form feedback render failed: %v", err)
+		return formErrorPage(c, http.StatusInternalServerError, "Something went wrong. Please try again.")
+	}
+	c.Set(fiber.HeaderContentType, "text/html; charset=utf-8")
+	c.Set(fiber.HeaderCacheControl, "no-store")
+	return c.Status(http.StatusUnprocessableEntity).Send(buf.Bytes())
 }
 
 // sameOrigin enforces the D02 origin/CSRF boundary for the JSON endpoint:

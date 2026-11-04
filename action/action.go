@@ -91,9 +91,8 @@
 // untrusted input, avoid exposing internal errors, and prevent accidental
 // invocation from page loads or prefetches.
 //
-// This package imports only the standard library and go-meta/routecontext
-// (itself stdlib-only via routeparams). It has no Fiber or fasthttp dependency
-// and no Node/JavaScript counterpart.
+// The optional form feedback API uses templ components. This package has no
+// Fiber or fasthttp dependency and no Node/JavaScript counterpart.
 package action
 
 import (

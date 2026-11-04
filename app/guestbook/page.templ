@@ -4,24 +4,14 @@ import (
 	"fmt"
 
 	actions "go-meta/app/actions"
-	"go-meta/formcsrf"
+	"go-meta/action"
+ "go-meta/app/guestbookform"
 )
 
 templ Guestbook() {
 	<main data-go-page="guestbook">
 		<h1>Guestbook</h1>
-		<form method="post" action="/_meta/actions/guestbook.submit" data-go-form="guestbook">
-			@formcsrf.HiddenField()
-			<label>
-				Name
-				<input type="text" name="name" required maxlength="80"/>
-			</label>
-			<label>
-				Message
-				<textarea name="message" required maxlength="500"></textarea>
-			</label>
-			<button type="submit">Sign guestbook</button>
-		</form>
+		@guestbookform.Form(action.FormState{})
 		<p data-guestbook-count>{ fmt.Sprintf("%d", len(actions.Guestbook())) }</p>
 	</main>
 }
