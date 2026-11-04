@@ -68,7 +68,7 @@ test('removing the binding stops embedding loader data in the shell', async ({ r
   // signal is that the bootstrap data script is no longer embedded.
   await expect
     .poll(() => getBody(request, '/dashboard/team-42'), { timeout: 90_000 })
-    .not.toContain('go-meta-loader-data');
+    .not.toContain('go-meta-csr-data');
 });
 
 test('no idle rebuild loop after changes settle', async () => {

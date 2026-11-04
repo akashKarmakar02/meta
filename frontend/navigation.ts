@@ -198,6 +198,15 @@ function validateNavigationResponse(parsed: unknown, sourceURL: string): Navigat
 
   // Every field has been checked above; the assertions only convert the
   // unknown-typed JSON view into the declared response type.
+  //
+  // The optional C04 `data` payload is passed through VERBATIM. It is the
+  // loader's JSON result: any JSON value is legal (object, array, string,
+  // number, boolean, or null), so there is nothing to validate beyond the
+  // JSON parse that already happened — and dropping it here would sever
+  // the server's loader delivery from every soft-navigation mount
+  // (csr-mount, layout-child-swap, and the pipeline all read env.data).
+  // Absence stays absence: `undefined` means "no registered loader" and a
+  // JSON null stays null, keeping the two states distinguishable downstream.
   return {
     version: env.version as number,
     url: env.url as string,
@@ -208,5 +217,6 @@ function validateNavigationResponse(parsed: unknown, sourceURL: string): Navigat
     html: env.html as string,
     clientEntry:
       env.mode === 'csr' ? (env.clientEntry as string) : null,
+    ...(env.data !== undefined ? { data: env.data } : {}),
   };
 }

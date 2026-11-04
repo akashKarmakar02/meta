@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"go-meta/internal/routing"
 )
@@ -292,5 +293,40 @@ func TestWriteRoutesFileIOError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "codegen:") {
 		t.Errorf("error = %v, want it prefixed with codegen:", err)
+	}
+}
+
+// TestWriteRoutesFileNoopPreservesMTime (C06): regenerating with unchanged
+// inputs must not touch the output file — neither bytes nor mtime. A rewrite
+// would bump the mtime and trigger watcher rebuild loops (Air/Vite) even
+// though nothing changed.
+func TestWriteRoutesFileNoopPreservesMTime(t *testing.T) {
+	dir := t.TempDir()
+	m := fixtureManifest(t)
+	if err := WriteRoutesFile(dir, m); err != nil {
+		t.Fatalf("initial write: %v", err)
+	}
+	dst := filepath.Join(dir, "generated", "routes_gen.go")
+	before, err := os.Stat(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Ensure the no-op check sees a genuinely different mtime if it rewrote:
+	// backdate the file slightly so any rewrite is detectable by mtime.
+	past := before.ModTime().Add(-2 * time.Second)
+	if err := os.Chtimes(dst, past, past); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if err := WriteRoutesFile(dir, m); err != nil {
+			t.Fatalf("no-op write %d: %v", i, err)
+		}
+	}
+	after, err := os.Stat(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(past) {
+		t.Fatalf("no-op generation changed the file mtime: %v -> %v", past, after.ModTime())
 	}
 }

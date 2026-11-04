@@ -98,6 +98,36 @@ describe('fetchNavigation (F06)', () => {
     expect(env.html).toBe('');
   });
 
+  // C06: the validator must pass the optional loader payload through —
+  // every soft-navigation mount site (csr-mount, layout-child-swap, the
+  // pipeline) reads env.data, so dropping it here would silently sever
+  // C04's delivery for all genuine soft navigations.
+  it('passes the optional CSR loader data field through verbatim', async () => {
+    for (const payload of [
+      { teamId: 'team-42', greeting: 'Loaded by Go' },
+      null,
+      'plain string',
+      42,
+      [1, 2, 3],
+      false,
+    ]) {
+      mockFetch(() =>
+        jsonResponse(JSON.stringify({ ...csrFixture, data: payload }))
+      );
+      const env = await fetchNavigation('/dashboard/settings');
+      expect(env.data).toEqual(payload);
+    }
+  });
+
+  it('keeps the loader data field absent when the server omits it', async () => {
+    mockFetch(() => jsonResponse(csrFixture));
+    const env = await fetchNavigation('/dashboard/settings');
+    // Absence means "no registered loader"; it must stay distinct from a
+    // JSON null payload both here and at the page boundary.
+    expect('data' in env).toBe(false);
+    expect(env.data).toBeUndefined();
+  });
+
   it('forwards the AbortSignal to fetch', async () => {
     const controller = new AbortController();
     const { fn } = mockFetch(() => {

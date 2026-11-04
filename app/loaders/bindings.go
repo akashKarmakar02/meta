@@ -17,5 +17,7 @@ func Bindings() []loader.Binding {
 		loader.Bind("c05/redirectCsr/page.svelte", LoadC05RedirectCSR),
 		loader.Bind("c05/slowRedirect/page.templ", LoadC05SlowRedirect),
 		loader.Bind("c05/notFound/page.templ", LoadC05NotFound),
+		// C06 three-state fixture: JSON null (vs absent vs value).
+		loader.Bind("c05/nullData/page.svelte", LoadC05NullData),
 	}
 }

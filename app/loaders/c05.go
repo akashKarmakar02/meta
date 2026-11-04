@@ -46,3 +46,18 @@ func LoadC05SlowRedirect(ctx context.Context, _ routecontext.Route) (string, err
 func LoadC05NotFound(_ context.Context, _ routecontext.Route) (string, error) {
 	return "", loader.ErrNotFound
 }
+
+// C06NullData is the C06 three-state fixture result type. A loader may
+// legitimately return a typed nil pointer; the framework serializes it as JSON
+// null, which must stay distinct from an absent payload (no registered
+// loader) and from a value payload.
+type C06NullData struct {
+	Marker string `json:"marker"`
+}
+
+// LoadC05NullData is bound to a CSR route and returns a nil pointer, which
+// serializes to JSON null. The page renders its `data` prop state so browser
+// tests can assert absent ≠ null ≠ value through a real soft navigation.
+func LoadC05NullData(_ context.Context, _ routecontext.Route) (*C06NullData, error) {
+	return nil, nil
+}

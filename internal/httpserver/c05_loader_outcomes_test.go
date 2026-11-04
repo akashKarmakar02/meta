@@ -86,6 +86,40 @@ func TestValidRedirectLocation(t *testing.T) {
 		"/\\evil", // backslash after root is not a path segment separator
 		"mailto:x",
 		"ftp://x",
+
+		// C06: percent-encoded bypasses — the browser decodes %XX when
+		// resolving Location, so the DECODED form must satisfy every rule
+		// too, and ambiguous/invalid escapes fail closed.
+		"/%2F%2Fevil.com",                // decodes to //evil.com (protocol-relative)
+		"/x%5Cevil.com",                  // %5C is backslash: decodes to /\evil.com
+		"/x%5c%5cevil.com",               // lowercase double backslash
+		"/a%0D%0Ab: c",                   // %0D%0A decodes to CR/LF (header injection)
+		"/a%0d%0ab",                      // lowercase CRLF
+		"/x%00y",                         // NUL
+		"/a%01b",                         // SOH control character
+		"/x%7Fy",                         // DEL (0x7f)
+		"https%3A%2F%2Fevil.example.com", // encoded scheme+host (not root-relative anyway)
+		"/%zz",                           // invalid percent escape
+		"/a%",                            // dangling percent
+		"/a%2",                           // truncated escape
+		"/%2f%2fevil.com",                // lowercase encoded protocol-relative
+	}
+
+	// Decoded forms that remain same-origin paths are still valid: the policy
+	// is origin-only, so a decoded "/a//b" (a double slash inside the path) or
+	// a decoded dot-segment traversal ("/login/../etc") stays on this origin.
+	// Path normalization is the browser's job; the defense boundary here is
+	// cross-origin escape, scheme changes, and header injection.
+	stillValid := []string{
+		"/a%2F%2Fb",                   // decodes to /a//b — odd but same-origin path
+		"/login%252F..%252Fevil",      // double-encoded; first decode stays a path char
+		"/login/%2e%2e/%2e%2e/etc",    // decoded dot-segment traversal, same-origin
+		"/search?q=%2B%20plus%20sign", // encoded + and %20 in a query value
+	}
+	for _, loc := range stillValid {
+		if !validRedirectLocation(loc) {
+			t.Errorf("validRedirectLocation(%q) = false, want true", loc)
+		}
 	}
 	for _, loc := range invalid {
 		if validRedirectLocation(loc) {

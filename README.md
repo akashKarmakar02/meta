@@ -354,7 +354,7 @@ shell (no data script is embedded).
 
 **Transport.** The serialized JSON travels in one consistent place for both paths:
 - **Direct load:** embedded in the shell as a `<script
-  type="application/json" id="go-meta-loader-data">` element, read by the
+  type="application/json" id="go-meta-csr-data">` element, read by the
   bootstrap before the page mounts.
 - **Soft navigation:** an optional `data` field on the existing **version-1**
   navigation envelope (no version bump, no new required fields).
@@ -466,6 +466,90 @@ client never applies a result it no longer owns.
 actions, no middleware extensions, and no additional routing syntax. The
 navigation envelope stays version-1 and backward-compatible: C05 adds no fields
 and no version bump.
+
+## Phase C integration gate (C06)
+
+C06 verifies the whole loader system end to end and closes the gaps the earlier
+gates left open. It changed product code in three places:
+
+1. **The navigation-envelope validator dropped `data`** (`validateNavigationResponse`
+   in `frontend/navigation.ts`). It rebuilt the validated envelope field by
+   field but omitted the optional `data` field C04 added, so every *real* soft
+   navigation into a CSR loader route delivered `undefined` page props — while
+   full-document loads (which read the embedded shell) worked. The earlier C04
+   browser tests could not catch it: their "soft navigation" used a synthetic
+   `a.click()` from `page.evaluate`, whose `isTrusted=false` events fall back to
+   the full-document path by design (the trust boundary). The validator now
+   passes `data` through (still `unknown` at the boundary), and the C06 browser
+   suite clicks with a real trusted gesture and asserts the envelope fetch
+   happened.
+2. **Redirect validation now decodes percent-escapes before checking** for
+   control characters and scheme separators (`internal/httpserver/loader_outcomes.go`).
+   `%0d%0a` (CRLF header injection) and an encoded backslash before a scheme
+   (`/a%2f%2fb` → `//b` after decoding) are now rejected. A double-encoded
+   slash (`%252f`) stays allowed deliberately: it decodes to a literal `%2f`
+   path segment, which is same-origin; rejecting it would break legitimate
+   percent-encoded paths. Dot-segment forms (`/a/../b`) remain allowed because
+   the policy is same-origin-only, not path-sanitization.
+3. **A dev-suite assertion checked the wrong element id** — it asserted the
+   absence of `go-meta-loader-data`, but the real id is `go-meta-csr-data`, so
+   the check could never fail. Corrected to the real id.
+
+C06 also added coverage without changing behavior: HTTP-level integration tests
+for SSR/CSR parity, route-context/query matrices, envelope/redirect checks at
+the real HTTP boundary (`cmd/example/c06_integration_test.go`); a browser suite
+for trusted-click data delivery, the three data states (absent ≠ JSON null ≠
+value), redirect URL/history correctness, and slow-A/fast-B races
+(`tests/browser/c06-integration.spec.ts`); dev-suite tests for editing a loader
+from success→error and error→redirect (`tests/development/loader-outcome-changes.spec.ts`);
+a codegen no-op mtime test; and a Node-free production smoke script
+(`scripts/node-free-production-smoke.sh`).
+
+**The complete lifecycle.**
+
+```text
+Go Loader[T] (typed, app-defined)
+  → loader.Bind[T] registration (immutable registry, no execution)
+  → route match (B02/B03 validated paths) → B05 RouteContext snapshot
+  → Registered.Execute (exactly once per matched request)
+  → SSR:  loaderdata.Get[T](ctx) → templ render (never JSON-serialized)
+  → CSR:  encoding/json → initial shell <script> OR envelope "data" (unknown at boundary)
+  → errors/redirects intercepted before render or publication (C05 mapping)
+```
+
+Verified properties (each pinned by a named test): loaders run exactly once per
+request on both response paths; typed data is available to both page and layout
+before render; absent/`null`/value stay distinct end to end; a failing loader
+stops rendering with no partial page or bootstrap payload; redirects are
+validated root-relative only, and a soft-nav redirect lands on the destination
+URL with exactly one history entry; stale envelopes lose races to newer
+navigations (data, URL, and title all commit from the winner only).
+
+**Payload size.** The framework imposes **no payload-size limit** on loader
+results. `encoding/json` streams into the response buffer (no unbounded
+intermediate accumulation beyond the encoder's own buffering), and both
+transport paths (shell embed and envelope field) use the same serialization.
+An application returning unbounded request-derived data can produce very large
+documents — sizing and bounding payloads is the application's responsibility.
+Practical recommendation: aggregate and truncate in the loader (SELECT counts,
+LIMITed lists), not post-hoc. Introducing a framework limit now would be a
+breaking change; it can be revisited if a real memory problem appears. Caching,
+streaming, and prefetching remain out of scope (Phase E or later).
+
+**Known limitations.**
+
+- Reactive loader data in *persistent layouts*: layout components receive no
+  `data` prop; data props belong to pages. A layout wanting per-navigation
+  values reads them from its slot content or the route context.
+- Client disconnects do not cancel server loaders (Fiber v3 / fasthttp does not
+  wire peer disconnect into the request context). The guarantee is that a stale
+  result is never committed client-side, not that the server stops work.
+- `499` is the nginx convention for client-closed-request, not an IANA status;
+  it is emitted as a best-effort terminal status and may not always reach the
+  client.
+- No caching, singleflight, streaming SSR, prefetching, or generated
+  Go→TypeScript types yet. Phase D adds server actions and enhanced forms;
+  Phase E adds the cache layer (TTL, invalidation) on top of this contract.
 
 ## Toolchain requirements
 

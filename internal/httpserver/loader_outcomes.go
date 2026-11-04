@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"go-meta/loader"
@@ -68,12 +69,33 @@ const statusClientClosedRequest = 499
 // redirects: the loader is trusted to choose a destination, but the destination
 // must stay within the origin.
 //
-// Accepted: "/login", "/docs/guide", "/a/b?x=1#top".
+// Accepted: "/login", "/docs/guide", "/a/b?x=1#top", "/search?q=a%20b".
 // Rejected: "" (empty), "login" (relative), "/login/" is fine but "//evil.com"
 // (protocol-relative), "http://x" / "https://x" (absolute), "javascript:..."
 // and other schemes, "/\evil.com" (backslash normalizes to "//evil.com" in
 // browsers), and any value containing a control character (header injection).
+//
+// C06: every shape rule is applied to BOTH the raw value and its
+// percent-decoded form. Browsers decode %XX sequences when resolving the
+// Location header, so a raw value that looks safe can still decode into a
+// dangerous target: "/%2F%2Fevil.com" decodes to "//evil.com" (protocol
+// relative), "/a%5Cb" decodes to a backslash form, and "/x%0D%0Ay" decodes to
+// an embedded CR/LF. Invalid percent escapes ("%zz", trailing "%") are
+// rejected outright — the generator produced a target the client cannot parse
+// unambiguously, so fail closed rather than guess which side wins.
 func validRedirectLocation(loc string) bool {
+	if !validRedirectShape(loc) {
+		return false
+	}
+	decoded, err := url.PathUnescape(loc)
+	if err != nil {
+		return false
+	}
+	return validRedirectShape(decoded)
+}
+
+// validRedirectShape applies the structural rules to one spelling of a target.
+func validRedirectShape(loc string) bool {
 	if loc == "" {
 		return false
 	}
