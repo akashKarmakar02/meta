@@ -4,7 +4,7 @@ import "go-meta/action"
 import "go-meta/formcsrf"
 
 templ Form(state action.FormState) {
- <form method="post" action="/_meta/actions/guestbook.submit" data-go-form="guestbook">
+ <form method="post" action="/_meta/actions/guestbook.submit" data-go-form="guestbook" data-go-meta-enhance>
   @formcsrf.HiddenField()
   if state.Message() != "" {
    <p role="alert">{ state.Message() }</p>

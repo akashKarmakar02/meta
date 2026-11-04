@@ -54,7 +54,9 @@ test('a repeated submission after refresh does not repeat the mutation', async (
   );
 });
 
-test('tampered CSRF token is rejected without executing the action', async ({ page }) => {
+test('tampered CSRF token is rejected without executing the action', async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ javaScriptEnabled: false, baseURL });
+  const page = await context.newPage();
   await page.goto('/guestbook');
   await page.fill('input[name="name"]', 'Attacker');
   await page.fill('textarea[name="message"]', 'Should not persist');
@@ -69,4 +71,5 @@ test('tampered CSRF token is rejected without executing the action', async ({ pa
     page.click('button[type="submit"]'),
   ]);
   await expect(page.locator('body')).toContainText('Invalid CSRF token');
+  await context.close();
 });

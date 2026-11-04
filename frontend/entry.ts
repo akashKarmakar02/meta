@@ -30,6 +30,9 @@ import {
 import { startSoftNavigation, adoptMountedInstances, adoptMountedPage } from './navigation-pipeline';
 import type { NavigationResponse } from './types';
 import { readInitialLoaderData } from './loader-data';
+import { installEnhancedForms } from './enhanced-forms';
+
+installEnhancedForms();
 
 const PageRootSelector = '[data-go-page-root]';
 const RouteIDAttr = 'data-go-route-id';

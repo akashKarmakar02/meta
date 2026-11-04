@@ -1011,3 +1011,42 @@ public HTTPS origin even behind a proxy. Actions should validate before
 irreversible side effects; an error does not roll them back. Successful native
 submissions still use 303 Post/Redirect/Get. D05 remains responsible for
 optional enhanced browser submissions.
+
+### Enhanced native forms (D05)
+
+Add `data-go-meta-enhance` to a standard action form, as in
+`app/guestbookform/form.templ`. With JavaScript unavailable, it continues to
+submit as an ordinary form and uses the D04 HTML feedback and 303 redirect.
+The document-level handler also works for dynamically mounted SSR and Svelte
+forms; no per-component listener is required. Only same-origin POST forms whose
+resolved action is a single valid ID under `/_meta/actions/`, whose encoding is
+`application/x-www-form-urlencoded`, and whose target is the current window
+are enhanced. Submitter overrides are respected. File inputs, image submitters,
+external actions, and unsupported encodings remain native. Browsers lacking
+`FormData(form, submitter)` leave submissions with submitters native.
+
+The browser constructs `FormData` with the actual submitter and converts it
+to `URLSearchParams`, preserving repeated values and the CSRF hidden field.
+It sends a same-origin credentialed POST with `X-Go-Meta-Action: 1` and
+`Accept: application/json`. The header requests a response format; it does not
+replace the trusted-origin or signed double-submit CSRF checks. A successful
+response is `{"ok":true,"redirect":"/guestbook"}` with the registered safe
+destination; a 422 uses the validation JSON described above. Existing JSON
+action clients remain unchanged.
+
+While pending, the form has `aria-busy="true"` and `data-go-meta-pending`;
+additional submits for that form are ignored until the response completes.
+On validation, the client inserts text-only field messages and a form summary,
+sets `aria-invalid`, and appends error IDs to `aria-describedby`. Errors are
+cleared on the next enhanced submission. Form state and requests are isolated;
+removed forms abort their fetch and stale results after navigation are ignored.
+
+Success uses a full-document GET to the registered destination, so it does not
+preserve a mounted client layout instance. A visible destination link is
+provided before navigation as recovery if it cannot start. Neither navigation
+failure nor a network error causes an automatic POST retry. A network error
+cannot establish whether a mutation committed; inspect the destination or
+application state before trying again. Duplicate suppression is per form and
+is not server-side idempotency. D05 does not provide automatic loader
+revalidation, optimistic updates, uploads, or offline retry; D06 remains the
+separate integration and security gate.

@@ -119,6 +119,7 @@ func contentTypeOf(v string) string {
 // The action never runs before every gate passes; the JSON path stays
 // byte-for-byte compatible with D02.
 func dispatchFormAction(c fiber.Ctx, registry *action.Registry, cfg ActionEndpointConfig, id string) error {
+	enhanced := enhancedForm(c)
 	if int64(len(c.Body())) > cfg.MaxBodyBytes {
 		return formErrorPage(c, http.StatusRequestEntityTooLarge, "The submission was too large.")
 	}
@@ -169,23 +170,40 @@ func dispatchFormAction(c fiber.Ctx, registry *action.Registry, cfg ActionEndpoi
 	if derr != nil {
 		var validation *action.ValidationError
 		if errors.As(derr, &validation) && validation != nil {
+			if enhanced {
+				return handleActionError(c, id, derr, false)
+			}
 			return formValidation(c, binding, values, validation, cookieToken)
 		}
-		return handleActionError(c, id, fmt.Errorf("%w: %v", action.ErrInvalidInput, derr), true)
+		return handleActionError(c, id, fmt.Errorf("%w: %v", action.ErrInvalidInput, derr), !enhanced)
 	}
 	route := actionRouteSnapshot(c, id)
 	if _, err = binding.InvokeForm(c.Context(), route, input); err != nil {
 		var validation *action.ValidationError
 		if errors.As(err, &validation) && validation != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			if enhanced {
+				return handleActionError(c, id, err, false)
+			}
 			return formValidation(c, binding, values, validation, cookieToken)
 		}
-		return handleActionError(c, id, err, true)
+		return handleActionError(c, id, err, !enhanced)
 	}
 	// Post/Redirect/Get with the binding's trusted destination. Result values
 	// are not placed in the redirect URL (D04 may extend this).
 	dest := binding.SuccessURL()
 	if loc, ok := validFormRedirectLocation(dest); ok {
 		c.Set(fiber.HeaderCacheControl, "no-store")
+		if enhanced {
+			data, err := json.Marshal(struct {
+				OK       bool   `json:"ok"`
+				Redirect string `json:"redirect"`
+			}{OK: true, Redirect: loc})
+			if err != nil {
+				return actionError(c, http.StatusInternalServerError, "action failed")
+			}
+			c.Set(fiber.HeaderContentType, "application/json")
+			return c.Status(http.StatusOK).Send(data)
+		}
 		return c.Redirect().Status(fiber.StatusSeeOther).To(loc)
 	}
 	log.Printf("go-meta: action %s has invalid redirect target %q", id, dest)
@@ -401,7 +419,14 @@ const csrfFormField = "_csrf"
 // formErrorPage answers a browser-native form failure with a minimal, safe
 // HTML page: static text only, no reflection of user input, no internal
 // details. D04 will add field-level feedback and value preservation.
+func enhancedForm(c fiber.Ctx) bool {
+	return contentTypeOf(c.Get(fiber.HeaderContentType)) == "application/x-www-form-urlencoded" && c.Get("X-Go-Meta-Action") == "1"
+}
+
 func formErrorPage(c fiber.Ctx, status int, msg string) error {
+	if enhancedForm(c) {
+		return actionError(c, status, msg)
+	}
 	c.Set(fiber.HeaderContentType, "text/html; charset=utf-8")
 	c.Set(fiber.HeaderCacheControl, "no-store")
 	body := "<!doctype html><html><head><meta charset=\"utf-8\"><title>Submission failed</title></head>" +
