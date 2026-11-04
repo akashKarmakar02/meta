@@ -26,11 +26,12 @@ import (
 // Calls counts invocations of the demo actions so tests can assert exact
 // execution counts (exactly-once per accepted request, zero on rejections).
 var Calls struct {
-	Create    atomic.Int64
-	Echo      atomic.Int64
-	Fail      atomic.Int64
-	Slow      atomic.Int64
-	Guestbook atomic.Int64
+	Create          atomic.Int64
+	Echo            atomic.Int64
+	Fail            atomic.Int64
+	Slow            atomic.Int64
+	Guestbook       atomic.Int64
+	UpdateCacheDemo atomic.Int64
 }
 
 // Reset zeroes the invocation counters and clears the guestbook demo store
@@ -41,6 +42,7 @@ func Reset() {
 	Calls.Fail.Store(0)
 	Calls.Slow.Store(0)
 	Calls.Guestbook.Store(0)
+	Calls.UpdateCacheDemo.Store(0)
 	guestbookMu.Lock()
 	guestbook = nil
 	guestbookNext.Store(0)
@@ -198,5 +200,6 @@ func Bindings() []action.Binding {
 		action.Bind("demo.fail", Fail),
 		action.Bind("demo.slow", Slow),
 		action.BindForm("guestbook.submit", SubmitGuestbook, DecodeGuestbookForm, "/guestbook").WithFormFeedback([]string{"name", "message"}, guestbookform.Feedback),
+		action.Bind("cache-demo.update", UpdateCacheDemo),
 	}
 }

@@ -1410,3 +1410,92 @@ loader more than once; there is no coalescing, background refresh, or automatic
 action invalidation. E04 handles invalidation orchestration and E05 handles
 singleflight. Cache lookup and encoding can cost more than a cheap loader;
 measure your workload rather than caching by default.
+
+### Invalidation and revalidation (E04)
+
+Applications invalidate explicitly after a mutation commits. The framework
+never guesses which loaders a mutation affects — the action knows which
+entries it touched and invalidates exactly those keys.
+
+Create one `loader.Invalidator` per application store at startup and pass it
+into every `CacheOptions` for that store:
+
+```go
+package example
+
+import (
+    "context"
+
+    "go-meta/cache"
+    "go-meta/loader"
+)
+
+func setup(store cache.Store) (*loader.Invalidator, error) {
+    inv, err := loader.NewInvalidator(store)
+    if err != nil {
+        return nil, err
+    }
+    // Attach inv to every CacheOptions over this store; bindings whose
+    // Invalidator targets a different store are rejected at construction.
+    return inv, nil
+}
+```
+
+An action then commits its mutation first, invalidates second:
+
+```go
+func UpdatePost(_ context.Context, route routecontext.Route, in UpdateInput) (UpdateResult, error) {
+    if in.ID == "" {
+        return UpdateResult{}, fmt.Errorf("action: invalid input")
+    }
+    commitMutation(in.ID, in.Title) // application mutation; nothing has been invalidated yet
+
+    r := routecontext.Route{RouteID: "posts/[id]/page.templ"}
+    r.Params = routeparams.NewParams(map[string]string{"id": in.ID})
+    if err := demoInvalidator.Invalidate(context.Background(), r, "app-v1"); err != nil {
+        // The mutation stays committed — the framework does not roll it back.
+        // The stale entry survives until its TTL expires, or retry (safe).
+        return UpdateResult{}, fmt.Errorf("invalidate: %w", err)
+    }
+    return UpdateResult{OK: true}, nil
+}
+```
+
+`Invalidate` reuses E03's exact identity: same route ID, decoded params,
+query (missing distinct from empty, repeated values ordered) and application
+scope. One tenant's scope is a different key, so no tenant can invalidate
+another's entry by manipulating a query string. Keys can also be precomputed
+with `loader.LoaderCacheKey` and passed to `InvalidateKey`. Query variants are
+deliberately distinct keys — an action that renders `?tab=overview` must
+invalidate that exact variant too if it cached it.
+
+The critical race — a slow fill reading version 1 while an action commits
+version 2 and invalidates, then the fill repopulates version 1 — is fenced:
+each fill registers against the key before reading the store, and its
+`Store.Set` runs inside the same per-key critical section as the
+invalidation's generation advance plus delete. A late fill observes the
+advanced generation and its write is suppressed (`ErrStaleFill` internally;
+the `stale_fill_suppressed` cache event); the request still receives its own
+already-computed result. Fencing requires attaching the invalidator on every
+cached binding over the store; a binding without it is unfenced and outside
+the guarantee (its writes go directly through `Store.Set`). Raw `Store.Set`
+writes outside the loader adapter bypass fencing entirely.
+
+Coordinator state is reference-counted per key and released with the last
+in-flight fill; there is no per-key goroutine, timer, or permanent
+generation map, and unrelated keys never serialize against each other.
+Filling holds the fence's mutex only around a generation check and one store
+call — never across loader execution.
+
+Revalidation is lazy: invalidation removes the entry, and the next matching
+request misses and executes the loader with a fresh TTL. There is no
+background refresh, no stale-while-revalidate, and no automatic browser
+update — an already-mounted Svelte page shows old data until its next
+navigation or reload. Cancellation does not undo a completed invalidation; a
+failed delete still advances the generation (stale fills are suppressed) but
+may leave the entry until expiry — retrying invalidation is safe and
+idempotent. Invalidating a missing key succeeds as a no-op.
+
+E04 does not implement singleflight: concurrent misses after invalidation each
+execute the loader (E05 will coalesce them). Invalidation affects only the
+current process's store — no cross-process or distributed invalidation.

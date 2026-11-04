@@ -45,6 +45,10 @@ const (
 	CacheEncodeError CacheEvent = "encode_error"
 	CacheDeleteError CacheEvent = "delete_error"
 	CacheClosed      CacheEvent = "closed"
+	// E04 events:
+	CacheInvalidated         CacheEvent = "invalidated"
+	CacheInvalidationFailed  CacheEvent = "invalidation_failed"
+	CacheStaleFillSuppressed CacheEvent = "stale_fill_suppressed"
 )
 
 // CacheOptions explicitly configures one loader's cache. Scope must affirm
@@ -58,6 +62,14 @@ type CacheOptions[T any] struct {
 	Scope   func(context.Context, routecontext.Route) (scope string, cacheable bool, err error)
 	Codec   Codec[T]
 	OnEvent func(CacheEvent)
+	// Invalidator (E04, optional) attaches the store's invalidation
+	// coordinator: fills fence their writes against coordinated
+	// invalidations, and Invalidator.Invalidate safely targets this binding.
+	// Without it the binding behaves exactly as E03 (unfenced). Applications
+	// that invalidate MUST attach it on every cached binding over the store:
+	// a binding without it stays outside the stale-fill guarantee. The
+	// invalidator's store must equal Store; NewRegistry rejects a mismatch.
+	Invalidator *Invalidator
 }
 
 var ErrInvalidCacheConfig = errors.New("loader: invalid cache configuration")
@@ -114,6 +126,13 @@ func BindCached[T any](routeID string, load Loader[T], opts CacheOptions[T]) Bin
 		binding.configErr = fmt.Errorf("%w: %w", ErrInvalidCacheConfig, err)
 		return binding
 	}
+	// E04: an attached invalidator must coordinate the very same store this
+	// binding writes to; a mismatch would fence some writes while invalidations
+	// deleted from elsewhere — rejected at construction.
+	if opts.Invalidator != nil && opts.Invalidator.store != opts.Store {
+		binding.configErr = fmt.Errorf("%w: cache options attach an invalidator built for a different store", ErrInvalidCacheConfig)
+		return binding
+	}
 	emit := func(event CacheEvent) {
 		if opts.OnEvent != nil {
 			opts.OnEvent(event)
@@ -140,6 +159,19 @@ func BindCached[T any](routeID string, load Loader[T], opts CacheOptions[T]) Bin
 		key, err := LoaderCacheKey(route, scope)
 		if err != nil {
 			return nil, fmt.Errorf("loader: cache key: %w", err)
+		}
+		// E04 fencing: register this fill before reading the store. An
+		// invalidation completing while the fill is in flight advances the
+		// generation; the fill's later write observes it and is suppressed
+		// instead of repopulating stale data. The reference is held across
+		// loader execution and released when the fill finishes.
+		var (
+			fillKF  *keyFence
+			fillGen uint64
+		)
+		if opts.Invalidator != nil {
+			fillKF, fillGen = opts.Invalidator.fence.beginFill(key)
+			defer opts.Invalidator.fence.release(fillKF)
 		}
 		entry, hit, err := opts.Store.Get(ctx, key)
 		if ctx.Err() != nil {
@@ -201,7 +233,20 @@ func BindCached[T any](routeID string, load Loader[T], opts CacheOptions[T]) Bin
 			emit(CacheEncodeError)
 			return value, nil
 		}
-		err = opts.Store.Set(ctx, key, cache.Entry{Value: encoded}, opts.Policy)
+		// E04 fenced write: the generation check and the Set share one
+		// critical section with invalidation's advance+delete section on the
+		// same key fence. A fenced fill whose write was suppressed by an
+		// invalidation returns ErrStaleFill; the loader's result is still
+		// served to this request.
+		if opts.Invalidator != nil {
+			err = opts.Invalidator.fence.storeIfCurrent(fillKF, fillGen, ctx, opts.Store, key, cache.Entry{Value: encoded}, opts.Policy)
+			if errors.Is(err, ErrStaleFill) {
+				emit(CacheStaleFillSuppressed)
+				return value, nil
+			}
+		} else {
+			err = opts.Store.Set(ctx, key, cache.Entry{Value: encoded}, opts.Policy)
+		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}

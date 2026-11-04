@@ -142,7 +142,14 @@ func main() {
 		log.Fatalf("cache configuration: %v", err)
 	}
 	defer demoCache.Close()
-	bindings := append(loaders.Bindings(), loaders.CachedDemoBindings(demoCache)...)
+	// E04: one invalidator coordinates this store; every cached binding over
+	// it attaches the same invalidator (enforced at registry construction).
+	demoInvalidator, err := loader.NewInvalidator(demoCache)
+	if err != nil {
+		log.Fatalf("cache invalidator: %v", err)
+	}
+	actions.DemoInvalidator = demoInvalidator
+	bindings := append(loaders.Bindings(), loaders.CachedDemoBindings(demoCache, demoInvalidator)...)
 	registry, err := newLoaderRegistry(bindings)
 	if err != nil {
 		log.Fatalf("loader registration: %v", err)
