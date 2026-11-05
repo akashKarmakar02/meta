@@ -104,7 +104,7 @@ func devgen(root string, out, errW io.Writer) error {
 		needs.routes = true
 	}
 	if needs.routes {
-		if err := runTool(out, errW, root, "go", "run", "./cmd/routegen"); err != nil {
+		if err := runTool(out, errW, root, "go", "run", "github.com/akashKarmakar02/meta/cmd/routegen"); err != nil {
 			return fmt.Errorf("devgen: route generation failed: %w", err)
 		}
 	}

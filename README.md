@@ -31,6 +31,32 @@ Package-local `//go:embed` assets in dynamic templ packages are not yet staged.
 Run `make generate` rather than invoking `templ generate` directly, so generated
 Go is kept out of bracket-named source directories.
 
+## Public route descriptors
+
+Generated Go route bindings use `github.com/akashKarmakar02/meta/routing`.
+It exposes `Route`, `Layout`, `RenderMode`, `ModeSSR`, and `ModeCSR`, as
+well as `NewRoute` and `NewLayout` for constructing validated descriptors.
+The constructors perform basic validation; route discovery and URL
+normalization remain separate. `NewRoute` copies its input layout slice.
+The fields and JSON names match the route descriptors used by the runtime.
+
+The route generator reads the consumer module path from `go.mod`, so generated
+page and layout imports use that project’s module. From a project that depends
+on meta and has templ configured as a Go tool, run:
+
+```bash
+go tool templ generate -ignore-pattern '[/\\]app[/\\].*\[|[/\\]generated[/\\]routepages[/\\]'
+go run github.com/akashKarmakar02/meta/cmd/routegen
+```
+
+The generator expects `app/` under the module root by default, and writes the
+route registry into `generated/` and `frontend/`. It also accepts an app
+directory and module-root output directory as positional arguments; the app
+directory must be inside that module root. Dynamic templ packages are compiled
+into `generated/routepages/`, without creating Go files under bracket-named
+route directories. A public application runtime and `meta init` are separate
+work; generation alone does not create a runnable independent application.
+
 ## Request route context
 
 In templ rendering, `github.com/akashKarmakar02/meta/routecontext` exposes the matched source-derived

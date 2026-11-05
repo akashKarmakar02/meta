@@ -34,6 +34,10 @@ func main() {
 }
 
 func run(appDir, outDir string) error {
+	modulePath, appImportDir, err := codegen.ProjectImports(appDir, outDir)
+	if err != nil {
+		return err
+	}
 	fsys := os.DirFS(appDir)
 
 	routes, err := routing.Discover(fsys)
@@ -51,11 +55,11 @@ func run(appDir, outDir string) error {
 		return fmt.Errorf("generate dynamic templ packages: %w", err)
 	}
 
-	if err := codegen.WriteRoutesFile(outDir, manifest); err != nil {
+	if err := codegen.WriteRoutesFileForProject(outDir, manifest, modulePath, appImportDir); err != nil {
 		return err
 	}
 
-	if err := codegen.WriteRouteRegistryTS(outDir, manifest); err != nil {
+	if err := codegen.WriteRouteRegistryTSForProject(outDir, manifest, appImportDir); err != nil {
 		return err
 	}
 	if err := codegen.CleanDynamicPackages(outDir, packages); err != nil {

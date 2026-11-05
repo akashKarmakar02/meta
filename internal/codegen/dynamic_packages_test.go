@@ -24,7 +24,7 @@ func TestDynamicPackagesCompileAndReconcile(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, name := range []string{"go.mod", "go.sum", "internal/routing/schema.go"} {
+	for _, name := range []string{"go.mod", "go.sum", "routing/schema.go"} {
 		data, err := os.ReadFile(filepath.Join("../..", filepath.FromSlash(name)))
 		if err != nil {
 			t.Fatal(err)
