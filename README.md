@@ -6,9 +6,9 @@ soft navigation.
 
 The Go module is `github.com/akashKarmakar02/meta`. This is an early
 pre-release: its APIs can change. To add a specific release to an existing
-Go module, run `go get github.com/akashKarmakar02/meta@v0.1.0-alpha.2`.
+Go module, run `go get github.com/akashKarmakar02/meta@v0.1.0-alpha.3`.
 Install the matching CLI with
-`go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-alpha.2`.
+`go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-alpha.3`.
 
 The implementation plan lives in [`phase1-implementation-blueprint.md`](phase1-implementation-blueprint.md).
 
@@ -65,7 +65,7 @@ Install the CLI as shown above, make sure your Go binary directory is on
 ```sh
 meta init my-app
 cd my-app
-make setup
+meta setup
 meta dev
 ```
 
@@ -73,7 +73,9 @@ meta dev
 page, the browser runtime, and build/dev configuration. It does not install
 dependencies or overwrite an existing directory. The default module path is
 `example.com/my-app`; use `--module github.com/you/my-app` to choose another.
-Go 1.26.10+, Node/npm, Make, and Air are required for development. The
+Go 1.26.10+, Node/npm, and Air are required for development. Run `meta generate`
+to regenerate source files, or `meta build` to generate and build the production
+server and assets in `bin/app` and `dist/client`. The
 production build is Go plus prebuilt assets and does not need Node.
 
 An unreleased development build of the CLI uses a local framework checkout;

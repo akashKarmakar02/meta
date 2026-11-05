@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"runtime/debug"
 )
 
 // Version is the single authoritative CLI version. Development builds
@@ -78,7 +79,15 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	if showVersion {
 		// Help and version answer without touching the filesystem, so
 		// they work outside any project directory.
-		fmt.Fprintf(ctx.Stdout, "meta version %s\n", Version)
+		version := Version
+		if version == "dev" {
+			if info, ok := debug.ReadBuildInfo(); ok {
+				if published := releaseBuildVersion(info); published != "" {
+					version = published
+				}
+			}
+		}
+		fmt.Fprintf(ctx.Stdout, "meta version %s\n", version)
 		return exitSuccess
 	}
 	if showHelp {
@@ -143,11 +152,14 @@ Usage:
   meta [flags] <command> [arguments]
 
 Commands:
-  dev    Start the development server (orchestrates Go, templ, and Vite)
-  init   Create a new meta project
-  help   Show this help, or help for a command
+  init      Create a new meta project
+  setup     Install project dependencies
+  dev       Start the development server
+  generate  Generate templates and routes
+  build     Build the production application
+  help      Show this help, or help for a command
 
-Available in later phases: build, start, generate, check.
+Available in later phases: start, check.
 
 Flags:
   -h, --help          Show this help

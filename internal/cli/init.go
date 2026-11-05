@@ -33,7 +33,7 @@ Usage:
 The default module path is example.com/<directory-name>. --framework-dir is
 for development of meta itself: it uses that local checkout via go.mod replace.
 The destination must not already exist. Dependencies are installed separately
-with make setup; meta init does not access the network.
+with meta setup; meta init does not access the network.
 `,
 		Run: runInit,
 	})
@@ -146,7 +146,7 @@ func runInit(ctx *Context, args []string) error {
 			return fmt.Errorf("meta init: incomplete project at %s: %w", dest, closeErr)
 		}
 	}
-	fmt.Fprintf(ctx.Stdout, "Created meta project %s (module %s).\n\nNext:\n  cd %s\n  make setup\n  meta dev\n", dest, modulePath, "'"+strings.ReplaceAll(dest, "'", "'\\''")+"'")
+	fmt.Fprintf(ctx.Stdout, "Created meta project %s (module %s).\n\nNext:\n  cd %s\n  meta setup\n  meta dev\n", dest, modulePath, "'"+strings.ReplaceAll(dest, "'", "'\\''")+"'")
 	if replacement != "" {
 		fmt.Fprintln(ctx.Stdout, "Using a local framework checkout; remove the go.mod replace before publishing your application.")
 	}

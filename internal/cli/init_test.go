@@ -21,10 +21,13 @@ func TestInitCreatesIndependentProject(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}
-	for _, name := range []string{"go.mod", ".air.toml", "app/page.templ", "app/dashboard/page.svelte", "cmd/app/main.go", "frontend/entry.ts", "frontend/router.ts", "Makefile"} {
+	for _, name := range []string{"go.mod", ".air.toml", "app/page.templ", "app/dashboard/page.svelte", "cmd/app/main.go", "frontend/entry.ts", "frontend/router.ts"} {
 		if _, err := os.Stat(filepath.Join(dest, name)); err != nil {
 			t.Errorf("missing %s: %v", name, err)
 		}
+	}
+	if _, err := os.Stat(filepath.Join(dest, "Makefile")); !os.IsNotExist(err) {
+		t.Fatal("generated project must not contain a Makefile")
 	}
 	mod, err := os.ReadFile(filepath.Join(dest, "go.mod"))
 	if err != nil {
