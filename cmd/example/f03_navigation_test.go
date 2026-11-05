@@ -10,7 +10,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"go-meta/internal/httpserver"
+	"github.com/akashKarmakar02/meta/internal/httpserver"
 )
 
 // F03: CSR routes return navigation envelopes on the navigation request:

@@ -6,7 +6,7 @@ import (
 	"image"
 	"testing"
 
-	"go-meta/internal/imageprocessor"
+	"github.com/akashKarmakar02/meta/internal/imageprocessor"
 )
 
 // imageDecodeDims decodes a WebP response body through the native decoder.

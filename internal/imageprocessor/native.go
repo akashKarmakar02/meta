@@ -85,8 +85,8 @@ import (
 	"image/png"
 	"sync"
 
-	"go-meta/imageopt"
-	"go-meta/imageproc"
+	"github.com/akashKarmakar02/meta/imageopt"
+	"github.com/akashKarmakar02/meta/imageproc"
 )
 
 // Native is the production Processor over libwebp + libavif.

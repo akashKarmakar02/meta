@@ -12,8 +12,8 @@ import (
 	"context"
 	"fmt"
 
-	"go-meta/imageopt"
-	"go-meta/imageproc"
+	"github.com/akashKarmakar02/meta/imageopt"
+	"github.com/akashKarmakar02/meta/imageproc"
 )
 
 // Native satisfies imageproc.Processor in untagged builds, but every

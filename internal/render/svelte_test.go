@@ -8,7 +8,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"go-meta/internal/routing"
+	"github.com/akashKarmakar02/meta/internal/routing"
 )
 
 // newTestApp wires a handler into a bare Fiber app for handler tests.

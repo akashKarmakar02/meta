@@ -19,7 +19,7 @@ func TestPhaseEPublicAPIFromAnotherModule(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	module := "module example.test/consumer\n\ngo 1.26.3\n\nrequire go-meta v0.0.0\nreplace go-meta => " + strconv.Quote(root) + "\n"
+	module := "module example.test/consumer\n\ngo 1.26.10\n\nrequire github.com/akashKarmakar02/meta v0.0.0\nreplace github.com/akashKarmakar02/meta => " + strconv.Quote(root) + "\n"
 	source := `package consumer
 
 import (
@@ -28,10 +28,10 @@ import (
 	"testing"
 	"time"
 
-	"go-meta/cache"
-	"go-meta/loader"
-	"go-meta/routecontext"
-	"go-meta/routeparams"
+	"github.com/akashKarmakar02/meta/cache"
+	"github.com/akashKarmakar02/meta/loader"
+	"github.com/akashKarmakar02/meta/routecontext"
+	"github.com/akashKarmakar02/meta/routeparams"
 )
 
 type post struct {

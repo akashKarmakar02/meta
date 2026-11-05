@@ -7,10 +7,10 @@ import (
 	"context"
 	"fmt"
 
-	"go-meta/app/loaders"
-	"go-meta/loader"
-	"go-meta/routecontext"
-	"go-meta/routeparams"
+	"github.com/akashKarmakar02/meta/app/loaders"
+	"github.com/akashKarmakar02/meta/loader"
+	"github.com/akashKarmakar02/meta/routecontext"
+	"github.com/akashKarmakar02/meta/routeparams"
 )
 
 // DemoInvalidator is set by main before registry construction; the update

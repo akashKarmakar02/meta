@@ -1,8 +1,13 @@
-# go-meta
+# meta
 
 A Go-first full-stack web framework. Phase 1 scope: file routing, server
 rendering (templ), client rendering (Svelte 5 islands), layout ownership, and
 soft navigation.
+
+The Go module is `github.com/akashKarmakar02/meta`. This is an early
+pre-release: its APIs can change. To add a specific release to an existing
+Go module, run `go get github.com/akashKarmakar02/meta@v0.1.0-alpha.1`.
+The `meta init` project generator is not yet implemented.
 
 The implementation plan lives in [`phase1-implementation-blueprint.md`](phase1-implementation-blueprint.md).
 
@@ -28,11 +33,11 @@ Go is kept out of bracket-named source directories.
 
 ## Request route context
 
-In templ rendering, `go-meta/routecontext` exposes the matched source-derived
+In templ rendering, `github.com/akashKarmakar02/meta/routecontext` exposes the matched source-derived
 route ID, declared pattern, B04 typed parameters, and query values:
 
 ```templ
-import "go-meta/routecontext"
+import "github.com/akashKarmakar02/meta/routecontext"
 
 templ Page() {
     {{ route, _ := routecontext.FromContext(ctx) }}
@@ -122,7 +127,7 @@ in single-segment parameters.
 
 ## Server-side loader contract (C01)
 
-`go-meta/loader` defines `Loader[T]`, a synchronous function receiving a
+`github.com/akashKarmakar02/meta/loader` defines `Loader[T]`, a synchronous function receiving a
 standard `context.Context` and the matched `routecontext.Route`, and
 `loader.Execute`, which invokes it explicitly and returns the same typed value
 and error. For example:
@@ -130,8 +135,8 @@ and error. For example:
 ```go
 import (
     "context"
-    "go-meta/loader"
-    "go-meta/routecontext"
+    "github.com/akashKarmakar02/meta/loader"
+    "github.com/akashKarmakar02/meta/routecontext"
 )
 
 type User struct { ID int64; Tab string; Tags []string }
@@ -184,8 +189,8 @@ package loaders
 
 import (
     "context"
-    "go-meta/loader"
-    "go-meta/routecontext"
+    "github.com/akashKarmakar02/meta/loader"
+    "github.com/akashKarmakar02/meta/routecontext"
 )
 
 type UserData struct { ID int64 `json:"id"` }
@@ -236,7 +241,7 @@ available to the templ page and layout. CSR routes are not touched: a registered
 CSR loader is never executed by C03 (that is C04).
 
 A loader is defined and registered exactly as in C02. The result reaches templ
-through the `go-meta/loaderdata` package, which mirrors `routeparams` and
+through the `github.com/akashKarmakar02/meta/loaderdata` package, which mirrors `routeparams` and
 `routecontext`: a private context key, no Fiber or fasthttp dependency, and a
 strongly typed read.
 
@@ -247,8 +252,8 @@ package posts
 import (
     "fmt"
 
-    "go-meta/app/loaders"
-    "go-meta/loaderdata"
+    "github.com/akashKarmakar02/meta/app/loaders"
+    "github.com/akashKarmakar02/meta/loaderdata"
 )
 
 templ Page() {
@@ -556,7 +561,7 @@ streaming, and prefetching remain out of scope (Phase E or later).
 A **server action** is an application-defined *mutation* with typed input and
 output. It is deliberately not a loader: a loader reads data for a rendering
 request; an action changes application state on an explicit request. D01
-defines only the Go contract — the `go-meta/action` package. Nothing in D01
+defines only the Go contract — the `github.com/akashKarmakar02/meta/action` package. Nothing in D01
 exposes actions over HTTP, registers them anywhere, or executes them outside an
 explicit `action.Execute` call.
 
@@ -566,8 +571,8 @@ package app
 import (
     "context"
 
-    "go-meta/action"
-    "go-meta/routecontext"
+    "github.com/akashKarmakar02/meta/action"
+    "github.com/akashKarmakar02/meta/routecontext"
 )
 
 type CreatePostInput struct {
@@ -804,7 +809,7 @@ multi-value slices via `values["tags"]`.
 ### CSRF protection
 
 Forms carry a double-submit HMAC token. The `formcsrf.Manager` (public
-package `go-meta/formcsrf`) issues expiring tokens signed with a server
+package `github.com/akashKarmakar02/meta/formcsrf`) issues expiring tokens signed with a server
 secret; `httpserver.WithFormCSRF` mounts issuance on page GETs, storing the
 token in request context where `formcsrf.HiddenField()` renders it as a
 hidden form input. The action endpoint rejects any form whose `_csrf` field
@@ -834,7 +839,7 @@ The D02 JSON success and generic-error contracts are unchanged; structured valid
 
 ## Toolchain requirements
 
-- **Go 1.26+** is required. The Fiber v3 documentation lists Go 1.26 as the
+- **Go 1.26.10+** is required. The Fiber v3 documentation lists Go 1.26 as the
   minimum version; `go.mod` targets Go 1.26.
 - **Node.js / npm** is allowed **only for development and build** (Vite, Svelte,
   TypeScript checks). It is never part of the production runtime: the server is
@@ -847,7 +852,7 @@ The D02 JSON success and generic-error contracts are unchanged; structured valid
 
 ### Requirements
 
-- Go 1.26+ (`go version`) — module toolchain per `go.mod`.
+- Go 1.26.10+ (`go version`) — module toolchain per `go.mod`.
 - Node.js with npm (for Vite/Svelte HMR in development only).
 - [Air](https://github.com/air-verse/air) for Go hot reload:
   `go install github.com/air-verse/air@latest`
@@ -1100,8 +1105,8 @@ remain future roadmap work (Phases E/G).
 
 ## Cache contracts and policies (E01)
 
-Phase E adds caching to go-meta. E01 ships the *contract* only: the public
-`go-meta/cache` package defines keys, entries, TTL policies, error categories,
+Phase E adds caching to meta. E01 ships the *contract* only: the public
+`github.com/akashKarmakar02/meta/cache` package defines keys, entries, TTL policies, error categories,
 and the `Store` interface. **No storage engine exists yet** — nothing in the
 framework caches anything, no loader or action behavior changed, and building
 this package adds no runtime component. E02 will implement the bounded
@@ -1111,7 +1116,7 @@ invalidation; E05 adds singleflight miss coalescing.
 ### Public package
 
 ```go
-import "go-meta/cache"
+import "github.com/akashKarmakar02/meta/cache"
 
 key, err := cache.NewKey("loader:user-profile", "42", "tab=posts")
 policy := cache.Policy{TTL: 5 * time.Minute}
@@ -1227,7 +1232,7 @@ E02 implements the E01 `cache.Store` contract as a bounded, concurrency-safe
 in-memory cache: `cache.Memory`, constructed with `cache.NewMemory`.
 
 ```go
-import "go-meta/cache"
+import "github.com/akashKarmakar02/meta/cache"
 
 store, err := cache.NewMemory(cache.MemoryConfig{
     MaxEntries:    10000,             // live-entry bound
@@ -1337,9 +1342,9 @@ import (
     "context"
     "time"
 
-    "go-meta/cache"
-    "go-meta/loader"
-    "go-meta/routecontext"
+    "github.com/akashKarmakar02/meta/cache"
+    "github.com/akashKarmakar02/meta/loader"
+    "github.com/akashKarmakar02/meta/routecontext"
 )
 
 type Post struct { Title string `json:"title"` }
@@ -1426,8 +1431,8 @@ package example
 import (
     "context"
 
-    "go-meta/cache"
-    "go-meta/loader"
+    "github.com/akashKarmakar02/meta/cache"
+    "github.com/akashKarmakar02/meta/loader"
 )
 
 func setup(store cache.Store) (*loader.Invalidator, error) {
@@ -1615,7 +1620,7 @@ are in the E06 commit message. No other performance rewrites were made.
 
 ### Image optimization contract (F01)
 
-`go-meta/imageopt` defines requests; it does **not** resolve, fetch, decode,
+`github.com/akashKarmakar02/meta/imageopt` defines requests; it does **not** resolve, fetch, decode,
 resize, encode, or cache images. The reserved `GET /_meta/image` validates
 requests and currently answers `501 Not Implemented` for valid ones. Invalid
 queries return `400`; other methods return `405` with `Allow: GET, HEAD`.
@@ -1637,7 +1642,7 @@ import (
     "fmt"
     "log"
 
-    "go-meta/imageopt"
+    "github.com/akashKarmakar02/meta/imageopt"
 )
 
 func main() {
@@ -1737,7 +1742,7 @@ Candidates evaluated:
    decode and encode use the Go standard library. The binding is ~150 lines of
    first-party cgo — smaller than adopting an unmaintained third-party wrapper.
 
-Go 1.26.3 preserved; no go.mod changes required for the default build.
+At that stage, Go 1.26.3 was used; current minimums are listed above.
 
 ### Packages
 
@@ -2204,7 +2209,7 @@ the Phase E loader cache and does not use it.
 Off by default. The example server enables it with:
 
 ```bash
-GO_META_IMAGE_CACHE_DIR=/var/cache/go-meta/images ./bin/example-native
+GO_META_IMAGE_CACHE_DIR=/var/cache/github.com/akashKarmakar02/meta/images ./bin/example-native
 # optional bounds (defaults shown):
 GO_META_IMAGE_CACHE_MAX_TOTAL=268435456   # 256 MiB total
 GO_META_IMAGE_CACHE_MAX_ENTRIES=4096      # entry count bound
@@ -2215,7 +2220,7 @@ Direct API use compiles without native tags:
 
 ```go
 cache, err := imagecache.Open(imagecache.Config{
-    Dir:           "/var/cache/go-meta/images",
+    Dir:           "/var/cache/github.com/akashKarmakar02/meta/images",
     MaxTotalBytes: 256 << 20,
     MaxEntries:    4096,
     MaxEntryBytes: 64 << 20,

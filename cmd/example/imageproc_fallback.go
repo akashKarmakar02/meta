@@ -11,8 +11,8 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"go-meta/imageproc"
-	"go-meta/internal/httpserver"
+	"github.com/akashKarmakar02/meta/imageproc"
+	"github.com/akashKarmakar02/meta/internal/httpserver"
 )
 
 func mountImage(fapp *fiber.App) {

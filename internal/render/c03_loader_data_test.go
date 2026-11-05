@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"go-meta/loaderdata"
-	"go-meta/routecontext"
-	"go-meta/routeparams"
+	"github.com/akashKarmakar02/meta/loaderdata"
+	"github.com/akashKarmakar02/meta/routecontext"
+	"github.com/akashKarmakar02/meta/routeparams"
 )
 
 // TestLoaderDataCoexistsWithRouteContextAndParams proves a single templ

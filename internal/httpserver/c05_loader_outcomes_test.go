@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"go-meta/loader"
+	"github.com/akashKarmakar02/meta/loader"
 )
 
 // C05: the error classifier must map every loader outcome to exactly one

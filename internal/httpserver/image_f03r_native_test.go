@@ -18,9 +18,9 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"go-meta/imageopt"
-	"go-meta/imageproc"
-	"go-meta/internal/imageprocessor"
+	"github.com/akashKarmakar02/meta/imageopt"
+	"github.com/akashKarmakar02/meta/imageproc"
+	"github.com/akashKarmakar02/meta/internal/imageprocessor"
 )
 
 // F03R native HTTP tests: the real processor over the real resolver at the

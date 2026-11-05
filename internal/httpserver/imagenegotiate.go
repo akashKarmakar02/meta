@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"go-meta/imageopt"
-	"go-meta/imageproc"
+	"github.com/akashKarmakar02/meta/imageopt"
+	"github.com/akashKarmakar02/meta/imageproc"
 )
 
 // Accept-header format negotiation for f=auto (F03 §17–20).

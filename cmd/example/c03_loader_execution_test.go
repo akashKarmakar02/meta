@@ -12,9 +12,9 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"go-meta/app/loaders"
-	"go-meta/loader"
-	"go-meta/routecontext"
+	"github.com/akashKarmakar02/meta/app/loaders"
+	"github.com/akashKarmakar02/meta/loader"
+	"github.com/akashKarmakar02/meta/routecontext"
 )
 
 // getBody issues a request against app and returns the status and body.

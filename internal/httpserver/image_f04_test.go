@@ -16,8 +16,8 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"go-meta/imageopt"
-	"go-meta/imageproc"
+	"github.com/akashKarmakar02/meta/imageopt"
+	"github.com/akashKarmakar02/meta/imageproc"
 )
 
 // F04 HTTP security regressions: method behavior, special files over

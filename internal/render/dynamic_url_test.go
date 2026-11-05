@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/akashKarmakar02/meta/internal/httpserver"
+	"github.com/akashKarmakar02/meta/internal/routing"
 	"github.com/gofiber/fiber/v3"
-	"go-meta/internal/httpserver"
-	"go-meta/internal/routing"
 )
 
 func TestDynamicCSRUsesConcreteEscapedURL(t *testing.T) {

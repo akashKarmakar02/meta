@@ -18,10 +18,10 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"go-meta/action"
-	"go-meta/formcsrf"
-	"go-meta/routecontext"
-	"go-meta/routeparams"
+	"github.com/akashKarmakar02/meta/action"
+	"github.com/akashKarmakar02/meta/formcsrf"
+	"github.com/akashKarmakar02/meta/routecontext"
+	"github.com/akashKarmakar02/meta/routeparams"
 )
 
 // ActionsPrefix is the framework-owned endpoint namespace for action dispatch.

@@ -9,7 +9,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"go-meta/internal/httpserver"
+	"github.com/akashKarmakar02/meta/internal/httpserver"
 )
 
 // navGet issues a GET with the navigation header, returning status, body, and content type.

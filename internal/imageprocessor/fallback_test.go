@@ -7,8 +7,8 @@ import (
 	"errors"
 	"testing"
 
-	"go-meta/imageopt"
-	"go-meta/imageproc"
+	"github.com/akashKarmakar02/meta/imageopt"
+	"github.com/akashKarmakar02/meta/imageproc"
 )
 
 // TestFallbackBuildFailsClosed: without the build tag, New reports

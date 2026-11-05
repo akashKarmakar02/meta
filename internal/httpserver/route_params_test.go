@@ -8,8 +8,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/akashKarmakar02/meta/internal/routing"
 	"github.com/gofiber/fiber/v3"
-	"go-meta/internal/routing"
 )
 
 func TestRouteParamsAndPathSafety(t *testing.T) {

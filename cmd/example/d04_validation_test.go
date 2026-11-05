@@ -11,11 +11,11 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"go-meta/action"
-	appactions "go-meta/app/actions"
-	"go-meta/app/guestbookform"
-	"go-meta/formcsrf"
-	"go-meta/routecontext"
+	"github.com/akashKarmakar02/meta/action"
+	appactions "github.com/akashKarmakar02/meta/app/actions"
+	"github.com/akashKarmakar02/meta/app/guestbookform"
+	"github.com/akashKarmakar02/meta/formcsrf"
+	"github.com/akashKarmakar02/meta/routecontext"
 )
 
 func TestD04NativeFeedbackAndResubmit(t *testing.T) {

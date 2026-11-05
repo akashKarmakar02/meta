@@ -196,7 +196,7 @@ func TestDevGenNoOpSkipsTools(t *testing.T) {
 	// output present and consistent: devgen must exit without running any
 	// tools.
 	writeFixtureFile(t, filepath.Join(root, "app", "page.templ"), "old", past())
-	writeRoutesGen(t, root, []string{"go-meta/app"}) // consistent with tree
+	writeRoutesGen(t, root, []string{"github.com/akashKarmakar02/meta/app"}) // consistent with tree
 	writeMarker(t, root)
 	manifest, err := routeManifest(root)
 	if err != nil {
@@ -243,7 +243,7 @@ func TestDevGenRecoversFromDeletedRouteDir(t *testing.T) {
 	// A stale route reference: generated output imports app/gone, which
 	// has no sources on disk.
 	writeFixtureFile(t, filepath.Join(root, "app", "page.templ"), "src", past())
-	writeRoutesGen(t, root, []string{"go-meta/app", "go-meta/app/gone"})
+	writeRoutesGen(t, root, []string{"github.com/akashKarmakar02/meta/app", "github.com/akashKarmakar02/meta/app/gone"})
 	writeMarker(t, root)
 
 	var stdout, stderr bytes.Buffer

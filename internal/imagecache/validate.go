@@ -3,7 +3,7 @@ package imagecache
 import (
 	"bytes"
 
-	"go-meta/imageopt"
+	"github.com/akashKarmakar02/meta/imageopt"
 )
 
 // Integrity strategy (§25), stated honestly:

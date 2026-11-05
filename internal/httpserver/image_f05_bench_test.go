@@ -15,9 +15,9 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"go-meta/imageopt"
-	"go-meta/internal/imagecache"
-	"go-meta/internal/imageprocessor"
+	"github.com/akashKarmakar02/meta/imageopt"
+	"github.com/akashKarmakar02/meta/internal/imagecache"
+	"github.com/akashKarmakar02/meta/internal/imageprocessor"
 )
 
 func benchServer(b *testing.B) (*fiber.App, string) {

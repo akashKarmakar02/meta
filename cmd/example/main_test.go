@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/akashKarmakar02/meta/generated"
+	"github.com/akashKarmakar02/meta/internal/httpserver"
 	"github.com/gofiber/fiber/v3"
-	"go-meta/generated"
-	"go-meta/internal/httpserver"
 )
 
 // --- existing tests (restored) ---

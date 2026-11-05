@@ -5,7 +5,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"go-meta/formcsrf"
+	"github.com/akashKarmakar02/meta/formcsrf"
 )
 
 // WithFormCSRF issues the double-submit CSRF material for browser-native form

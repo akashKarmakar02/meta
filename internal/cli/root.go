@@ -13,7 +13,7 @@ import (
 // Version is the single authoritative CLI version. Development builds
 // report "dev"; release builds override it with
 //
-//	go build -ldflags "-X go-meta/internal/cli.Version=<semver>"
+//	go build -ldflags "-X github.com/akashKarmakar02/meta/internal/cli.Version=<semver>"
 var Version = "dev"
 
 // Exit codes are centralized here, at the executable boundary: command
@@ -137,7 +137,7 @@ func reportError(ctx *Context, err error) int {
 }
 
 func writeRootUsage(w io.Writer) {
-	fmt.Fprint(w, `meta is the command-line tool for go-meta projects.
+	fmt.Fprint(w, `meta is the command-line tool for meta projects.
 
 Usage:
   meta [flags] <command> [arguments]
@@ -153,7 +153,7 @@ Flags:
       --version       Show version information
       --dir <path>    Project root directory (skips discovery from the
                       working directory; the directory must be a valid
-                      go-meta project)
+                      meta project)
 
 Run 'meta help <command>' for command details.
 `)

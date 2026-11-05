@@ -5,9 +5,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/akashKarmakar02/meta/internal/routing"
+	"github.com/akashKarmakar02/meta/routeparams"
 	"github.com/gofiber/fiber/v3"
-	"go-meta/internal/routing"
-	"go-meta/routeparams"
 )
 
 // B04: the typed parameter API is reachable from the actual render context.

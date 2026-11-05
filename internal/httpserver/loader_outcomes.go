@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"strings"
 
-	"go-meta/loader"
+	"github.com/akashKarmakar02/meta/loader"
 )
 
 // loaderOutcomeClass names how a loader error maps to an HTTP response.

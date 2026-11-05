@@ -18,9 +18,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"go-meta/action"
-	"go-meta/app/guestbookform"
-	"go-meta/routecontext"
+	"github.com/akashKarmakar02/meta/action"
+	"github.com/akashKarmakar02/meta/app/guestbookform"
+	"github.com/akashKarmakar02/meta/routecontext"
 )
 
 // Calls counts invocations of the demo actions so tests can assert exact

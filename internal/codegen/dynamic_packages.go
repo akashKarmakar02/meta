@@ -10,7 +10,7 @@ import (
 	"slices"
 	"strings"
 
-	"go-meta/internal/routing"
+	"github.com/akashKarmakar02/meta/internal/routing"
 )
 
 // GenerateDynamicPackages compiles templ files from dynamic source packages in

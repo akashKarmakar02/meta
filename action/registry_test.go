@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"go-meta/routecontext"
+	"github.com/akashKarmakar02/meta/routecontext"
 )
 
 func regRoute() routecontext.Route { return routecontext.Route{} }

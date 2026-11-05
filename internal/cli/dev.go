@@ -382,7 +382,7 @@ func runDevWith(c *Context, deps devDeps) error {
 		return perr
 	}
 
-	fmt.Fprint(c.Stdout, "go-meta development\n\n")
+	fmt.Fprint(c.Stdout, "meta development\n\n")
 	fmt.Fprintf(c.Stdout, "Project:    %s\n", root)
 	fmt.Fprintf(c.Stdout, "Local:      http://localhost:%s\n", publicPort)
 	fmt.Fprint(c.Stdout, "\n")

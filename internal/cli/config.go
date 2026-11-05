@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 )
 
-// projectRoot resolves the go-meta project root for the invocation.
+// projectRoot resolves the meta project root for the invocation.
 //
 // Resolution order:
 //  1. An explicit --dir option, validated by validateRoot, which must
@@ -34,7 +34,7 @@ func (c *Context) projectRoot() (string, error) {
 }
 
 // findRootUpward searches from dir (usually the working directory) toward
-// the filesystem root for the nearest go-meta project root. It rejects
+// the filesystem root for the nearest meta project root. It rejects
 // the ambient-Go-module case: a bare go.mod without an app/ directory is
 // not accepted, so running meta inside an unrelated Go repository fails
 // instead of adopting it.
@@ -82,12 +82,12 @@ func validateRoot(dir string) (string, error) {
 		return "", &invalidProjectError{dir: dir, reason: "not a directory"}
 	}
 	if !isProjectRoot(dir) {
-		return "", &invalidProjectError{dir: dir, reason: "missing go.mod or app/ directory (not a go-meta project)"}
+		return "", &invalidProjectError{dir: dir, reason: "missing go.mod or app/ directory (not a meta project)"}
 	}
 	return dir, nil
 }
 
-// isProjectRoot reports whether dir looks like a go-meta project root:
+// isProjectRoot reports whether dir looks like a meta project root:
 // a go.mod file plus an app directory, per the provisional marker rule
 // documented on Context.projectRoot.
 func isProjectRoot(dir string) bool {
@@ -103,7 +103,7 @@ type noProjectError struct{ searchedFrom string }
 
 func (e *noProjectError) Error() string {
 	return fmt.Sprintf(
-		"meta: no go-meta project found (searched upward from %s); run from inside a project or pass --dir <path>",
+		"meta: no meta project found (searched upward from %s); run from inside a project or pass --dir <path>",
 		e.searchedFrom,
 	)
 }

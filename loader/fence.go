@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"sync"
 
-	"go-meta/cache"
-	"go-meta/routecontext"
+	"github.com/akashKarmakar02/meta/cache"
+	"github.com/akashKarmakar02/meta/routecontext"
 )
 
 // ErrStaleFill reports that a cache fill's write was suppressed because an

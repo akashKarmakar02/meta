@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"go-meta/routecontext"
-	"go-meta/routeparams"
+	"github.com/akashKarmakar02/meta/routecontext"
+	"github.com/akashKarmakar02/meta/routeparams"
 )
 
 // errSentinel is a distinctive application error for wrap/classification cases.

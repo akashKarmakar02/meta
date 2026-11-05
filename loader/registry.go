@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"go-meta/routecontext"
+	"github.com/akashKarmakar02/meta/routecontext"
 )
 
 var (

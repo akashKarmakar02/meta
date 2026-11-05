@@ -9,7 +9,7 @@ import (
 )
 
 // TestF02ExternalModuleImport (§29): an isolated external Go module
-// imports go-meta/imageopt and go-meta/imageproc without Fiber, templ,
+// imports github.com/akashKarmakar02/meta/imageopt and github.com/akashKarmakar02/meta/imageproc without Fiber, templ,
 // or native image libraries in its dependency graph. imageproc defines
 // the processor contract; applications wire a concrete backend through
 // configuration, not by importing internal packages.
@@ -19,15 +19,15 @@ func TestF02ExternalModuleImport(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	module := "module example.test/consumer\n\ngo 1.26.3\n\nrequire go-meta v0.0.0\nreplace go-meta => " + strconv.Quote(root) + "\n"
+	module := "module example.test/consumer\n\ngo 1.26.10\n\nrequire github.com/akashKarmakar02/meta v0.0.0\nreplace github.com/akashKarmakar02/meta => " + strconv.Quote(root) + "\n"
 	source := `package consumer
 
 import (
 	"context"
 	"testing"
 
-	"go-meta/imageopt"
-	"go-meta/imageproc"
+	"github.com/akashKarmakar02/meta/imageopt"
+	"github.com/akashKarmakar02/meta/imageproc"
 )
 
 func TestExternalF02(t *testing.T) {

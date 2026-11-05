@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"go-meta/imageopt"
+	"github.com/akashKarmakar02/meta/imageopt"
 )
 
 // Aliases keep the benchmark helper self-contained.

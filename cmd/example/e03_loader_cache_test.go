@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"go-meta/app/loaders"
-	"go-meta/cache"
-	"go-meta/loader"
-	"go-meta/routecontext"
+	"github.com/akashKarmakar02/meta/app/loaders"
+	"github.com/akashKarmakar02/meta/cache"
+	"github.com/akashKarmakar02/meta/loader"
+	"github.com/akashKarmakar02/meta/routecontext"
 )
 
 func TestE03CachedSSRAndCSR(t *testing.T) {

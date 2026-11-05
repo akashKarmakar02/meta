@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"go-meta/cache"
+	"github.com/akashKarmakar02/meta/cache"
 )
 
 // ErrFlightPanic reports a panic in a shared loader computation. Internal

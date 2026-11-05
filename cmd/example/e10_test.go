@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"go-meta/internal/httpserver"
+	"github.com/akashKarmakar02/meta/internal/httpserver"
 )
 
 // e10ClientDir stages a dist/client fixture in a temp dir with the real

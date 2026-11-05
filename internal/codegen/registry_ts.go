@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"go-meta/internal/routing"
+	"github.com/akashKarmakar02/meta/internal/routing"
 )
 
 // tsHeader is stamped on every generated TypeScript file.

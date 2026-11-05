@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"go-meta/imageopt"
+	"github.com/akashKarmakar02/meta/imageopt"
 )
 
 // relativeName maps a validated key and concrete format onto the

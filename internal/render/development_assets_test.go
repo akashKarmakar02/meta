@@ -1,7 +1,7 @@
 package render
 
 import (
-	"go-meta/internal/httpserver"
+	"github.com/akashKarmakar02/meta/internal/httpserver"
 	"strings"
 	"testing"
 )

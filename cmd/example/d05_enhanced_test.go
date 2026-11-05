@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	appactions "go-meta/app/actions"
-	"go-meta/formcsrf"
+	appactions "github.com/akashKarmakar02/meta/app/actions"
+	"github.com/akashKarmakar02/meta/formcsrf"
 )
 
 func TestD05EnhancedFormNegotiationAndCSRF(t *testing.T) {

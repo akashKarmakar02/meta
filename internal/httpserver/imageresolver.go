@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"go-meta/imageproc"
+	"github.com/akashKarmakar02/meta/imageproc"
 )
 
 // openNonblockFlags is the platform-specific nonblocking-open flag used

@@ -12,8 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"go-meta/imageopt"
-	"go-meta/imageproc"
+	"github.com/akashKarmakar02/meta/imageopt"
+	"github.com/akashKarmakar02/meta/imageproc"
 )
 
 // Pre-decode gate regression tests (F03R §4). The fixtures are tiny files

@@ -9,7 +9,7 @@ import (
 // backendFactory builds the production processor. It is installed once at
 // program init by the internal native adapter (or by any embedder that
 // compiled one in), keeping this public package free of CGO and native
-// dependencies: importing go-meta/imageproc alone links nothing.
+// dependencies: importing github.com/akashKarmakar02/meta/imageproc alone links nothing.
 var (
 	backendMu      sync.Mutex
 	backendFactory func(ctx context.Context) (Processor, error)

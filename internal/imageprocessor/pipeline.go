@@ -21,7 +21,7 @@ import (
 
 	xdraw "golang.org/x/image/draw"
 
-	"go-meta/imageproc"
+	"github.com/akashKarmakar02/meta/imageproc"
 )
 
 // unsafePointer reinterprets a C pointer as an unsafe.Pointer. Internal

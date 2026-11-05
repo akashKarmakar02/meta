@@ -9,7 +9,7 @@ import (
 	"io"
 	"net/url"
 
-	"go-meta/routecontext"
+	"github.com/akashKarmakar02/meta/routecontext"
 )
 
 // Registry errors. They follow loader.NewRegistry's conventions (C02):

@@ -10,8 +10,8 @@ import (
 	"image/png"
 	"testing"
 
-	"go-meta/imageopt"
-	"go-meta/imageproc"
+	"github.com/akashKarmakar02/meta/imageopt"
+	"github.com/akashKarmakar02/meta/imageproc"
 )
 
 // FuzzInspectSource fuzzes the bounded pre-decode inspection with SMALL

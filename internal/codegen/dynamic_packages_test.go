@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"go-meta/internal/routing"
+	"github.com/akashKarmakar02/meta/internal/routing"
 )
 
 func TestDynamicPackagesCompileAndReconcile(t *testing.T) {
@@ -32,7 +32,7 @@ func TestDynamicPackagesCompileAndReconcile(t *testing.T) {
 		write(name, string(data))
 	}
 	write("app/users/helpers/helper.go", "package helpers\nfunc Text() string { return \"helper\" }\n")
-	write("app/users/[userId]/posts/[postId]/page.templ", "package postpage\nimport \"go-meta/app/users/helpers\"\ntempl Page() { <main>@Card(helpers.Text())</main> }\n")
+	write("app/users/[userId]/posts/[postId]/page.templ", "package postpage\nimport \"github.com/akashKarmakar02/meta/app/users/helpers\"\ntempl Page() { <main>@Card(helpers.Text())</main> }\n")
 	write("app/users/[userId]/posts/[postId]/card.templ", "package postpage\ntempl Card(s string) { <p>{ s }</p> }\n")
 	write("app/users/[userId]/posts/[postId]/layout.templ", "package postpage\ntempl Layout(c templ.Component) { <section>@c</section> }\n")
 	fsys := os.DirFS(filepath.Join(root, "app"))
@@ -54,7 +54,7 @@ func TestDynamicPackagesCompileAndReconcile(t *testing.T) {
 	if err := WriteRoutesFile(root, manifest); err != nil {
 		t.Fatal(err)
 	}
-	write("cmd/proof/main.go", "package main\nimport (\"context\"; \"os\"; r \"go-meta/generated\")\nfunc main(){ c,e:=r.SSRPage(r.RegisterRoutes()[0]); if e!=nil { panic(e) }; if e=c.Render(context.Background(),os.Stdout); e!=nil { panic(e) } }\n")
+	write("cmd/proof/main.go", "package main\nimport (\"context\"; \"os\"; r \"github.com/akashKarmakar02/meta/generated\")\nfunc main(){ c,e:=r.SSRPage(r.RegisterRoutes()[0]); if e!=nil { panic(e) }; if e=c.Render(context.Background(),os.Stdout); e!=nil { panic(e) } }\n")
 	cmd := exec.Command("go", "run", "-buildvcs=false", "./cmd/proof")
 	cmd.Dir = root
 	got, err := cmd.CombinedOutput()

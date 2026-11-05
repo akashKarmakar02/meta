@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"go-meta/internal/httpserver"
+	"github.com/akashKarmakar02/meta/internal/httpserver"
 )
 
 // H05 acceptance: HTTP tests for the versioned navigation JSON protocol,

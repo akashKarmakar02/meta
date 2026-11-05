@@ -9,8 +9,8 @@ import (
 	"context"
 	"time"
 
-	"go-meta/loader"
-	"go-meta/routecontext"
+	"github.com/akashKarmakar02/meta/loader"
+	"github.com/akashKarmakar02/meta/routecontext"
 )
 
 // LoadC05RedirectSSR is bound to an SSR route and always redirects to /about.

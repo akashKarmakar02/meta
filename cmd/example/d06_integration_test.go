@@ -12,9 +12,9 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"go-meta/action"
-	appactions "go-meta/app/actions"
-	"go-meta/formcsrf"
+	"github.com/akashKarmakar02/meta/action"
+	appactions "github.com/akashKarmakar02/meta/app/actions"
+	"github.com/akashKarmakar02/meta/formcsrf"
 )
 
 // postFormAction submits a url-encoded form through the real Fiber pipeline.

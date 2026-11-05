@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	root "go-meta/app"
+	root "github.com/akashKarmakar02/meta/app"
 )
 
 // renderAbout renders the About component through the same

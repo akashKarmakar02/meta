@@ -10,7 +10,7 @@ import (
 	"testing/fstest"
 	"time"
 
-	"go-meta/internal/routing"
+	"github.com/akashKarmakar02/meta/internal/routing"
 )
 
 func fixtureManifest(t *testing.T) routing.Manifest {
@@ -226,13 +226,13 @@ func TestRoutesFileContent(t *testing.T) {
 		`{ID: "app/layout.templ", SourceFile: "layout.templ", Mode: "ssr"}`,
 		`{ID: "app/dashboard/layout.svelte", SourceFile: "dashboard/layout.svelte", Mode: "csr"}`,
 		// C05: per-route symbol mapping with deterministic aliases.
-		"page0 \"go-meta/app\"",
-		"page1 \"go-meta/app/about\"",
+		"page0 \"github.com/akashKarmakar02/meta/app\"",
+		"page1 \"github.com/akashKarmakar02/meta/app/about\"",
 		"templ.Component",
 		// D06: layouts compose around pages at generation time, innermost
 		// wrap first so the final nesting matches the manifest's
 		// outermost-first chain order.
-		"layout0 \"go-meta/app\"",
+		"layout0 \"github.com/akashKarmakar02/meta/app\"",
 		"return layout0.Layout(page0.Page())",
 		"return layout0.Layout(page1.About())",
 	} {

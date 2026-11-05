@@ -3,7 +3,7 @@ package loaders
 import (
 	"context"
 
-	"go-meta/routecontext"
+	"github.com/akashKarmakar02/meta/routecontext"
 )
 
 // PostData is the demonstration loader result for the C03 SSR example. It is a

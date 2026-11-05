@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"go-meta/action"
-	appactions "go-meta/app/actions"
-	apploaders "go-meta/app/loaders"
-	"go-meta/cache"
-	"go-meta/loader"
-	"go-meta/routecontext"
+	"github.com/akashKarmakar02/meta/action"
+	appactions "github.com/akashKarmakar02/meta/app/actions"
+	apploaders "github.com/akashKarmakar02/meta/app/loaders"
+	"github.com/akashKarmakar02/meta/cache"
+	"github.com/akashKarmakar02/meta/loader"
+	"github.com/akashKarmakar02/meta/routecontext"
 )
 
 // TestE04ActionInvalidatesCachedSSRAndCSR drives the full loop: load (cache

@@ -13,8 +13,8 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"go-meta/internal/httpserver"
-	"go-meta/internal/routing"
+	"github.com/akashKarmakar02/meta/internal/httpserver"
+	"github.com/akashKarmakar02/meta/internal/routing"
 )
 
 // VisualLayoutResolver applies the selected server-owned visual layout.

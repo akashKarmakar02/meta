@@ -12,17 +12,17 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/logger"
 	"github.com/gofiber/fiber/v3/middleware/recover"
 
-	"go-meta/action"
-	"go-meta/app/actions"
-	"go-meta/app/loaders"
-	"go-meta/cache"
-	"go-meta/formcsrf"
-	"go-meta/loader"
+	"github.com/akashKarmakar02/meta/action"
+	"github.com/akashKarmakar02/meta/app/actions"
+	"github.com/akashKarmakar02/meta/app/loaders"
+	"github.com/akashKarmakar02/meta/cache"
+	"github.com/akashKarmakar02/meta/formcsrf"
+	"github.com/akashKarmakar02/meta/loader"
 
-	routes "go-meta/generated"
-	"go-meta/internal/httpserver"
-	"go-meta/internal/render"
-	"go-meta/internal/routing"
+	routes "github.com/akashKarmakar02/meta/generated"
+	"github.com/akashKarmakar02/meta/internal/httpserver"
+	"github.com/akashKarmakar02/meta/internal/render"
+	"github.com/akashKarmakar02/meta/internal/routing"
 )
 
 // newApp constructs the Fiber application with its middleware and routes.

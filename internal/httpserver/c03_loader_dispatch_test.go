@@ -11,12 +11,12 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/akashKarmakar02/meta/internal/httpserver"
+	"github.com/akashKarmakar02/meta/internal/routing"
+	"github.com/akashKarmakar02/meta/loader"
+	"github.com/akashKarmakar02/meta/loaderdata"
+	"github.com/akashKarmakar02/meta/routecontext"
 	"github.com/gofiber/fiber/v3"
-	"go-meta/internal/httpserver"
-	"go-meta/internal/routing"
-	"go-meta/loader"
-	"go-meta/loaderdata"
-	"go-meta/routecontext"
 )
 
 // renderProbe is a stand-in for the templ page: it reads the loader result

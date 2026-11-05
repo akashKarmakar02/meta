@@ -1,7 +1,7 @@
 package post
 
-import "go-meta/app/loaders"
-import "go-meta/loaderdata"
+import "github.com/akashKarmakar02/meta/app/loaders"
+import "github.com/akashKarmakar02/meta/loaderdata"
 
 templ Page() {
  {{ data, _ := loaderdata.Get[loaders.CacheDemoData](ctx) }}

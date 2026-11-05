@@ -21,10 +21,10 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"go-meta/imageopt"
-	"go-meta/imageproc"
-	"go-meta/internal/imagecache"
-	"go-meta/internal/imageprocessor"
+	"github.com/akashKarmakar02/meta/imageopt"
+	"github.com/akashKarmakar02/meta/imageproc"
+	"github.com/akashKarmakar02/meta/internal/imagecache"
+	"github.com/akashKarmakar02/meta/internal/imageprocessor"
 )
 
 // tinyPNG builds a small deterministic PNG fixture (64x32, distinct colors).

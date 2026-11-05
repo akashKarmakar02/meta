@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"go-meta/imageopt"
+	"github.com/akashKarmakar02/meta/imageopt"
 )
 
 // Cancel at the second context check, after the temporary file was written.

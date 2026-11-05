@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"go-meta/imageopt"
+	"github.com/akashKarmakar02/meta/imageopt"
 )
 
 // Minimal valid encoded fixtures per format: real magic bytes so

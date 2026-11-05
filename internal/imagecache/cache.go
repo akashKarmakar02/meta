@@ -43,7 +43,7 @@ import (
 	"sync"
 	"time"
 
-	"go-meta/imageopt"
+	"github.com/akashKarmakar02/meta/imageopt"
 )
 
 // Errors returned to callers. The HTTP layer maps every one of them onto

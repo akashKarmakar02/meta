@@ -8,8 +8,8 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"go-meta/imageopt"
-	"go-meta/imageproc"
+	"github.com/akashKarmakar02/meta/imageopt"
+	"github.com/akashKarmakar02/meta/imageproc"
 )
 
 // TestF02ConfiguredProcessorKeepsEndpointTruthful (§24): wiring a

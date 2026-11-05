@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/akashKarmakar02/meta/imageopt"
 	"github.com/gofiber/fiber/v3"
-	"go-meta/imageopt"
 )
 
 func TestImageEndpoint(t *testing.T) {

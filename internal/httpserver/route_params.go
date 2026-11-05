@@ -8,10 +8,10 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/akashKarmakar02/meta/internal/routing"
+	"github.com/akashKarmakar02/meta/routecontext"
+	"github.com/akashKarmakar02/meta/routeparams"
 	"github.com/gofiber/fiber/v3"
-	"go-meta/internal/routing"
-	"go-meta/routecontext"
-	"go-meta/routeparams"
 )
 
 type routeParamsKey struct{}

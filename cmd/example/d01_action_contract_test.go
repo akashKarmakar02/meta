@@ -7,9 +7,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"go-meta/action"
-	"go-meta/loader"
-	"go-meta/routecontext"
+	"github.com/akashKarmakar02/meta/action"
+	"github.com/akashKarmakar02/meta/loader"
+	"github.com/akashKarmakar02/meta/routecontext"
 )
 
 // TestD01ActionContractIntegration exercises the D01 action contract against a

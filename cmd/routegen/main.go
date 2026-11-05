@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"os"
 
-	"go-meta/internal/codegen"
-	"go-meta/internal/routing"
+	"github.com/akashKarmakar02/meta/internal/codegen"
+	"github.com/akashKarmakar02/meta/internal/routing"
 )
 
 func main() {

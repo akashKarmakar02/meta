@@ -6,7 +6,7 @@ import (
 	"context"
 	"errors"
 
-	"go-meta/routecontext"
+	"github.com/akashKarmakar02/meta/routecontext"
 )
 
 // Loader reads data for a matched route. The context is request-scoped; route

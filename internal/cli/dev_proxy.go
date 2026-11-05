@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"go-meta/internal/httpserver"
+	"github.com/akashKarmakar02/meta/internal/httpserver"
 )
 
 // vitePrefix is reserved exclusively for Vite's development module graph.
@@ -243,13 +243,13 @@ func writeBackendUnavailable(w http.ResponseWriter, r *http.Request, err error) 
 	if navigationEnvelopeRequest(r) || !acceptsHTML(r) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		fmt.Fprintf(w, "go-meta development backend unavailable (%s); retrying automatically after the current rebuild\n", rootCause(err))
+		fmt.Fprintf(w, "meta development backend unavailable (%s); retrying automatically after the current rebuild\n", rootCause(err))
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusServiceUnavailable)
 	fmt.Fprintf(w, `<!doctype html>
-<html><head><meta charset="utf-8"><title>go-meta development backend restarting</title></head>
+<html><head><meta charset="utf-8"><title>meta development backend restarting</title></head>
 <body style="font-family: system-ui, sans-serif; margin: 3rem auto; max-width: 36rem;">
 <h1>Development backend restarting</h1>
 <p>The Go backend is rebuilding or restarting (Air hot reload). The public

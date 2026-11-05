@@ -8,7 +8,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"go-meta/internal/routing"
+	"github.com/akashKarmakar02/meta/internal/routing"
 )
 
 // TestApplicationRegeneration verifies both artifacts against the same real

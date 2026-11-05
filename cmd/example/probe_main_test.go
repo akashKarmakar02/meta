@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"go-meta/imageproc"
+	"github.com/akashKarmakar02/meta/imageproc"
 )
 
 // TestF02NativeBackendWiringSmoke: an in-module smoke that the single

@@ -15,8 +15,8 @@ import (
 	"sync"
 	"testing"
 
-	"go-meta/imageopt"
-	"go-meta/imageproc"
+	"github.com/akashKarmakar02/meta/imageopt"
+	"github.com/akashKarmakar02/meta/imageproc"
 )
 
 // f03Backend builds the native backend or skips when runtime libs are

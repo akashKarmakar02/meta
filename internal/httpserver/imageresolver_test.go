@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"go-meta/imageproc"
+	"github.com/akashKarmakar02/meta/imageproc"
 )
 
 func newTestResolver(t *testing.T, mapping map[string]string) *ImageResolver {

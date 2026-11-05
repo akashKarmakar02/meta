@@ -8,9 +8,9 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	routes "go-meta/generated"
-	"go-meta/internal/httpserver"
-	"go-meta/internal/routing"
+	routes "github.com/akashKarmakar02/meta/generated"
+	"github.com/akashKarmakar02/meta/internal/httpserver"
+	"github.com/akashKarmakar02/meta/internal/routing"
 )
 
 // H04 acceptance: HTTP tests for the full CSR shells /dashboard and

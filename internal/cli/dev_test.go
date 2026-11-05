@@ -199,7 +199,7 @@ func TestDevPrerequisitesTable(t *testing.T) {
 				t.Fatalf("error = %v, want substring %q", err, tt.wantErr)
 			}
 			stdoutStr := stdout.String()
-			for _, want := range []string{"go-meta development", "Project:", "Backend:", "Starting development services"} {
+			for _, want := range []string{"meta development", "Project:", "Backend:", "Starting development services"} {
 				if strings.Contains(stdoutStr, want) {
 					t.Errorf("stdout = %q, should not claim startup before prerequisite check (%q present)", stdoutStr, want)
 				}
@@ -291,7 +291,7 @@ func TestDevStartOutput(t *testing.T) {
 
 	out := stdout.String()
 	for _, want := range []string{
-		"go-meta development",
+		"meta development",
 		"Project:    " + root,
 		"Local:      http://localhost:3000",
 		"Backend:    Air",

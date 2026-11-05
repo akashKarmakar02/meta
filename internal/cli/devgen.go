@@ -313,7 +313,7 @@ func generatedMatchesTree(root string) (bool, error) {
 	}
 	for _, imp := range f.Imports {
 		path := strings.Trim(imp.Path.Value, `"`)
-		// Only app-tree imports are structural: e.g. go-meta/app/docs.
+		// Only app-tree imports are structural: e.g. github.com/akashKarmakar02/meta/app/docs.
 		if !strings.Contains(path, "/app/") {
 			continue
 		}
@@ -324,7 +324,7 @@ func generatedMatchesTree(root string) (bool, error) {
 	return true, nil
 }
 
-// pkgExistsUnder reports whether an import path like go-meta/app/docs has
+// pkgExistsUnder reports whether an import path like github.com/akashKarmakar02/meta/app/docs has
 // a corresponding directory containing .go files under root. The module
 // prefix is unknown here (each consumer project differs), so the check
 // matches by path suffix: /app/<rest> directories.

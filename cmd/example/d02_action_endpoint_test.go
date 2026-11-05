@@ -19,10 +19,10 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"go-meta/action"
-	appactions "go-meta/app/actions"
-	"go-meta/loader"
-	"go-meta/routecontext"
+	"github.com/akashKarmakar02/meta/action"
+	appactions "github.com/akashKarmakar02/meta/app/actions"
+	"github.com/akashKarmakar02/meta/loader"
+	"github.com/akashKarmakar02/meta/routecontext"
 )
 
 // d02TrustedOrigin is the trusted origin the test apps are configured with;

@@ -99,7 +99,7 @@ import (
 	"context"
 	"errors"
 
-	"go-meta/routecontext"
+	"github.com/akashKarmakar02/meta/routecontext"
 )
 
 // Action is a server-side mutation with typed input and output. The context is

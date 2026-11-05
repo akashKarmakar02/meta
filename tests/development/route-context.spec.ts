@@ -12,8 +12,8 @@ const page = (heading: string) => `package contextpage
 import (
  "fmt"
  "strings"
- "go-meta/routecontext"
- "go-meta/routeparams"
+ "github.com/akashKarmakar02/meta/routecontext"
+ "github.com/akashKarmakar02/meta/routeparams"
 )
 templ Page() {
  {{
@@ -30,13 +30,13 @@ test.beforeAll(async () => {
  for (const dir of ['app/context-users/[userId]/posts/[postId]', 'app/context-docs/[id]/[...slug]', 'app/contextclient/[id]']) mkdirSync(path.join(session.root, dir), { recursive: true });
  write(session.root, pageFile, page('Route context'));
  write(session.root, 'app/context-docs/[id]/[...slug]/page.templ', `package contextdocs
-import "go-meta/routecontext"
+import "github.com/akashKarmakar02/meta/routecontext"
 templ Page() {
  {{ r, _ := routecontext.FromContext(ctx); slug, _ := r.Params.Get("slug"); id, _ := r.Params.Get("id") }}
  <main><h1>Context docs</h1><p>{r.Pattern}</p><p>{id}</p><p>{slug}</p><p>{r.Query.Get("lang")}</p></main>
 }\n`);
  write(session.root, 'app/contextclient/layout.templ', `package contextclient
-import "go-meta/routecontext"
+import "github.com/akashKarmakar02/meta/routecontext"
 templ ContextclientLayout(c templ.Component) {
  {{ r, _ := routecontext.FromContext(ctx) }}
  <div data-client-route={r.RouteID} data-client-query={r.Query.Get("q")}>@c</div>

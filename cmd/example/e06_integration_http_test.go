@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	apploaders "go-meta/app/loaders"
-	"go-meta/cache"
-	"go-meta/loader"
-	"go-meta/routecontext"
+	apploaders "github.com/akashKarmakar02/meta/app/loaders"
+	"github.com/akashKarmakar02/meta/cache"
+	"github.com/akashKarmakar02/meta/loader"
+	"github.com/akashKarmakar02/meta/routecontext"
 
 	"github.com/gofiber/fiber/v3"
 )

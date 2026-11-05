@@ -9,9 +9,9 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"go-meta/imageopt"
-	"go-meta/imageproc"
-	"go-meta/internal/imagecache"
+	"github.com/akashKarmakar02/meta/imageopt"
+	"github.com/akashKarmakar02/meta/imageproc"
+	"github.com/akashKarmakar02/meta/internal/imagecache"
 )
 
 // The image endpoint (F01 contract, F03 processing).

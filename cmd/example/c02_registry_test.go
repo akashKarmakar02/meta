@@ -8,9 +8,9 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/akashKarmakar02/meta/loader"
+	"github.com/akashKarmakar02/meta/routecontext"
 	"github.com/gofiber/fiber/v3"
-	"go-meta/loader"
-	"go-meta/routecontext"
 )
 
 func TestC02RegistryUsesGeneratedHTTPIdentities(t *testing.T) {

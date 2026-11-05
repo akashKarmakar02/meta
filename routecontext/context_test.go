@@ -5,8 +5,8 @@ import (
 	"net/url"
 	"testing"
 
-	"go-meta/routecontext"
-	"go-meta/routeparams"
+	"github.com/akashKarmakar02/meta/routecontext"
+	"github.com/akashKarmakar02/meta/routeparams"
 )
 
 func TestQuerySnapshot(t *testing.T) {

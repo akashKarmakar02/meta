@@ -6,7 +6,7 @@ import (
 	"context"
 	"net/url"
 
-	"go-meta/routeparams"
+	"github.com/akashKarmakar02/meta/routeparams"
 )
 
 type contextKey struct{}

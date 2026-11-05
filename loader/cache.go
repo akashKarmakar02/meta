@@ -10,9 +10,9 @@ import (
 	"sort"
 	"strconv"
 
-	"go-meta/cache"
-	"go-meta/routecontext"
-	"go-meta/routeparams"
+	"github.com/akashKarmakar02/meta/cache"
+	"github.com/akashKarmakar02/meta/routecontext"
+	"github.com/akashKarmakar02/meta/routeparams"
 )
 
 // Codec serializes and restores a loader result. Callbacks must be safe for

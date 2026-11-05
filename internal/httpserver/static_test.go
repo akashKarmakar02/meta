@@ -166,7 +166,7 @@ func TestMountAssetsBlocksTraversal(t *testing.T) {
 			t.Fatal(err)
 		}
 		b, _ := io.ReadAll(resp.Body)
-		if strings.Contains(string(b), "frontend/entry.ts") || strings.Contains(string(b), "module go-meta") {
+		if strings.Contains(string(b), "frontend/entry.ts") || strings.Contains(string(b), "module github.com/akashKarmakar02/meta") {
 			t.Fatalf("%s leaked file contents", p)
 		}
 		if resp.StatusCode != 404 {

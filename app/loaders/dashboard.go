@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"go-meta/routecontext"
+	"github.com/akashKarmakar02/meta/routecontext"
 )
 
 // DashboardData is the demonstration loader result for the C04 CSR example.

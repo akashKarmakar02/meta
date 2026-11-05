@@ -12,9 +12,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"go-meta/app/loaders"
-	"go-meta/loader"
-	"go-meta/routecontext"
+	"github.com/akashKarmakar02/meta/app/loaders"
+	"github.com/akashKarmakar02/meta/loader"
+	"github.com/akashKarmakar02/meta/routecontext"
 )
 
 // TestC04CSRLoaderDeliversDataEndToEnd drives the real app (real registry from

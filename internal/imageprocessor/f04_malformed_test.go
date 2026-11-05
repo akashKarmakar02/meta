@@ -8,8 +8,8 @@ import (
 	"sync"
 	"testing"
 
-	"go-meta/imageopt"
-	"go-meta/imageproc"
+	"github.com/akashKarmakar02/meta/imageopt"
+	"github.com/akashKarmakar02/meta/imageproc"
 )
 
 // animatedVP8X marks the animation flag on a VP8X-only WebP header.

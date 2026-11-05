@@ -13,7 +13,7 @@ import (
 	"image"
 	"sync"
 
-	"go-meta/imageopt"
+	"github.com/akashKarmakar02/meta/imageopt"
 )
 
 // Sentinel errors. Internal causes remain wrapped for server-side

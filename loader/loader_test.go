@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"go-meta/loader"
-	"go-meta/routecontext"
-	"go-meta/routeparams"
+	"github.com/akashKarmakar02/meta/loader"
+	"github.com/akashKarmakar02/meta/routecontext"
+	"github.com/akashKarmakar02/meta/routeparams"
 )
 
 type user struct {

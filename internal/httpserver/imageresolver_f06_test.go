@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"go-meta/imageproc"
+	"github.com/akashKarmakar02/meta/imageproc"
 )
 
 func TestF06ResolverChoosesLongestNamespace(t *testing.T) {

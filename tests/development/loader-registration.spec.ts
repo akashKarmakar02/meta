@@ -5,7 +5,7 @@ import { newDevSession, write, pause, type DevSession } from './fixtures/dev-ses
 
 let session: DevSession;
 const source = (ids: string[], marker: string) => `package loaders
-import ("context"; "log"; "go-meta/loader"; "go-meta/routecontext")
+import ("context"; "log"; "github.com/akashKarmakar02/meta/loader"; "github.com/akashKarmakar02/meta/routecontext")
 func load(context.Context, routecontext.Route) (int, error) { return 1, nil }
 func Bindings() []loader.Binding { log.Print("${marker}"); return []loader.Binding{${ids.map(id => `loader.Bind(${JSON.stringify(id)}, load),`).join('')}} }
 `;

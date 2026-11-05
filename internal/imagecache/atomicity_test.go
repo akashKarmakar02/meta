@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"go-meta/imageopt"
+	"github.com/akashKarmakar02/meta/imageopt"
 )
 
 // F05 §47: prove that readers never observe a partially written entry. A

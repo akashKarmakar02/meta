@@ -16,7 +16,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"go-meta/imageproc"
+	"github.com/akashKarmakar02/meta/imageproc"
 )
 
 // F03R HTTP regression tests: oversized declared dimensions rejected

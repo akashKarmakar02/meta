@@ -14,8 +14,8 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	appactions "go-meta/app/actions"
-	"go-meta/formcsrf"
+	appactions "github.com/akashKarmakar02/meta/app/actions"
+	"github.com/akashKarmakar02/meta/formcsrf"
 )
 
 // newD03App builds a fully configured app with the example actions and a

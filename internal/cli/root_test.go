@@ -150,7 +150,7 @@ func chdirTemp(t *testing.T) string {
 	return dir
 }
 
-// makeProject creates a minimal valid go-meta project tree under a temp
+// makeProject creates a minimal valid meta project tree under a temp
 // dir and returns its root path. The go.mod carries the templ tool
 // directive meta dev's pre-flight check looks for.
 func makeProject(t *testing.T) string {
@@ -264,7 +264,7 @@ func TestFindRootUpwardNoProject(t *testing.T) {
 }
 
 // noAppDir creates a temp directory containing only go.mod (a plain Go
-// module, not a go-meta project).
+// module, not a meta project).
 func noAppDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -285,7 +285,7 @@ func TestValidateRootTable(t *testing.T) {
 		{name: "valid root", dir: root},
 		{name: "missing directory", dir: filepath.Join(t.TempDir(), "nope"), wantErr: "cannot read directory"},
 		{name: "file instead of directory", dir: filepath.Join(root, "go.mod"), wantErr: "not a directory"},
-		{name: "project without app dir", dir: noAppDir(t), wantErr: "not a go-meta project"},
+		{name: "project without app dir", dir: noAppDir(t), wantErr: "not a meta project"},
 	}
 
 	for _, tt := range tests {
@@ -332,7 +332,7 @@ func TestRunDevOutsideProject(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1", code)
 	}
-	if !strings.Contains(stderr.String(), "no go-meta project found") {
+	if !strings.Contains(stderr.String(), "no meta project found") {
 		t.Errorf("stderr = %q, want no-project message", stderr.String())
 	}
 }

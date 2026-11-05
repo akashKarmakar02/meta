@@ -10,8 +10,8 @@ import (
 	"github.com/a-h/templ"
 	"github.com/gofiber/fiber/v3"
 
-	"go-meta/internal/httpserver"
-	"go-meta/internal/routing"
+	"github.com/akashKarmakar02/meta/internal/httpserver"
+	"github.com/akashKarmakar02/meta/internal/routing"
 )
 
 // PageResolver returns a templ component for a route; generated code

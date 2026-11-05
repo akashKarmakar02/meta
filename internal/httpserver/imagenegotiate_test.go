@@ -3,7 +3,7 @@ package httpserver
 import (
 	"testing"
 
-	"go-meta/imageproc"
+	"github.com/akashKarmakar02/meta/imageproc"
 )
 
 // fullCaps is the native backend's probed capability set on this host.

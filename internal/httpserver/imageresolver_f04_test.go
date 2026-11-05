@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"go-meta/imageproc"
+	"github.com/akashKarmakar02/meta/imageproc"
 )
 
 // F04 filesystem security tests: special files, descriptor hygiene, and

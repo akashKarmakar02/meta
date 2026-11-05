@@ -7,7 +7,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"go-meta/internal/routing"
+	"github.com/akashKarmakar02/meta/internal/routing"
 )
 
 // fixtureCSRManifest discovers routes from a minimal CSR+SSR tree so tests

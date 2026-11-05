@@ -13,8 +13,8 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"go-meta/loader"
-	"go-meta/routecontext"
+	"github.com/akashKarmakar02/meta/loader"
+	"github.com/akashKarmakar02/meta/routecontext"
 )
 
 // doRequest issues a request against app and returns the status, body, and

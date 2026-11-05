@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"go-meta/internal/httpserver"
+	"github.com/akashKarmakar02/meta/internal/httpserver"
 )
 
 // TestF08DocsEnvelopeBarePageNoLayouts verifies the /docs navigation

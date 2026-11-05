@@ -30,8 +30,8 @@ test.afterAll(async () => {
 const toOutcome = (original: string, outcome: string): string =>
   original
     .replace(
-      '"go-meta/routecontext"',
-      '"go-meta/loader"\n\t"go-meta/routecontext"'
+      '"github.com/akashKarmakar02/meta/routecontext"',
+      '"github.com/akashKarmakar02/meta/loader"\n\t"github.com/akashKarmakar02/meta/routecontext"'
     )
     .replace(
       /\tid, err := route\.Params\.Int64\("postId"\)\n\tif err != nil \{\n\t\treturn PostData\{\}, err\n\t\}\n\treturn PostData\{\n\t\tID:[\s\S]*?\n\t\}, nil/,

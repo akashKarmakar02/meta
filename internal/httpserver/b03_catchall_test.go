@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/akashKarmakar02/meta/internal/routing"
 	"github.com/gofiber/fiber/v3"
-	"go-meta/internal/routing"
 )
 
 // B03: a catch-all route captures one or more segments, decoded per segment,

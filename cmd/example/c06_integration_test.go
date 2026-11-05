@@ -16,10 +16,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	routes "go-meta/generated"
-	"go-meta/internal/httpserver"
-	"go-meta/loader"
-	"go-meta/routecontext"
+	routes "github.com/akashKarmakar02/meta/generated"
+	"github.com/akashKarmakar02/meta/internal/httpserver"
+	"github.com/akashKarmakar02/meta/loader"
+	"github.com/akashKarmakar02/meta/routecontext"
 )
 
 // findRouteID asserts a generated route with the given ID exists.

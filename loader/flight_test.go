@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"go-meta/cache"
-	"go-meta/routecontext"
+	"github.com/akashKarmakar02/meta/cache"
+	"github.com/akashKarmakar02/meta/routecontext"
 )
 
 type flightData struct {

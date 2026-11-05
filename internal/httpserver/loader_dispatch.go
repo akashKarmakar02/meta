@@ -8,10 +8,10 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"go-meta/internal/routing"
-	"go-meta/loader"
-	"go-meta/loaderdata"
-	"go-meta/routecontext"
+	"github.com/akashKarmakar02/meta/internal/routing"
+	"github.com/akashKarmakar02/meta/loader"
+	"github.com/akashKarmakar02/meta/loaderdata"
+	"github.com/akashKarmakar02/meta/routecontext"
 )
 
 // WithLoader resolves a route's registered loader result once, before the
