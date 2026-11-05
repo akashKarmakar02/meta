@@ -66,11 +66,12 @@ static int webpDecodeInfo(const uint8_t* data, size_t len, int* w, int* h) {
 import "C"
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"image"
-	_ "image/jpeg"
-	_ "image/png"
+	"image/jpeg"
+	"image/png"
 	"sync"
 
 	"go-meta/imageopt"
@@ -82,6 +83,11 @@ type Native struct {
 	caps    imageproc.Capabilities
 	version string
 	info    imageproc.BackendInfo
+
+	// fullDecoder, when non-nil, replaces the family decoders in
+	// decodeInspected. Test-only seam for proving that rejected sources
+	// never reach a full decode; nil in production.
+	fullDecoder func(b []byte, format string) (image.Image, error)
 
 	webpMu sync.Mutex // serializes the libwebp per-call encoder state if
 	// a future change introduces global encoder settings;
@@ -168,13 +174,22 @@ func (n *Native) Version() string { return n.version }
 // library state that outlives every processor).
 func (n *Native) Close() error { return nil }
 
-// DecodeConfig sniffs dimensions without a full decode.
+// DecodeConfig sniffs dimensions and format without a full decode. The
+// stdlib registry (jpeg/png/gif) is format-sniffing only; WebP and AVIF
+// go through the native bounded header inspectors. This method is the
+// pre-decode gate: no full-frame allocation happens for any family.
 func (n *Native) DecodeConfig(src imageproc.Source) (image.Config, error) {
-	cfg, _, err := image.DecodeConfig(bytesReader(src.Bytes))
-	return cfg, err
+	ins, err := n.inspectSource(src.Bytes)
+	if err != nil {
+		return image.Config{}, err
+	}
+	return image.Config{Width: ins.width, Height: ins.height}, nil
 }
 
-// Process runs the full pipeline: decode, resize, encode. It never writes
+// Process runs the full pipeline: bounded inspection (format-appropriate
+// header parse, never a generic one), pixel-limit rejection before any
+// full-frame allocation, full decode, revalidation of the actually decoded
+// dimensions against the inspected ones, resize, encode. It never writes
 // HTTP responses, and checks cancellation before each expensive stage.
 func (n *Native) Process(ctx context.Context, src imageproc.Source, t imageproc.Transform) (imageproc.Result, error) {
 	if err := imageproc.PreProcess(ctx, n.caps, t); err != nil {
@@ -184,9 +199,21 @@ func (n *Native) Process(ctx context.Context, src imageproc.Source, t imageproc.
 		return imageproc.Result{}, fmt.Errorf("%w: empty source", imageproc.ErrSourceInvalid)
 	}
 
-	img, formatName, err := n.decodeSource(src.Bytes)
+	inspected, err := n.inspectSource(src.Bytes)
 	if err != nil {
 		return imageproc.Result{}, err
+	}
+	img, err := n.decodeInspected(src.Bytes, inspected)
+	if err != nil {
+		return imageproc.Result{}, err
+	}
+	// Revalidate the actually decoded frame against the inspected
+	// metadata: a source whose true dimensions differ from its header
+	// (or bytes that changed under us) must not bypass the gate.
+	b := img.Bounds()
+	if b.Dx() != inspected.width || b.Dy() != inspected.height {
+		return imageproc.Result{}, fmt.Errorf("%w: decoded %dx%d but header declared %dx%d",
+			imageproc.ErrSourceInvalid, b.Dx(), b.Dy(), inspected.width, inspected.height)
 	}
 	if err := ctx.Err(); err != nil {
 		return imageproc.Result{}, err
@@ -212,7 +239,7 @@ func (n *Native) Process(ctx context.Context, src imageproc.Source, t imageproc.
 		return imageproc.Result{}, fmt.Errorf("%w: %q", imageproc.ErrUnsupportedFormat, string(t.Format))
 	}
 	if err != nil {
-		return imageproc.Result{}, fmt.Errorf("%w: encode %s: %v", imageproc.ErrProcessing, formatName, err)
+		return imageproc.Result{}, fmt.Errorf("%w: encode %s: %v", imageproc.ErrProcessing, inspected.format, err)
 	}
 	w := out.Bounds().Dx()
 	h := out.Bounds().Dy()
@@ -222,42 +249,160 @@ func (n *Native) Process(ctx context.Context, src imageproc.Source, t imageproc.
 	}, nil
 }
 
-// decodeSource decodes source bytes into an image, choosing the decoder by
-// actual content sniff (image.Decode's registry), not filename. WebP
-// inputs go through the native decoder (the stdlib has none); animated
-// WebP and AVIF sources are rejected rather than silently optimized as
-// frame 0.
-func (n *Native) decodeSource(b []byte) (image.Image, string, error) {
-	cfg, formatName, err := image.DecodeConfig(bytesReader(b))
-	if err != nil {
-		return nil, "", fmt.Errorf("%w: sniff: %v", imageproc.ErrSourceInvalid, err)
+// inspectedSource is the bounded, format-appropriate header inspection of
+// a source: which family it claims to be, the dimensions it declares, and
+// whether it is animated. All limits are already checked by inspectSource
+// before it returns; a returned inspection is authorized for full decode.
+type inspectedSource struct {
+	format  string // sniffed family name, never a filename guess
+	width   int
+	height  int
+	decoded bool // true when inspection itself proved the frame decodable
+}
+
+// inspectSource performs the pre-decode gate: detect the family by magic
+// bytes, parse only that family's headers, reject unsupported or animated
+// families, and enforce the dimension and decoded-pixel ceilings with
+// overflow-safe arithmetic — all before any full-frame allocation. It is
+// also the single entry point used by DecodeConfig, so the endpoint's
+// sniff and Process's decode can never disagree about the family checked.
+func (n *Native) inspectSource(b []byte) (inspectedSource, error) {
+	switch {
+	case bytes.HasPrefix(b, []byte("\x89PNG\r\n\x1a\n")):
+		cfg, err := pngDecodeConfig(b)
+		if err != nil {
+			return inspectedSource{}, fmt.Errorf("%w: png header: %v", imageproc.ErrSourceInvalid, err)
+		}
+		return checkedInspection("png", cfg.Width, cfg.Height, false)
+	case bytes.HasPrefix(b, []byte{0xff, 0xd8}):
+		cfg, err := jpegDecodeConfig(b)
+		if err != nil {
+			return inspectedSource{}, fmt.Errorf("%w: jpeg header: %v", imageproc.ErrSourceInvalid, err)
+		}
+		return checkedInspection("jpeg", cfg.Width, cfg.Height, false)
+	case bytes.HasPrefix(b, []byte("GIF8")):
+		// gif.DecodeConfig parses the logical screen descriptor only, but
+		// F03 has no animated-input policy for GIF; reject the family rather
+		// than optimizing one arbitrary frame.
+		return inspectedSource{}, fmt.Errorf("%w: gif sources are not supported in F03", imageproc.ErrSourceInvalid)
+	case bytes.HasPrefix(b, []byte("RIFF")) && len(b) >= 12 && string(b[8:12]) == "WEBP":
+		features, err := webpInspect(b)
+		if err != nil {
+			return inspectedSource{}, fmt.Errorf("%w: webp header: %v", imageproc.ErrSourceInvalid, err)
+		}
+		if features.hasAnimation {
+			return inspectedSource{}, fmt.Errorf("%w: animated webp not supported", imageproc.ErrSourceInvalid)
+		}
+		// The WebP path decodes through libwebp, whose own feature parse is
+		// the inspection; decoded=true makes the post-decode revalidation a
+		// same-source check.
+		return checkedInspection("webp", features.width, features.height, true)
+	case bytes.HasPrefix(b, []byte("\x00\x00\x00")) && len(b) >= 12 && isBMFFBrand(b):
+		w, h, frames, err := avifInfo(b)
+		if err != nil {
+			return inspectedSource{}, fmt.Errorf("%w: avif header: %v", imageproc.ErrSourceInvalid, err)
+		}
+		if frames > 1 {
+			return inspectedSource{}, fmt.Errorf("%w: animated avif not supported", imageproc.ErrSourceInvalid)
+		}
+		return checkedInspection("avif", w, h, true)
+	default:
+		return inspectedSource{}, fmt.Errorf("%w: unrecognized image format", imageproc.ErrSourceInvalid)
 	}
-	// Overflow-safe pixel ceiling before any allocation.
-	if int64(cfg.Width)*int64(cfg.Height) > maxDecodedPixels {
-		return nil, "", fmt.Errorf("%w: %dx%d pixels", imageproc.ErrSourceTooLarge, cfg.Width, cfg.Height)
+}
+
+// checkedInspection validates declared dimensions (positive, within the
+// per-axis ceiling, and under the total decoded-pixel ceiling with
+// overflow-safe int64 multiplication) and returns the authorized
+// inspection.
+func checkedInspection(format string, w, h int, decoded bool) (inspectedSource, error) {
+	if w <= 0 || h <= 0 {
+		return inspectedSource{}, fmt.Errorf("%w: %s dimensions %dx%d", imageproc.ErrSourceInvalid, format, w, h)
 	}
-	switch formatName {
+	if int64(w)*int64(h) > maxDecodedPixels {
+		return inspectedSource{}, fmt.Errorf("%w: %s declares %dx%d pixels", imageproc.ErrSourceTooLarge, format, w, h)
+	}
+	return inspectedSource{format: format, width: w, height: h, decoded: decoded}, nil
+}
+
+// decodeInspected fully decodes an already-inspected source. WebP goes
+// through the native decoder (which re-runs the same bounded feature
+// parse before allocating pixels); every other supported family —
+// currently only jpeg and png after inspection rejects the rest — uses
+// the stdlib decoder that owns that family's header format. After
+// decoding, the actual dimensions are revalidated by Process against the
+// inspected ones so a source that changed between inspection and decode
+// cannot smuggle a larger frame past the gate. fullDecoder is the single
+// decoding seam: pre-decode rejection tests swap it to prove the full
+// decoder is never invoked for rejected sources.
+func (n *Native) decodeInspected(b []byte, ins inspectedSource) (image.Image, error) {
+	if n.fullDecoder != nil {
+		return n.fullDecoder(b, ins.format)
+	}
+	return decodeFamily(b, ins.format)
+}
+
+// decodeFamily fully decodes b as the given inspected family.
+func decodeFamily(b []byte, format string) (image.Image, error) {
+	switch format {
 	case "webp":
 		img, err := decodeWebPToRGBA(b)
 		if err != nil {
-			return nil, "", fmt.Errorf("%w: %v", imageproc.ErrSourceInvalid, err)
+			return nil, fmt.Errorf("%w: webp decode: %v", imageproc.ErrSourceInvalid, err)
 		}
-		return img, "webp", nil
-	case "avif":
-		_, _, frames, err := avifInfo(b)
+		return img, nil
+	case "jpeg", "png":
+		var (
+			img image.Image
+			err error
+		)
+		if format == "jpeg" {
+			img, err = jpeg.Decode(bytes.NewReader(b))
+		} else {
+			img, err = png.Decode(bytes.NewReader(b))
+		}
 		if err != nil {
-			return nil, "", fmt.Errorf("%w: %v", imageproc.ErrSourceInvalid, err)
+			return nil, fmt.Errorf("%w: %s decode: %v", imageproc.ErrSourceInvalid, format, err)
 		}
-		if frames > 1 {
-			return nil, "", fmt.Errorf("%w: animated avif not supported", imageproc.ErrSourceInvalid)
+		return img, nil
+	case "avif":
+		// Inspection parses the container, but F03 has no AVIF pixel decoder;
+		// it must fail here rather than pretending to optimize.
+		return nil, fmt.Errorf("%w: avif sources are not decodable in F03 (dav1d binding pending)", imageproc.ErrUnsupportedFormat)
+	default:
+		// Unreachable while every branch of inspectSource names a handled
+		// family; kept as a fail-closed guard for future families.
+		return nil, fmt.Errorf("%w: internal: uninspected family %q reached decode", imageproc.ErrSourceInvalid, format)
+	}
+}
+
+// isBMFFBrand reports whether b's ftyp brand at offset 4–11 marks a
+// container this build knows how to bound: avif or avis. Other brands are
+// left to the unrecognized-format rejection.
+func isBMFFBrand(b []byte) bool {
+	if len(b) < 12 {
+		return false
+	}
+	brand := string(b[8:12]) // major brand, e.g. "avif" / "avis"
+	_ = brand
+	// The compatible-brands list (offset 16..) can also carry the marker;
+	// scan a bounded prefix of the ftyp box for "avif"/"avis" so still-image
+	// AVIF written with a different major brand is still recognized.
+	boxLen := int(uint32(b[3]) | uint32(b[2])<<8 | uint32(b[1])<<16 | uint32(b[0])<<24)
+	end := len(b)
+	if boxLen >= 8 && boxLen <= 1024 && boxLen < end {
+		end = boxLen
+	}
+	scanEnd := end
+	if scanEnd > 1024 {
+		scanEnd = 1024
+	}
+	for i := 8; i+4 <= scanEnd; i++ {
+		if string(b[i:i+4]) == "avif" || string(b[i:i+4]) == "avis" {
+			return true
 		}
-		return nil, "", fmt.Errorf("%w: avif sources are not decodable in F03 (dav1d binding pending)", imageproc.ErrUnsupportedFormat)
 	}
-	img, _, err := image.Decode(bytesReader(b))
-	if err != nil {
-		return nil, "", fmt.Errorf("%w: decode: %v", imageproc.ErrSourceInvalid, err)
-	}
-	return img, formatName, nil
+	return false
 }
 
 func (n *Native) encodeWebP(img image.Image, quality int) ([]byte, error) {

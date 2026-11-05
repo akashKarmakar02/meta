@@ -1873,9 +1873,9 @@ u := imageopt.URL("/images/hero.jpg").
   never stretched or cropped, never larger than requested in either axis.
 - **Never upscale:** an image smaller than the request is returned at its
   original dimensions (conservative policy; identical across all encoders).
-- Rounding: standard integer rounding on the derived dimension (`round(a*b/c)`),
-  clamped to at least 1 pixel and never above the requested bound. Documented
-  example: a 1600×900 source requested as 500×500 yields 500×281.
+- Rounding: floor on the derived dimension, clamped to at least 1 pixel and
+  never above the requested bound. Documented example: a 1600×900 source
+  requested as 500×500 yields 500×281.
 - Resampling: Catmull-Rom interpolation via `golang.org/x/image/draw`
   (pinned v0.33.0), applied on the source's RGBA view; non-zero source
   bounds are handled by converting through `image/draw` first.
@@ -1924,10 +1924,33 @@ are disabled entirely. Errors do not disclose filesystem paths.
 
 | Limit | Default | Enforcement |
 |---|---|---|
-| Max input file bytes | 50 MiB | resolver aborts bounded read |
-| Max decoded pixels | 40 MP | DecodeConfig check before decode allocation |
-| Max output dimension/pixels | per F01 MaxDimension/MaxPixels | transform validation |
+| Max input file bytes | 32 MiB | resolver aborts bounded read before any decode |
+| Max decoded pixels | 40 MP | dimension/pixel check on inspected headers, before full decode allocation |
+| Max output dimension/pixels | per F01 MaxDimension/MaxPixels | transform validation, separate from source checks |
 | Max concurrent transformations | 4 | semaphore at the HTTP boundary (waiting requests honor ctx cancellation) |
+
+**Pre-decode dimension enforcement (F03R).** Source headers are inspected
+by format-appropriate bounded parsers — never one generic sniff, and never
+a filename extension — *before* any full-frame allocation:
+
+- JPEG/PNG: stdlib `DecodeConfig` over a length-bounded reader (IHDR/SOF
+  markers only; no pixel buffers).
+- WebP: libwebp `WebPGetFeatures` — header parse only, no pixel buffer.
+- AVIF input: libavif `avifDecoderParse` — container metadata only.
+
+The inspection rejects non-positive dimensions, unsupported or
+uninspectable families (SVG, GIF, random bytes), animated sources, and
+declared pixel counts over the limit — all with overflow-safe `int64`
+arithmetic (`w*h` never computed in `int`). Only after inspection passes
+does the full decode run, and the *decoded* dimensions are revalidated
+against the inspected ones: a source whose true frame differs from its
+header is refused, so the gate cannot be bypassed by metadata/full-decode
+disagreement. The endpoint's `DecodeConfig` sniff and the processor's
+`Process` gate share the same inspection code path and cannot disagree.
+
+Output dimensions are checked separately: F01 request validation bounds
+the requested box, and never-upscale guarantees the output never exceeds
+the source.
 
 Native encoding (libwebp/libavif calls) is not interruptible once started;
 cancellation is checked before source resolution, while waiting for a permit,
@@ -1950,8 +1973,38 @@ limitation, not hidden.
 HEAD performs the full transformation so the status, `Content-Type`, and
 `Content-Length` are exact; no body is sent.
 
-Caching until F05: successful responses carry `Cache-Control: no-store`.
-No disk cache exists yet.
+**Cache policy (F03R):** optimized-image URLs are unversioned — the same
+URL returns different bytes when a local source changes — so both
+successes and errors carry `Cache-Control: no-store`. No immutable or
+shared-cache policy is advertised. Version-aware caching, content
+fingerprinting, and disk caching are F05's design, not F03's.
+
+### Output verification — exactly what it is
+
+The F03 production pipeline does **not** re-decode its own encoded output;
+that would double native work per request for marginal safety. Output
+verification lives where it belongs, in the test suite, with these exact
+semantics:
+
+- **WebP output**: verified by full pixel decode through the same libwebp
+  decoder the pipeline uses (`DecodeWebPForTest`) — dimensions, content
+  uniformity, and alpha preservation are checked on decoded pixels.
+- **JPEG/PNG output**: verified by stdlib decode in tests.
+- **AVIF output**: verified by a libavif *parse* probe — `avifDecoderParse`
+  returns dimensions and frame count. This is a container/metadata
+  verification, not a pixel-level decode. It proves the file is
+  structurally valid AVIF of the right size and frame count; it does not
+  prove every pixel matches the source.
+
+Why this does not contradict `Capabilities.AVIFDecode = false`: that flag
+governs what the processor accepts as *input* through its public decode
+path. A source-decode path must handle arbitrary attacker-supplied bytes —
+bounded inspection, dimension ceilings, animation rejection, allocation
+limits. The verification probe runs only over bytes this process just
+encoded, inside tests. One is a public capability claim; the other is an
+internal test assertion. F03 has no general AVIF source decoding, and the
+capability flag says so truthfully; enabling AVIF input decode remains
+deferred to a real dav1d binding, not resolved by wording.
 
 ### Build configuration
 

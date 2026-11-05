@@ -31,6 +31,13 @@ import (
 //
 // The unconfigured endpoint (no resolver/processor wired) keeps the
 // truthful 501 from F01/F02.
+//
+// Cache policy (F03R): optimized-image URLs are unversioned — the same URL
+// can return different bytes after a local source changes — so both
+// successes and errors carry Cache-Control: no-store. A stronger
+// immutable policy belongs to F05's source-fingerprinted cache identity,
+// not to a URL contract that cannot promise byte stability. f=auto adds
+// Vary: Accept because the representation depends on negotiation.
 
 // ImageEndpointConfig wires processing into the image endpoint. Zero
 // values disable processing: requests stay truthful 501s.
@@ -137,13 +144,26 @@ func serveImage(c fiber.Ctx, r imageopt.Request, cfg ImageEndpointConfig, gate *
 	src := imageproc.Source{URLIdentity: r.Source, Bytes: srcBytes}
 
 	// Sniff decoded dimensions before any pixel allocation: compressed
-	// bombs must fail at metadata time.
+	// bombs must fail at metadata time. DecodeConfig is the same
+	// format-appropriate bounded inspection Process uses, so the endpoint
+	// gate and the pipeline gate cannot disagree.
 	if sniffer, ok := cfg.Processor.(imageproc.DecodeConfig); ok {
 		cfgImg, derr := sniffer.DecodeConfig(src)
 		if derr != nil {
+			// The processor's inspection already enforces the same
+			// ceilings; map its verdicts, not a blanket 415.
+			if errors.Is(derr, imageproc.ErrSourceTooLarge) {
+				return c.Status(http.StatusRequestEntityTooLarge).SendString("image source too large")
+			}
 			return c.Status(http.StatusUnsupportedMediaType).SendString("unsupported image source")
 		}
+		// Invalid dimensions (non-positive axes) are invalid metadata;
+		// over-limit dimensions are the 413 resource ceiling. Both are
+		// enforced here, before any pixel allocation.
 		if perr := cfg.Resolver.limits.CheckDecodedPixels(cfgImg.Width, cfgImg.Height); perr != nil {
+			if errors.Is(perr, imageproc.ErrSourceInvalid) {
+				return c.Status(http.StatusUnsupportedMediaType).SendString("unsupported image source")
+			}
 			return c.Status(http.StatusRequestEntityTooLarge).SendString("image source too large")
 		}
 	}

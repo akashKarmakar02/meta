@@ -195,8 +195,10 @@ func mapOpenError(err error) error {
 	return errImageSourceForbidden
 }
 
-// CheckDecodedPixels enforces the decoded-pixel ceiling on config sniffed
-// dimensions with overflow-safe arithmetic.
+// CheckDecodedPixels enforces the dimension and decoded-pixel ceilings on
+// header-inspected dimensions with overflow-safe arithmetic. Both axes
+// must be positive; the total must stay within MaxDecodedPixels. Called
+// before any full-frame decode.
 func (l ImageSourceLimits) CheckDecodedPixels(w, h int) error {
 	if w <= 0 || h <= 0 {
 		return imageproc.ErrSourceInvalid

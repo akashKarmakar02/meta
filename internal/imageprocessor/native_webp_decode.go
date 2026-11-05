@@ -7,11 +7,25 @@ package imageprocessor
 #include <string.h>
 #include <webp/decode.h>
 
-// webpDecodeRGBA fully decodes a WebP bitstream into packed RGBA rows.
-// Returns a malloc'd buffer the caller frees; *out_len receives its size
-// (width*height*4). Returns NULL on failure. has_animation reports the
-// bitstream's animation flag so callers can reject animated sources
-// instead of silently optimizing frame 0.
+// webpInspectHeaders parses only the bitstream features (dimensions,
+// animation flag) of a WebP file: no pixel buffer is allocated. Returns
+// 0 on success, nonzero VP8StatusCode on failure.
+static int webpInspectHeaders(const uint8_t* data, size_t len,
+	int* w, int* h, int* has_animation) {
+	WebPBitstreamFeatures f;
+	VP8StatusCode st = WebPGetFeatures(data, len, &f);
+	if (st != VP8_STATUS_OK) return (int)st;
+	*w = f.width;
+	*h = f.height;
+	*has_animation = f.has_animation;
+	return 0;
+}
+
+// webpDecodeRGBA fully decodes a (non-animated) WebP bitstream into packed
+// RGBA rows. Returns a malloc'd buffer the caller frees; *out_len receives
+// its size (width*height*4). Returns NULL on failure. has_animation
+// reports the bitstream's animation flag so callers can reject animated
+// sources instead of silently optimizing frame 0.
 static unsigned char* webpDecodeRGBA(const uint8_t* data, size_t len,
 	int* w, int* h, size_t* out_len, int* has_animation) {
 	WebPBitstreamFeatures f;
@@ -45,6 +59,27 @@ import (
 	"fmt"
 	"image"
 )
+
+// webpFeatures is the bounded header-inspection result for a WebP file.
+type webpFeatures struct {
+	width, height int
+	hasAnimation  bool
+}
+
+// webpInspect inspects a WebP bitstream's declared dimensions and
+// animation flag without allocating any pixel buffer. It is the pre-decode
+// gate for the WebP family; decodeWebPToRGBA runs its own identical
+// feature parse again before allocating, so inspection and decode cannot
+// disagree about what was checked.
+func webpInspect(data []byte) (webpFeatures, error) {
+	var w, h, hasAnim C.int
+	r := C.webpInspectHeaders((*C.uint8_t)(&data[0]), C.size_t(len(data)),
+		&w, &h, &hasAnim)
+	if r != 0 {
+		return webpFeatures{}, fmt.Errorf("WebPGetFeatures: status %d", int(r))
+	}
+	return webpFeatures{width: int(w), height: int(h), hasAnimation: hasAnim != 0}, nil
+}
 
 // decodeWebPToRGBA decodes a (non-animated) WebP bitstream into an
 // image.NRGBA. Errors distinguish animation rejection from decode failure.

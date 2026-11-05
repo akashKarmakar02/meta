@@ -13,6 +13,7 @@ import (
 	"image"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"unsafe"
 
 	xdraw "golang.org/x/image/draw"
@@ -30,6 +31,23 @@ func copySliceFromC(dst []byte, p *C.uint8_t) {
 
 // bytesReader adapts []byte for stdlib decoders.
 func bytesReader(b []byte) *bytes.Reader { return bytes.NewReader(b) }
+
+// headerReadBudget bounds the bytes a stdlib DecodeConfig call may read.
+// image.DecodeConfig allocates no pixel buffers, but it does read from
+// the provided io.Reader without a limit; a bounded reader makes the
+// inspection stage's cost proportional to the header, not the file.
+const headerReadBudget = 64 << 10
+
+// pngDecodeConfig parses the PNG IHDR only (stdlib png.DecodeConfig).
+func pngDecodeConfig(b []byte) (image.Config, error) {
+	return png.DecodeConfig(io.LimitReader(bytes.NewReader(b), headerReadBudget))
+}
+
+// jpegDecodeConfig parses the JPEG SOF markers only (stdlib
+// jpeg.DecodeConfig).
+func jpegDecodeConfig(b []byte) (image.Config, error) {
+	return jpeg.DecodeConfig(io.LimitReader(bytes.NewReader(b), headerReadBudget))
+}
 
 // toRGBA flattens any image to packed RGBA rows (non-premultiplied 8-bit,
 // the convention both WebPPictureImportRGBA and avifRGBImage expect).
