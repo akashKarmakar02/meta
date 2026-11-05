@@ -114,6 +114,9 @@ func newConfiguredAppBase(assets *httpserver.Assets, privateSocket bool, registr
 		fapp.Use(httpserver.WithFormCSRF(csrfManager, trustedOrigin...))
 	}
 
+	// F01: reserve the image endpoint before any file-based page route.
+	httpserver.MountImage(fapp)
+
 	fapp.Get("/healthz", func(c fiber.Ctx) error {
 		return c.SendString("ok")
 	})

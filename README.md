@@ -1612,3 +1612,97 @@ clock reads — so caching pays off for loaders costing more than a few
 microseconds (DB or network-like work of ≥100µs is decisively positive), and
 loses for trivial in-memory loaders. The full environment record and numbers
 are in the E06 commit message. No other performance rewrites were made.
+
+### Image optimization contract (F01)
+
+`go-meta/imageopt` defines requests; it does **not** resolve, fetch, decode,
+resize, encode, or cache images. The reserved `GET /_meta/image` validates
+requests and currently answers `501 Not Implemented` for valid ones. Invalid
+queries return `400`; other methods return `405` with `Allow: GET, HEAD`.
+`HEAD` has the same status and headers as GET without a body. These responses
+are plain text, `no-store`, and never page-navigation envelopes. The endpoint
+is registered before page routes and is served through the normal development
+proxy and production Go server.
+
+When processing exists, a missing approved source is intended to return 404,
+an unsupported source media type 415, a source exceeding limits 413, and an
+unexpected internal failure a generic 500. These future outcomes must not
+reveal filesystem paths or decoder internals, and processing must finish before
+a successful image response is committed.
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+
+    "go-meta/imageopt"
+)
+
+func main() {
+    request := imageopt.Request{
+        Source: "/images/hero.jpg", Width: 960, Quality: 80,
+        Format: imageopt.FormatAuto,
+    }
+    imageURL, err := imageopt.URL(request)
+    if err != nil { log.Fatal(err) }
+    fmt.Println(imageURL) // usable as an img src in templ or Svelte
+}
+```
+
+Query keys are `src`, `w`, `h`, `q`, and `f`. Unknown, duplicate, and explicitly
+empty parameters are rejected. `w` and `h` are decimal integers in 1–4096;
+one may be omitted but at least one is required. If both are specified the
+future processor fits the image within the box while preserving aspect ratio;
+cropping and upscaling policy are not yet implemented. The requested output
+box cannot exceed 16,777,216 pixels. `imageopt.Limits` and `ValidateWithin`
+allow each server to impose stricter positive bounds; the HTTP adapter checks
+its limits before serving. `q` defaults to 80 and ranges from 1 to
+100; its visual effect depends on the eventual encoder. `f` defaults to
+`auto`; `avif`, `webp`, `jpeg`, and `png` name possible output formats, not
+implemented encoders. Explicit defaults and omitted defaults are equivalent.
+`ParseRawQuery` decodes exactly once, while `ParseValues` accepts already
+query-decoded values. `Request.Validate` validates direct construction;
+`URL` validates and percent-encodes in deterministic parameter order.
+
+Sources are public URL identities under `/images/` or `/assets/`, not filesystem
+paths. Namespace membership does **not** grant filesystem access: a future
+resolver must explicitly bind each namespace to an approved public root and
+verify containment after resolving symlinks. Controls, invalid UTF-8, dot or
+empty segments, backslashes, percent signs remaining after query decoding,
+queries, fragments, and scheme syntax are rejected. Remote, `file:`, and
+protocol-relative URLs are not accepted. A future remote resolver needs an
+explicit allowlist, DNS-rebinding protection, private/link-local address checks,
+redirect and port validation, bounded downloads, timeouts, and response-type
+verification; none is implemented here. Private or personalized images and
+credentials must not be passed to a public optimizer or shared cache.
+
+F03 must negotiate `auto` only among actually available and allowed encoders,
+using HTTP Accept media ranges and quality weights, honoring `q=0` exclusions;
+server preference breaks equal weights. A missing Accept permits any available
+format, wildcards cover their matching media types, and explicit formats do not
+use Accept to select a different format. If no allowed format is acceptable,
+the future endpoint must fail rather than mislabel bytes. Malformed Accept
+values must not be treated as proof of support. Negotiation is not
+implemented in F01. Future successful responses must use the selected format's
+MIME type and correct body length when known, and auto responses must include
+`Vary: Accept`. Cache-Control must reflect source privacy; ETag and conditional
+requests are not implemented or promised by F01.
+
+`CacheIdentity.Key` is a deterministic, length-delimited, versioned digest of
+namespace, source, source version, requested dimensions, contain behavior,
+quality, selected **concrete** format, and processor version. A trusted future
+resolver must supply a source fingerprint/version that changes with the source,
+and a processor version that changes with relevant encoding behavior. Raw
+paths never become cache filenames. F05 may evolve the storage format without
+changing the public URL. F01 creates no disk cache.
+
+F02–F04 must enforce source-byte, decoded-pixel, memory, output-byte, time, and
+concurrency limits at the real I/O and decoder boundary; compressed byte size
+alone does not prevent decompression bombs. SVG rasterization is unsupported
+without separately reviewed sandboxing; normal static SVG serving is unchanged.
+Animated inputs must be rejected until preservation is explicitly supported,
+not silently reduced to one frame. Frame counts and duration require bounds,
+and decoder dependencies must be maintained. SSR and CSR may use the same
+root-relative URL, and production continues to require no Node runtime.

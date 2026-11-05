@@ -228,6 +228,23 @@ else
   fi
 fi
 
+cache_first=$(curl -fsS "$BASE/cache-demo/post/nodefree" | sed -n 's/.*data-cache-refreshed>\([^<]*\).*/\1/p')
+cache_second=$(curl -fsS "$BASE/cache-demo/post/nodefree" | sed -n 's/.*data-cache-refreshed>\([^<]*\).*/\1/p')
+if [ -z "$cache_first" ] || [ "$cache_first" != "$cache_second" ]; then
+  echo "FAIL: loader cache smoke check" >&2
+  fail=1
+else
+  echo "ok:   cached loader returns the same value"
+fi
+
+got=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/_meta/image?src=%2Fimages%2Fhero.jpg&w=20")
+if [ "$got" != "501" ]; then
+  echo "FAIL: image contract -> $got (want 501)" >&2
+  fail=1
+else
+  echo "ok:   image contract -> 501"
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "NODE-FREE SMOKE: FAILED" >&2
   exit 1
