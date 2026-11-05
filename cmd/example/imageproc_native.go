@@ -19,6 +19,7 @@ import (
 	"go-meta/imageopt"
 	"go-meta/imageproc"
 	"go-meta/internal/httpserver"
+	"go-meta/internal/imagecache"
 	"go-meta/internal/imageprocessor"
 )
 
@@ -28,6 +29,11 @@ import (
 // default "/images/" anchored at the module's public/images). A missing
 // root is a hard startup failure; there is never a silent fallback to an
 // arbitrary working directory.
+//
+// F05 disk cache (GO_META_IMAGE_CACHE_DIR): disabled unless the operator
+// names a directory. Limits have explicit defaults; an unparseable limit
+// or unusable cache directory is a hard startup failure rather than a
+// silently-degraded or unlimited cache.
 func mountImage(fapp *fiber.App) {
 	limits := imageopt.DefaultLimits()
 
@@ -55,10 +61,37 @@ func mountImage(fapp *fiber.App) {
 		Processor:     backend,
 		MaxConcurrent: maxConcurrent,
 	}
+	if dir := os.Getenv("GO_META_IMAGE_CACHE_DIR"); dir != "" {
+		cache, cerr := imagecache.Open(imagecache.Config{
+			Dir:           dir,
+			MaxTotalBytes: envImageBytes("GO_META_IMAGE_CACHE_MAX_TOTAL", 256<<20),
+			MaxEntries:    int(envImageBytes("GO_META_IMAGE_CACHE_MAX_ENTRIES", 4096)),
+			MaxEntryBytes: envImageBytes("GO_META_IMAGE_CACHE_MAX_ENTRY", 64<<20),
+		})
+		if cerr != nil {
+			fmt.Fprintf(os.Stderr, "image cache: %v\n", cerr)
+			os.Exit(1)
+		}
+		cfg.Cache = cache
+	}
 	if err := httpserver.MountImageProcessing(fapp, limits, cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "image endpoint: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// envImageBytes reads a positive byte count from env; def is used when
+// unset or invalid. Values are clamped to a sane ceiling (1 GiB) so a typo
+// cannot configure an unbounded cache.
+func envImageBytes(name string, def int64) int64 {
+	v, err := strconv.ParseInt(os.Getenv(name), 10, 64)
+	if err != nil || v < 1 {
+		return def
+	}
+	if v > 1<<30 {
+		return 1 << 30
+	}
+	return v
 }
 
 // parseImageRoots parses "namespace=dir" comma pairs. Duplicate

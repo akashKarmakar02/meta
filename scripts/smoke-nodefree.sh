@@ -33,12 +33,14 @@ fi
 # smoke runs with a minimal PATH containing only the utilities the check
 # itself needs — simulating a machine without Node installed.
 SMOKE_BIN="$(mktemp -d)"
-for tool in curl seq sleep rm; do ln -s "$(command -v "$tool")" "$SMOKE_BIN/$tool" 2>/dev/null; done
+for tool in curl seq sleep rm cksum; do ln -s "$(command -v "$tool")" "$SMOKE_BIN/$tool" 2>/dev/null; done
 export PATH="$SMOKE_BIN"
 if command -v node >/dev/null 2>&1; then
   echo "FAIL: node still reachable on PATH"; exit 1
 fi
 
+# F05: when the operator exported GO_META_IMAGE_CACHE_DIR, launch the
+# server with it enabled so the hit/miss probes exercise real caching.
 "$BIN" >/tmp/smoke-server.log 2>&1 < /dev/null &
 SRV=$!
 trap 'kill $SRV 2>/dev/null; rm -rf "$SMOKE_BIN"' EXIT
@@ -100,6 +102,30 @@ probe GET "/_meta/image?src=%2Fimages%2Fhero.jpg&w=800&f=png" 200 image/png
 probe HEAD "/_meta/image?src=%2Fimages%2Fhero.jpg&w=800&f=webp" 200 image/webp
 probe GET "/_meta/image?src=%2Fimages%2Fmissing.jpg&w=100&f=webp" 404
 probe GET "/_meta/image?src=%2Fetc%2Fpasswd&w=1&f=webp" 400
+
+# F05 disk-cache checks. When GO_META_IMAGE_CACHE_DIR points somewhere,
+# the first miss populates it and the identical repeat must hit — same
+# status, MIME, and byte length. Missing dir env: caching is off, which is
+# fine; these probes just confirm serving still works.
+if [ -n "${GO_META_IMAGE_CACHE_DIR:-}" ]; then
+  a=$(curl -s -o /tmp/smoke-img1 -w '%{http_code} %{content_type} %{size_download}' "$BASE/_meta/image?src=%2Fimages%2Fhero.jpg&w=333&f=webp")
+  b=$(curl -s -o /tmp/smoke-img2 -w '%{http_code} %{content_type} %{size_download}' "$BASE/_meta/image?src=%2Fimages%2Fhero.jpg&w=333&f=webp")
+  if [ "$a" != "$b" ] || ! [[ "$a" == 200* ]]; then
+    echo "FAIL cache hit/miss mismatch: miss='$a' hit='$b'"; fail=$((fail+1))
+  else
+    echo "ok disk-cache hit matches miss ($a)"
+    pass=$((pass+1))
+  fi
+  # The sandbox PATH has no cmp/cut: cksum output "sum size file"; use
+  # parameter expansion instead of external tools.
+  c1=$(cksum /tmp/smoke-img1); h1=${c1%% *}
+  c2=$(cksum /tmp/smoke-img2); h2=${c2%% *}
+  if [ "$h1" != "$h2" ]; then
+    echo "FAIL cache-hit bytes differ from miss"; fail=$((fail+1))
+  else
+    pass=$((pass+1))
+  fi
+fi
 
 echo "pass=$pass fail=$fail"
 [ "$fail" = 0 ]

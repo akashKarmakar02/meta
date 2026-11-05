@@ -11,6 +11,7 @@ import (
 
 	"go-meta/imageopt"
 	"go-meta/imageproc"
+	"go-meta/internal/imagecache"
 )
 
 // The image endpoint (F01 contract, F03 processing).
@@ -56,6 +57,11 @@ type ImageEndpointConfig struct {
 	// refused with 500 and never published (F04 §23). Default 64 MiB,
 	// well above anything a ≤16 MP output at ≤4096×4096 can produce.
 	MaxOutputBytes int64
+	// Cache optionally stores completed optimized outputs on disk (F05).
+	// Nil disables disk caching entirely — no directory is created or
+	// touched. Cache failures never fail a request: they degrade to
+	// processing and are logged server-side only.
+	Cache *imagecache.Cache
 }
 
 const (
@@ -193,6 +199,39 @@ func serveImage(c fiber.Ctx, r imageopt.Request, cfg ImageEndpointConfig, gate *
 		}
 	}
 
+	// F05 disk-cache lookup. Identity is the canonical F01 CacheIdentity:
+	// the request's validated fields plus the negotiated concrete format,
+	// the source-content fingerprint of THIS snapshot, and the processor
+	// version. A hit serves verified bytes without touching the processor
+	// or consuming a native permit. Every pre-processing guarantee above
+	// (validation, negotiation, root resolution, byte cap, pixel gate)
+	// has already run for hits as well — the cache never bypasses them.
+	var cacheKey string
+	if cfg.Cache != nil {
+		id := imageopt.CacheIdentity{
+			Request:          r,
+			Namespace:        cfg.Resolver.namespaceFor(r.Source),
+			SourceVersion:    sourceVersion(srcBytes),
+			ProcessorVersion: processorVersion(cfg.Processor),
+			SelectedFormat:   selected,
+		}
+		key, kerr := id.Key()
+		if kerr == nil {
+			cacheKey = key
+			if cached, gerr := cfg.Cache.Get(ctx, key, selected, cfg.MaxOutputBytes); gerr == nil {
+				wantMIME, _ := selected.MIME()
+				c.Set(fiber.HeaderContentType, wantMIME)
+				c.Set(fiber.HeaderContentLength, strconv.Itoa(len(cached)))
+				if c.Method() == http.MethodHead {
+					return c.Send(nil)
+				}
+				return c.Send(cached)
+			}
+			// Any Get failure — miss, corruption removed, closed cache,
+			// cancellation while waiting — falls through to processing.
+		}
+	}
+
 	// Bound concurrent heavy transformations. The permit is taken BEFORE
 	// the full decode and resize work (not just around the native
 	// encoder), so queued requests cannot allocate large decode buffers
@@ -239,6 +278,15 @@ func serveImage(c fiber.Ctx, r imageopt.Request, cfg ImageEndpointConfig, gate *
 	wantMIME, merr := selected.MIME()
 	if merr != nil || res.MIME != wantMIME {
 		return c.Status(http.StatusInternalServerError).SendString("image processing failed")
+	}
+
+	// F05 best-effort publication: a fully validated result is published
+	// under the canonical identity so later requests can hit. Publication
+	// failure never fails this response — the bytes are already valid and
+	// deliverable (§23). The context may be expired after a slow encode;
+	// that is a miss for future requests, not an error for this one.
+	if cfg.Cache != nil && cacheKey != "" {
+		_ = cfg.Cache.Put(context.WithoutCancel(ctx), cacheKey, selected, res.Data)
 	}
 
 	c.Set(fiber.HeaderContentType, wantMIME)

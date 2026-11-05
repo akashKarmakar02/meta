@@ -2191,3 +2191,159 @@ key, no cross-source aliasing, cache-path confinement equivalent to source
 roots, atomic writes with no partial publication, size limits and
 eviction, and — until versioned URLs exist — no immutable browser
 responses at unversioned URLs. No disk cache exists in F04.
+
+## Optimized image disk caching (F05)
+
+F05 adds an opt-in disk cache for completed optimized outputs. Repeated
+requests for the same source content and transformation reuse previously
+encoded bytes — no decode, no Catmull-Rom resize, no native WebP/AVIF
+encoding. The cache is a dedicated subsystem beside the endpoint; it is not
+the Phase E loader cache and does not use it.
+
+### Enabling
+
+Off by default. The example server enables it with:
+
+```bash
+GO_META_IMAGE_CACHE_DIR=/var/cache/go-meta/images ./bin/example-native
+# optional bounds (defaults shown):
+GO_META_IMAGE_CACHE_MAX_TOTAL=268435456   # 256 MiB total
+GO_META_IMAGE_CACHE_MAX_ENTRIES=4096      # entry count bound
+GO_META_IMAGE_CACHE_MAX_ENTRY=67108864    # 64 MiB per entry
+```
+
+Direct API use compiles without native tags:
+
+```go
+cache, err := imagecache.Open(imagecache.Config{
+    Dir:           "/var/cache/go-meta/images",
+    MaxTotalBytes: 256 << 20,
+    MaxEntries:    4096,
+    MaxEntryBytes: 64 << 20,
+})
+if err != nil {
+    log.Fatal(err) // actionable startup failure, never silently degraded
+}
+defer cache.Close()
+
+cfg := httpserver.ImageEndpointConfig{
+    Resolver: resolver, Processor: proc, MaxConcurrent: 4, Cache: cache,
+}
+```
+
+Unset the env var and the endpoint behaves exactly as F04 — no directory is
+created or touched. An invalid directory, unreadable/writable failure, or
+nonsensical limits fail startup loudly rather than degrade silently.
+
+### Identity
+
+The cache key is the F01 `imageopt.CacheIdentity` over: namespace, source
+identity, **SHA-256 of the exact bounded source snapshot that processing
+would decode** (same bytes — replacement mid-request cannot publish V2
+under V1's key), requested geometry and quality, the **concrete selected
+format** (`f=auto` is resolved against `Accept` before keying, so AVIF and
+WebP entries never alias), resize/fit behavior, and the processor version
+(from the backend's `Version()`; encoder upgrades produce fresh keys while
+old entries age out through eviction).
+
+Same-size/same-mtime replacement invalidates because identity is content
+hashing, not mtime. Costs are documented honestly: the full source read and
+hash happen on every request, including hits (bounded by the 32 MiB source
+cap). For small frequently-served images that read is a significant part of
+hit cost; F06 may evaluate manifest-based versions.
+
+Filename: `<root>/<shard>/<key>.<format>` where shard is the first two hex
+digits of the digest body — 256 shard directories keep listings small.
+Filenames derive only from validated digests; raw query text, source paths,
+or user-controlled strings never reach filenames.
+
+### Publication, reads, corruption
+
+Publication: unique temp file in the destination shard (same filesystem),
+full write, fsync, root-relative atomic rename. Readers observe either the
+previous complete entry or the new one — never partial bytes. Crash
+leftovers (`tmp-` prefixed files) are reclaimed at next startup.
+
+Hit verification: open under `os.Root`, regular-file check, exact size
+bound, format magic bytes. Corruption (truncation, wrong magic, oversize,
+non-regular file) removes the entry, misses, and reprocesses once — bad
+bytes are never served twice, and recovery has no retry loop.
+
+The trust model is honest: the cache directory is writable server data.
+Verification detects accidental corruption; it does NOT defend against an
+attacker who can rewrite the directory wholesale (no keyed digests, no
+sidecar manifests). Permissions: directories 0700, files 0600, no
+execution.
+
+### Bounds, eviction, restart
+
+Accounting = sum of finalized entry sizes (metadata, shards, and transient
+temp files consume additional disk beyond that number — documented
+limitation). Counters stay exact across writes, eviction, corruption
+removal, and restart (startup reconciliation re-indexes the shard tree at
+real sizes, ignores foreign files, enforces capacity, removes abandoned
+temp files).
+
+Eviction: least-recently-used by file mtime, which hits bump — so recency
+survives restarts. Runs inside the accounting lock during publication; no
+background sweeper exists. Readers of a concurrently evicted entry finish
+safely: eviction unlinks, but open descriptors keep serving complete bytes
+(POSIX semantics).
+
+Concurrency: one mutex held only for bookkeeping — never across encoding,
+whole-file reads, or eviction scans. Same-key concurrent publications are
+safe (unique temp names; later complete rename wins). Cache hits do not
+consume native permits. One process owns each cache directory;
+multi-process sharing is unsupported (cross-process locking would be
+required to make it safe — an explicit, deliberate limitation).
+
+Failures: any Get failure falls back to normal processing. Any Put failure
+( including after Close) never fails an otherwise-successful response; the
+image still serves. No filesystem detail ever reaches the client — errors
+map to miss/fallback server-side only.
+
+Headers/status: unchanged from F04 — concrete MIME, correct
+Content-Length, `Vary: Accept` for auto, `Cache-Control: no-store`
+everywhere (a disk hit does not make the public URL immutable), 501 stays
+truthful in untagged builds (hits never disguise missing native support),
+HEAD hits serve metadata without reprocessing.
+
+### Operations
+
+Deployment: dedicated writable directory outside public roots and outside
+the source tree; single-process ownership; 0700/0600 permissions; budget for
+roughly total-bytes plus a few percent metadata overhead; safe to delete
+at any time (fully rebuildable); exclude from backups (not primary data);
+read-only deployments just leave the cache disabled.
+
+Upgrade/restart: processor version changes naturally produce fresh keys;
+old entries remain and age out via eviction — no wipe needed. Clearing is
+safe: stop the process, delete the directory, restart.
+
+### What it detects and does not
+
+Detected: truncation, empty files, wrong-format content, size-limit
+violations, abandoned temp files, non-regular/symlink entries.
+Not detected: an attacker with write access swapping valid-looking bytes
+(forgeable magic); that requires trusting directory ownership, which is the
+documented operator responsibility.
+
+### Benchmarks (64x32 PNG → w=32)
+
+Real native encodes, one machine, directional only (F06 owns the gate):
+
+| Flow | ns/op |
+|---|---|
+| WebP miss (encode) | ~651,000 |
+| WebP hit (disk) | ~86,000 |
+| AVIF miss (encode) | ~4,472,000 |
+| AVIF hit (disk) | ~105,000 |
+
+Hits also skip the concurrency admission wait entirely.
+
+### F06 handoff
+
+Versioned asset manifests could avoid the per-request source hash for
+trusted immutable assets; browser-cache policy at versioned URLs; cache-hit
+metrics. No generic disk-cache framework is planned — this subsystem stays
+image-specific.

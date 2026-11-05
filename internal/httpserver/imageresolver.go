@@ -192,6 +192,18 @@ func (r *ImageResolver) Resolve(ctx context.Context, identity string) ([]byte, e
 	return buf, nil
 }
 
+// namespaceFor returns the configured namespace prefix that owns identity,
+// or "" when no root is configured for it (the request fails resolution
+// before this matters; used by the F05 cache identity, where a stable
+// namespace distinguishes identical relative paths under different roots).
+func (r *ImageResolver) namespaceFor(identity string) string {
+	fr, _ := r.match(identity)
+	if fr == nil {
+		return ""
+	}
+	return fr.namespace
+}
+
 // match finds the configured root for identity and the path relative to it.
 // F01 validation guarantees no leading '../' tricks; the root-relative
 // lookup still refuses any residual traversal or escaping symlink.
