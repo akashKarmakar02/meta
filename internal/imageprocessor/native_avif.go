@@ -79,3 +79,18 @@ func encodeAVIFC(img image.Image, quality int) ([]byte, error) {
 	copySliceFromC(out, ptr)
 	return out, nil
 }
+
+// avifEncodeProbe encodes a 1×1 RGBA pixel once; New uses it to prove the
+// linked libavif has a working AV1 codec, not merely loadable symbols
+// (F04 §31 — no false capability from shared-library presence alone).
+func avifEncodeProbe() error {
+	px := []byte{0x10, 0x20, 0x30, 0xff}
+	var outLen C.size_t
+	var errCode C.int
+	ptr := C.encodeAVIFRGBA((*C.uint8_t)(&px[0]), 1, 1, 50, 9, 1, &outLen, &errCode)
+	if ptr == nil {
+		return fmt.Errorf("libavif probe encode failed: avifResult %d", int(errCode))
+	}
+	C.free(unsafePointer(ptr))
+	return nil
+}

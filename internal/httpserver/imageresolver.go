@@ -12,6 +12,13 @@ import (
 	"go-meta/imageproc"
 )
 
+// openNonblockFlags is the platform-specific nonblocking-open flag used
+// when opening sources so special files cannot stall the request. On
+// platforms without it the flag is zero and the regular-file check still
+// rejects non-regular sources after a (potentially blocking) open — the
+// flag is an availability hardening, not the containment boundary.
+const openNonblockFlags = syscallO_NONBLOCK
+
 // Source resolution for the image endpoint (F03 §21–24).
 //
 // The resolver maps F01-validated source identities (/images/...,
@@ -129,7 +136,13 @@ func (r *ImageResolver) Namespaces() []string {
 // Resolve reads the source identity's bytes under its approved root.
 // The F01 contract has already validated the identity lexically; this
 // method performs the actual root-confined access. Bytes returned are
-// freshly allocated per call — no shared buffers between requests.
+// freshly allocated per call — no shared buffers between requests. The
+// whole read is one descriptor's snapshot: open (nonblocking, so a FIFO
+// cannot stall it), verify a regular file via the same descriptor's
+// fstat, then bounded-read from that descriptor. Inspection and decoding
+// upstream operate exclusively on these returned bytes — the resolver
+// never reopens a pathname between safety checks, so a source replaced
+// mid-request cannot smuggle different content past a prior validation.
 func (r *ImageResolver) Resolve(ctx context.Context, identity string) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -141,27 +154,34 @@ func (r *ImageResolver) Resolve(ctx context.Context, identity string) ([]byte, e
 		return nil, errImageSourceNotFound
 	}
 
-	f, err := fr.root.Open(rel)
+	// Open with O_NONBLOCK so an attacker-placed FIFO or device node
+	// cannot block the worker forever; os.Root confines the open to the
+	// root regardless of flags. Directories still open fine and are
+	// rejected by the mode check below.
+	f, err := fr.root.OpenFile(rel, os.O_RDONLY|openNonblockFlags, 0)
 	if err != nil {
 		return nil, mapOpenError(err)
 	}
 	defer f.Close()
 
-	// Bound the read before allocating: stat first, then a single capped
-	// ReadAll-style loop. A file replaced between stat and read yields
-	// either fewer bytes (fine) or is caught by the io.LimitReader cap.
+	// Only regular files are sources. Sockets, FIFOs, devices, and other
+	// special files fail closed as forbidden — before any read can block
+	// or return attacker-controlled stream content.
 	st, err := f.Stat()
 	if err != nil {
 		return nil, errImageSourceForbidden
 	}
-	if st.IsDir() {
-		return nil, errImageSourceNotFound
+	if !st.Mode().IsRegular() {
+		if st.IsDir() {
+			return nil, errImageSourceNotFound
+		}
+		return nil, errImageSourceForbidden
 	}
-	if st.Size() > r.limits.MaxSourceBytes {
-		return nil, imageproc.ErrSourceTooLarge
-	}
-	// Read at most MaxSourceBytes+1 so an exactly-at-limit file succeeds
-	// but anything larger fails even if it grew after stat.
+
+	// Bounded read of at most MaxSourceBytes+1 bytes: an exactly-at-limit
+	// file succeeds, anything larger fails even if it grew after open.
+	// The limit applies to bytes actually read, never to metadata size,
+	// so growing and shrinking files are both handled by the cap itself.
 	buf, err := io.ReadAll(io.LimitReader(f, r.limits.MaxSourceBytes+1))
 	if err != nil {
 		return nil, errImageSourceForbidden

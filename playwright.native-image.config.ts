@@ -9,7 +9,7 @@ import { defineConfig } from '@playwright/test'
  */
 export default defineConfig({
   testDir: './tests/browser',
-  testMatch: /f03-image-optimization\.spec\.ts/,
+  testMatch: /f0[34]-image.*\.spec\.ts/,
   timeout: 30_000,
   retries: 0,
   use: {
@@ -19,7 +19,9 @@ export default defineConfig({
   webServer: {
     command: 'PORT=3139 ./bin/example-native',
     url: 'http://127.0.0.1:3139/healthz',
-    reuseExistingServer: true,
+    // F04: never attach to an already-running server — a stale tagged
+    // binary answering probes caused a false pass during F03R.
+    reuseExistingServer: false,
     timeout: 20_000,
   },
 })

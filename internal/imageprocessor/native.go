@@ -36,6 +36,10 @@ static unsigned char* encodeWebP(const uint8_t* rgba, int width, int height, flo
 		WebPPictureFree(&pic);
 		return NULL;
 	}
+	// Bounded internal threading (F04 §27): fixed single-threaded segment
+	// work regardless of machine core count — the endpoint semaphore is
+	// the concurrency control; per-encode thread pools would multiply it.
+	cfg.thread_level = 0;
 	WebPMemoryWriter writer;
 	WebPMemoryWriterInit(&writer);
 	pic.writer = WebPMemoryWrite;
@@ -118,13 +122,13 @@ func New(ctx context.Context) (*Native, error) {
 	n.caps.WebPEncode = true
 	n.caps.WebPDecode = true // same library provides WebPGetFeatures
 
-	// libavif: prove the encoder path by creating and destroying an
-	// encoder, the cheapest reliable probe of a usable codec build.
-	enc := C.avifEncoderCreate()
-	if enc == nil {
-		return nil, fmt.Errorf("%w: libavif encoder creation failed", imageproc.ErrBackendUnavailable)
+	// libavif: prove a working AV1 encode path by actually encoding a
+	// 1×1 frame (F04 §31 — encoder creation alone proves nothing about
+	// codec availability). A failed probe disables AVIF encoding rather
+	// than crash-later.
+	if perr := avifEncodeProbe(); perr != nil {
+		return nil, fmt.Errorf("%w: %v", imageproc.ErrBackendUnavailable, perr)
 	}
-	C.avifEncoderDestroy(enc)
 	n.caps.AVIFEncode = true
 	// AVIFDecode stays false: F03 encodes AVIF but does not decode AVIF
 	// sources (no dav1d pixel binding yet). Honesty over reach.

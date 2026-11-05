@@ -2035,7 +2035,9 @@ section for the full dependency discussion.
 `make build-native` builds the tagged binary; `make e2e-native` runs the
 focused native-image Chromium suite against it.
 `scripts/smoke-nodefree.sh [--untagged] [binary]` runs the node-free smoke
-in either mode.
+in either mode. Both smoke scripts refuse to start if their port is
+already serving — kill stale servers rather than letting tests attach to
+the wrong process (an F03R lesson, fixed in F04).
 
 ### Not in F03
 
@@ -2044,3 +2046,148 @@ first-frame-optimized), remote sources, disk caching (F05), and the
 comprehensive security matrix (F04) remain out of scope. EXIF orientation
 is not applied: the stdlib JPEG decoder ignores it; images needing rotation
 are served unrotated — limitation documented for F04 review.
+
+## Image processing security (F04)
+
+F04 audited the pipeline end to end and added the resource budget the
+earlier phases left implicit. This section is the security contract; the
+"Real image optimization (F03)" section above remains the functional
+documentation.
+
+### Threat boundary
+
+The endpoint serves only files under operator-configured namespace roots
+(default `/images/` at `public/images`; more via `GO_META_IMAGE_ROOTS`
+`namespace=dir` pairs). There is no remote fetching, no working-directory
+fallback, no environment-variable path expansion inside identities, and no
+filename-extension trust anywhere — family detection is magic bytes only.
+Containment is `os.Root` on every open (symlink escapes, traversal,
+absolute tails, NUL and backslash forms all fail closed), plus regular-file
+mode enforcement after open. `Cache-Control: no-store` stays on every
+response (F03R).
+
+### What F04 changed
+
+1. **Special files can no longer stall a request.** Sources now open with
+   `O_NONBLOCK` under `os.Root` and must be regular files by fstat. A FIFO,
+   socket, or device under a public root fails closed as 404 before any
+   read — previously a FIFO could block the worker indefinitely.
+2. **MaxConcurrent=1 now means one.** The F03 gate was only built for
+   values > 1, so a configured concurrency of 1 silently meant *unbounded*
+   concurrency. Fixed; admission regression test added.
+3. **Permit wait is bounded** (`maxPermitWait`, 10 s): queued requests get
+   503 overload instead of parking forever holding a connection.
+4. **The processing permit is acquired before decode/resize work**, not
+   merely around the encoder: queued requests cannot allocate large decode
+   buffers while waiting.
+5. **Per-request processing budget** (`maxProcessingTime`, 60 s): the
+   deadline is checked between stages; a stuck request cannot pin a permit
+   indefinitely. Native calls themselves are not interruptible mid-call —
+   a canceled request finishes at most the current native call before its
+   output is discarded (documented limitation).
+6. **Encoded output size cap** (`MaxOutputBytes`, default 64 MiB): an
+   oversized encoded result is refused 500 and never published. The check
+   happens post-encode — the encoder's memory was already spent by then;
+   the cap bounds what is shipped, not what is allocated (honest limitation).
+7. **AVIF capability probe is real**: startup encodes an actual 1×1 AVIF
+   frame; a libavif build with loadable symbols but a broken AV1 codec
+   now fails startup instead of lying in `Capabilities`.
+8. **WebP encoder threading pinned to single-threaded** per encode
+   (`thread_level=0`); AVIF encode uses a fixed 2 threads. Process-level
+   concurrency is the endpoint semaphore alone — no multiplicative native
+   thread pools. Settings are not mutated per request.
+9. **Smoke scripts refuse occupied ports**: `smoke-nodefree.sh` exits if
+   anything already answers on its port (the F03R stale-server false-pass),
+   verifies its own process survived startup, and cleans up only its own
+   server.
+
+### Resource budgets (actual configured values)
+
+| Budget | Value | Enforced |
+|---|---|---|
+| Raw query length | 8192 B | parser entry, before parameter parsing |
+| Source identity length | 2048 B | F01 validation |
+| Requested dimensions | ≤ 4096 px, ≤ 16,777,216 px product | F01 validation |
+| Source file bytes | 32 MiB | bounded single-descriptor read (+1 byte over-read cap) |
+| Declared decoded pixels | 40,000,000 | pre-decode, overflow-safe int64, per family |
+| Decoded frame dims | must equal inspected header dims | post-decode revalidation |
+| Output dimensions | within requested box, floor-rounded, ≥1 px, never upscaled | contain geometry |
+| Encoded output bytes | 64 MiB default (`MaxOutputBytes`) | post-encode refusal |
+| Concurrent heavy transforms | 4 default (`GO_META_IMAGE_CONCURRENCY`, ≤64) | semaphore before decode |
+| Permit wait | 10 s | then 503 |
+| Total processing time | 60 s | between stages |
+
+### Memory ownership (approximate worst case, one request)
+
+Source bytes ≤ 32 MiB (Go); decoded RGBA frame ≤ ~160 MB at the 40 MP
+ceiling (native or Go depending on family); resize destination ≤ ~64 MB at
+the 16 MP output ceiling; native encode input is that same buffer; encoder
+output bounded by the output cap. Peak simultaneous ownership is roughly
+source + frame + destination + encoded ≈ 260 MB for one maximal request,
+and the semaphore (default 4) bounds how many such requests run at once —
+so a rough process ceiling is 4 × 260 MB plus framework overhead. Native
+allocations are malloc'd outside Go heap accounting: size the process on
+RSS, not Go heap. Every native allocation has a paired free on success,
+error, and cancellation paths (audited in F04 §28 below); nothing relies
+on Go GC for native memory.
+
+### Native allocation audit
+
+| Allocation | Owner | Free |
+|---|---|---|
+| `WebPEncode` → `writer.mem` | `encodeWebP` Go wrapper | `C.free` deferred immediately after copy |
+| `WebPDecodeRGBAInto` output | caller-owned slice | Go GC (raw slice) |
+| libavif encode `avifImage`/`avifEncoder`/RGB | C helper | destroyed on both success and every error branch inside the helper |
+| libavif probe output | probe | freed before return |
+
+No function returns without freeing or transferring ownership of every
+allocation it made; error branches free partial state.
+
+### CGO pointer rules
+
+Go byte slices passed to C are kept alive by the calling frame for the
+duration of the call (no C-side retention past return); dimensions are
+range-checked (positive, ≤ 40 MP product) before the `C.int` conversion;
+output lengths are validated non-zero and copied into Go-owned memory
+before any pointer arithmetic.
+
+### Guarantees versus limitations
+
+Framework-enforced: root confinement, special-file rejection, input-byte
+and decoded-pixel ceilings, pre-decode inspection for every accepted
+family, animation/SVG/GIF-family rejection, bounded concurrency, bounded
+wait, output cap, no-store cache policy, truthful capabilities, no partial
+responses, safe error text (no paths, no native diagnostics).
+
+Operator responsibilities: keep libwebp/libavif patched (this release was
+built against libwebp 1.6.0 / libavif 1.3.0 — consult your distribution's
+advisories for both, including the bundled AV1 codec), run the service as
+an unprivileged user, mount public source roots read-only where possible,
+do not place mutable upload directories under them without treating
+uploads as untrusted input to this endpoint, size process memory for the
+budgets above, and deploy with CPU capacity for the configured
+concurrency. The framework is **not** a sandbox for native codecs: F04's
+malformed-input corpus and bounded fuzzing found no crash, but they do not
+prove the codecs bug-free.
+
+### Fuzzing and adversarial testing
+
+Five bounded fuzz campaigns ran clean (no panics, no hangs):
+`FuzzParseRawQuery` (21 s, 1.57 M execs), `FuzzValidateSource` (21 s,
+497 K execs), `FuzzCacheIdentityKey` (21 s, 1.97 M execs), and — under the
+native tag with inputs capped at 4 KiB / 2 KiB so allocation cannot be
+large — `FuzzInspectSource` (21 s, 28 K execs) and `FuzzProcessSmall`
+(21 s, 6.5 K execs). A deterministic malformed-input corpus (20 entries:
+truncated JPEG/PNG, corrupt and animated WebP headers, non-AVIF BMFF,
+SVG text, mixed magic bytes, NUL prefixes, trailing garbage) runs as a
+regression test: every entry rejected safely, processor usable after each,
+no panics under concurrent interleaving. These are bounded campaigns on one
+machine, not exhaustive proofs.
+
+### F05 handoff
+
+F05 (disk caching) must preserve: source identity and version in the cache
+key, no cross-source aliasing, cache-path confinement equivalent to source
+roots, atomic writes with no partial publication, size limits and
+eviction, and — until versioned URLs exist — no immutable browser
+responses at unversioned URLs. No disk cache exists in F04.

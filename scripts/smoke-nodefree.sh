@@ -6,10 +6,27 @@
 set -u
 UNTAGGED=0
 if [ "${1:-}" = --untagged ]; then UNTAGGED=1; shift; fi
-BIN="${1:-bin/example-native}"
+# Default binary must match the mode: --untagged means the untagged
+# production build (the old default launched the TAGGED binary and then
+# "expected" 501s from it — a wrong-process false failure).
+if [ $# -gt 0 ]; then
+  BIN="$1"; shift
+elif [ "$UNTAGGED" = 1 ]; then
+  BIN="bin/example"
+else
+  BIN="bin/example-native"
+fi
 PORT="${SMOKE_PORT:-3199}"
 BASE="http://127.0.0.1:$PORT"
 export PORT
+
+# F04 §44: refuse to run against a stale server. A leftover process on
+# this port would answer probes with the wrong build's behavior (this
+# bit F03R: an untagged run "passed" against a forgotten tagged server).
+if curl -s -o /dev/null --max-time 2 "$BASE/healthz" 2>/dev/null; then
+  echo "FAIL: port $PORT already serving — kill the stale server first" >&2
+  exit 1
+fi
 
 # Node-free runtime environment. This host ships Node as a system package
 # on /usr/bin, so stripping PATH directories is not sufficient. Instead the
@@ -28,9 +45,18 @@ trap 'kill $SRV 2>/dev/null; rm -rf "$SMOKE_BIN"' EXIT
 up=1
 for _ in $(seq 1 50); do
   curl -s -o /dev/null "$BASE/healthz" && up=0 && break
+  if ! kill -0 $SRV 2>/dev/null; then
+    echo "FAIL: server exited during startup"; cat /tmp/smoke-server.log >&2; exit 1
+  fi
   sleep 0.2
 done
 [ "$up" = 0 ] || { echo "FAIL: server did not come up"; exit 1; }
+
+# F04 §44: the healthy endpoint must belong to THIS process, not a stale
+# one that raced into the port between the pre-check and the bind.
+if ! kill -0 $SRV 2>/dev/null; then
+  echo "FAIL: expected server process died after startup"; exit 1
+fi
 
 pass=0; fail=0
 probe() { # method path want_status [want_ct] [extra header]

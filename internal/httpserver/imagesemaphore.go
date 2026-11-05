@@ -2,64 +2,76 @@ package httpserver
 
 import (
 	"context"
-	"sync"
+	"time"
 )
 
-// semaphore bounds concurrent native image transformations (F03 §27). It
-// is deliberately not a general task scheduler: acquire waits or honors
-// cancellation, release runs deferred on every exit path, and no
-// internal lock is held while user work runs.
+// semaphore bounds concurrent native image transformations (F03 §27,
+// F04 §24). It is deliberately not a general task scheduler: acquire
+// waits a bounded time or honors cancellation, release runs deferred on
+// every exit path, and no lock is held while user work runs. Tokens are
+// buffered-channel sends, so a release can never block and there is no
+// parked-goroutine residue.
 type semaphore struct {
-	mu    sync.Mutex
-	cond  *sync.Cond
-	slots int
-	watch bool // a cancellation watcher goroutine has been started
+	tokens chan struct{}
 }
 
 func newSemaphore(slots int) *semaphore {
 	if slots < 1 {
 		slots = 1
 	}
-	s := &semaphore{slots: slots}
-	s.cond = sync.NewCond(&s.mu)
+	s := &semaphore{tokens: make(chan struct{}, slots)}
+	for i := 0; i < slots; i++ {
+		s.tokens <- struct{}{}
+	}
 	return s
 }
 
-// acquire takes a slot, blocking while none is free. Cancellation while
-// waiting returns ctx.Err() without holding a permit; one watcher
-// goroutine (per semaphore) broadcasts context completion so waiters wake.
+// maxPermitWait bounds how long a request may queue for a processing
+// permit (F04 §25). Beyond it the endpoint rejects with 503 (overload)
+// rather than letting requests pile up holding reader goroutines.
+// Healthy traffic recovers as slots free up; the bound is per acquire.
+const maxPermitWait = 10 * time.Second
+
+// permitTimeoutError reports the bounded-wait overload condition.
+type permitTimeoutError struct{}
+
+func (permitTimeoutError) Error() string { return "image processing queue timeout" }
+
+// errPermitTimeout reports the bounded-wait overload condition for the
+// endpoint's status mapping.
+var errPermitTimeout error = permitTimeoutError{}
+
+// acquire takes a slot, blocking while none is free for at most
+// maxPermitWait. Cancellation while waiting returns ctx.Err(); an
+// expired wait returns errPermitTimeout for the caller to map to 503.
 func (s *semaphore) acquire(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	done := ctx.Done()
-	s.mu.Lock()
-	if done != nil && !s.watch {
-		s.watch = true
-		s.mu.Unlock()
-		go func() {
-			<-done
-			s.cond.Broadcast()
-		}()
-		s.mu.Lock()
+	select {
+	case <-s.tokens:
+		return nil
+	default:
 	}
-	for s.slots == 0 {
-		s.cond.Wait()
-		if err := ctx.Err(); err != nil {
-			s.mu.Unlock()
-			return err
-		}
+	timer := time.NewTimer(maxPermitWait)
+	defer timer.Stop()
+	select {
+	case <-s.tokens:
+		return nil
+	case <-timer.C:
+		return errPermitTimeout
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	s.slots--
-	s.mu.Unlock()
-	return nil
 }
 
 // release returns a slot. Deferred by callers, so it runs on success,
-// failure, and panic unwinding.
+// failure, and panic unwinding. Never blocks: the buffer always has room
+// because acquire consumed exactly one token per in-flight request.
 func (s *semaphore) release() {
-	s.mu.Lock()
-	s.slots++
-	s.cond.Signal()
-	s.mu.Unlock()
+	select {
+	case s.tokens <- struct{}{}:
+	default:
+		// Cannot happen with correct pairing; fail safe rather than block.
+	}
 }

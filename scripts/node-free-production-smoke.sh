@@ -16,8 +16,32 @@ if [ ! -d dist/client ]; then
   exit 1
 fi
 
+# F04 §44: an explicit binary argument selects which build to smoke —
+# default stays the untagged production binary. The script must never
+# silently test ./bin/example when a tagged binary was requested (the
+# same class of wrong-process mistake as the F03R stale-server incident).
+SERVER_BIN="./bin/example"
+if [ "${1:-}" = "--untagged" ] || [ "${1:-}" = "--tagged" ]; then
+  shift
+fi
+if [ $# -gt 0 ]; then
+  SERVER_BIN="$1"
+  shift
+fi
+if [ ! -x "$SERVER_BIN" ]; then
+  echo "FAIL: server binary $SERVER_BIN missing or not executable" >&2
+  exit 1
+fi
+
 PORT=${NODE_FREE_PORT:-3141}
 BASE="http://127.0.0.1:${PORT}"
+
+# F04 §44: refuse to run against a stale server on this port (this bit
+# F03R: an untagged run "passed" against a forgotten tagged server).
+if curl -s -o /dev/null --max-time 2 "$BASE/healthz" 2>/dev/null; then
+  echo "FAIL: port $PORT already serving — kill the stale server first" >&2
+  exit 1
+fi
 
 # A PATH with no Node, npm, npx, or corepack. Build it from a scratch
 # directory so the test works even where /usr/bin holds node itself: the
@@ -64,7 +88,7 @@ cleanup() {
 # server serves on 127.0.0.1, so configure it as the trusted origin the
 # way a production deployment would.
 PORT=$PORT GO_META_TRUSTED_ORIGIN="$BASE" PATH="$SANDBOX_PATH" \
-  ./bin/example >/tmp/go-meta-node-free.log 2>&1 &
+  "$SERVER_BIN" >/tmp/go-meta-node-free.log 2>&1 &
 SERVER_PID=$!
 # Note: curl runs with the normal PATH — it tests the server over HTTP;
 # only the SERVER must be Node-free.
@@ -238,11 +262,19 @@ else
 fi
 
 got=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/_meta/image?src=%2Fimages%2Fhero.jpg&w=20")
-if [ "$got" != "501" ]; then
-  echo "FAIL: image contract -> $got (want 501)" >&2
+# Behavior probe, not a filename assumption: an untagged build must be a
+# truthful 501; a native-tagged build must actually optimize the image.
+# Anything else (400/404/415/500) means the endpoint is broken in this build.
+if [ "$SERVER_BIN" = "./bin/example" ]; then
+  want=501
+else
+  want=200
+fi
+if [ "$got" != "$want" ]; then
+  echo "FAIL: image contract -> $got (want $want for $SERVER_BIN)" >&2
   fail=1
 else
-  echo "ok:   image contract -> 501"
+  echo "ok:   image contract -> $want"
 fi
 
 if [ "$fail" -ne 0 ]; then

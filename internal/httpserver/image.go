@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 
@@ -48,12 +49,27 @@ type ImageEndpointConfig struct {
 	// Processor encodes output formats. Required for serving.
 	Processor imageproc.Processor
 	// MaxConcurrent bounds simultaneous native transformations; waiting
-	// requests respect context cancellation and otherwise queue (bounded
-	// by Fiber's request concurrency). Default 4.
+	// requests queue for at most maxPermitWait before a 503 overload
+	// rejection. Default 4.
 	MaxConcurrent int
+	// MaxOutputBytes caps encoded output size. Larger encoded results are
+	// refused with 500 and never published (F04 §23). Default 64 MiB,
+	// well above anything a ≤16 MP output at ≤4096×4096 can produce.
+	MaxOutputBytes int64
 }
 
-const defaultMaxConcurrent = 4
+const (
+	defaultMaxConcurrent  = 4
+	defaultMaxOutputBytes = 64 << 20
+
+	// maxProcessingTime bounds the total processing budget of one image
+	// request (F04 §26): resolve + decode + resize + encode. Generous
+	// enough for a 40 MP source through Catmull-Rom into AVIF on slow
+	// hardware; short enough that a stuck request cannot pin a permit
+	// indefinitely. Native encode calls are not interruptible mid-call;
+	// the deadline stops work between stages.
+	maxProcessingTime = 60 * time.Second
+)
 
 // MountImage reserves the image endpoint without processing (F01/F02
 // behavior): valid requests stay 501, invalid ones 400. Register before
@@ -85,13 +101,16 @@ func MountImageProcessing(app *fiber.App, limits imageopt.Limits, cfg ImageEndpo
 	if cfg.MaxConcurrent < 1 {
 		cfg.MaxConcurrent = defaultMaxConcurrent
 	}
+	if cfg.MaxOutputBytes < 1 {
+		cfg.MaxOutputBytes = defaultMaxOutputBytes
+	}
 	mountImage(app, limits, cfg)
 	return nil
 }
 
 func mountImage(app *fiber.App, limits imageopt.Limits, cfg ImageEndpointConfig) {
 	var gate *semaphore
-	if cfg.MaxConcurrent > 1 {
+	if cfg.MaxConcurrent >= 1 {
 		gate = newSemaphore(cfg.MaxConcurrent)
 	}
 	app.All(imageopt.Endpoint, func(c fiber.Ctx) error {
@@ -116,7 +135,13 @@ func mountImage(app *fiber.App, limits imageopt.Limits, cfg ImageEndpointConfig)
 // partial body: the response is fully materialized before any status is
 // sent.
 func serveImage(c fiber.Ctx, r imageopt.Request, cfg ImageEndpointConfig, gate *semaphore) error {
-	ctx := c.Context()
+	// Total per-request processing budget (F04 §26): bounds decode,
+	// resize, and encode work together. Native encode calls are not
+	// interruptible mid-call (documented); the deadline stops work
+	// BETWEEN stages, so a canceled request finishes at most the current
+	// native call before its output is discarded.
+	ctx, cancel := context.WithTimeout(c.Context(), maxProcessingTime)
+	defer cancel()
 	caps := cfg.Processor.Capabilities()
 
 	// Resolve the concrete output format before touching the filesystem:
@@ -168,14 +193,24 @@ func serveImage(c fiber.Ctx, r imageopt.Request, cfg ImageEndpointConfig, gate *
 		}
 	}
 
-	// Bound concurrent native transformations. Waiting respects
-	// cancellation; the gate releases on every exit path including panic
-	// via defer inside acquire/release.
+	// Bound concurrent heavy transformations. The permit is taken BEFORE
+	// the full decode and resize work (not just around the native
+	// encoder), so queued requests cannot allocate large decode buffers
+	// while waiting. Waiting is bounded by maxPermitWait; timeout maps to
+	// 503 overload, cancellation to the client-gone path.
 	if gate != nil {
 		if err := gate.acquire(ctx); err != nil {
-			return c.Status(http.StatusServiceUnavailable).SendString("image processing busy, retry later")
+			if errors.Is(err, errPermitTimeout) {
+				return c.Status(http.StatusServiceUnavailable).SendString("image processing busy, retry later")
+			}
+			return fiber.ErrRequestTimeout // client went away
 		}
 		defer gate.release()
+	}
+	// Re-check cancellation after (possibly) queueing: a request whose
+	// client disconnected while waiting does no decode work.
+	if err := ctx.Err(); err != nil {
+		return fiber.ErrRequestTimeout
 	}
 
 	transform := imageproc.Transform{
@@ -191,6 +226,14 @@ func serveImage(c fiber.Ctx, r imageopt.Request, cfg ImageEndpointConfig, gate *
 
 	// Validate the result before publishing anything (response atomicity).
 	if len(res.Data) == 0 || res.Format != selected {
+		return c.Status(http.StatusInternalServerError).SendString("image processing failed")
+	}
+	// Output-size ceiling (F04 §23): an encoder that produced oversized
+	// output is a bug or a pathological input; refuse rather than ship
+	// megabytes at an unversioned no-store URL. The bytes were already
+	// allocated by the encoder — this check refuses publication, it does
+	// not claw back memory (documented limitation).
+	if int64(len(res.Data)) > cfg.MaxOutputBytes {
 		return c.Status(http.StatusInternalServerError).SendString("image processing failed")
 	}
 	wantMIME, merr := selected.MIME()
