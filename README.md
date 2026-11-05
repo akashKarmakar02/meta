@@ -1559,3 +1559,56 @@ check its error and retry. Cleanup compares the actual flight identity and
 cannot remove a replacement. The coordinator is process-local: it does not
 coalesce across instances, deduplicate actions, or provide background refresh.
 The example's `?slow=1` adds a bounded delay to make concurrent fills visible.
+
+### E06: integration, correctness, security and performance gate
+
+E06 verified E01–E05 as one system and closed with two narrowly scoped fixes:
+
+- **Clock reads in eviction sweeps (`cache/memory.go`).** `reclaimExpired`
+  previously read the clock once per entry while holding the store lock. On
+  hosts without a working vDSO clock — where `time.Now()` can cost ~2.5µs
+  instead of ~25ns — that made every admission-evicting `Set` O(entries ×
+  clock) and dominated contention-free writes under pressure. The sweep now
+  takes one clock reading per pass; TTL semantics (fake-clock boundary tests)
+  are unchanged, and high-cardinality churn improved ~190× on this host.
+  The host's slow `time.Now()` remains an environment fact to record when
+  comparing benchmark numbers.
+- **Pre-route middleware hook in the example app (`cmd/example/main.go`).**
+  `newConfiguredAppBase`/`newConfiguredApp`/`newConfiguredAppWithActions`
+  accept optional `preRoute` handlers so tests can install request-scoped
+  principal middleware exactly as real auth middleware would: before any
+  route registration. No framework change.
+
+**Cache-key identity** (§ E03 key builder): route ID, static path segments,
+each dynamic parameter (nested or catch-all decoded to its full string), the
+canonical query encoding, the application scope, and explicit bypass all
+participate. `a/b/c` and a catch-all capturing `["a","b","c"]` on the same
+route are the same key by design — same URL, same data.
+
+**Tenant isolation**: two properly distinct scopes over one URL miss and fill
+independently, hit independently, and never observe each other's entries; the
+framework's responsibility ends at faithfully including everything the
+application's scope callback declares. An application that returns a shared
+scope for distinct tenants opts into sharing — no framework layer can detect
+that mistake. Cache and flight events carry no keys, values, or scope strings.
+
+**Singleflight context contract** (pinned by HTTP-level test): request context
+values do not enter flight-owned contexts. A loader whose output depends on a
+request-specific value must not use `Flights`; the scope callback itself still
+evaluates per-request with the full request context, so tenant-distinct
+scopes stay tenant-distinct even while flights are enabled.
+
+**Failed invalidation**: if `Store.Delete` fails after the generation bump,
+the old entry may survive. Invalidation returns an error — never a false
+success — and retry is safe. Committed mutations are not misrepresented as
+rolled back; there is no automatic broad flush or cross-tenant fallback.
+
+**Benchmark reading guide** (`loader/e06_bench_test.go`): compare modes on
+one machine only; cached misses on a full bounded store include eviction cost;
+burst benchmarks measure wall-clock for N joiners plus total executions (1
+with singleflight, N without). On this host (8 vCPU, time.Now ≈ 2.5µs),
+cached hits for a small struct cost roughly 4–5µs/op (~2 allocs) — several
+clock reads — so caching pays off for loaders costing more than a few
+microseconds (DB or network-like work of ≥100µs is decisively positive), and
+loses for trivial in-memory loaders. The full environment record and numbers
+are in the E06 commit message. No other performance rewrites were made.

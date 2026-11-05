@@ -61,23 +61,24 @@ func newActionRegistry(bindings []action.Binding) (*action.Registry, error) {
 // development and tests pass the concrete origin they serve on. An empty
 // trusted origin fails every action request closed (sameOrigin returns false),
 // so a misconfigured deployment never exposes an open mutation endpoint.
-func newConfiguredAppWithActions(assets *httpserver.Assets, privateSocket bool, loaders *loader.Registry, actions_ *action.Registry, trustedOrigin string, csrfManager *formcsrf.Manager) *fiber.App {
-	fapp := newConfiguredAppBase(assets, privateSocket, loaders, csrfManager, trustedOrigin)
+func newConfiguredAppWithActions(assets *httpserver.Assets, privateSocket bool, loaders *loader.Registry, actions_ *action.Registry, trustedOrigin string, csrfManager *formcsrf.Manager, preRoute ...fiber.Handler) *fiber.App {
+	fapp := newConfiguredAppBase(assets, privateSocket, loaders, csrfManager, []string{trustedOrigin}, preRoute...)
 	httpserver.MountActions(fapp, actions_, httpserver.ActionEndpointConfig{TrustedOrigin: trustedOrigin, CSRF: csrfManager})
 	return fapp
 }
 
 // newConfiguredApp builds a server without action endpoints. Kept for tests
 // predating Phase D.
-func newConfiguredApp(assets *httpserver.Assets, privateSocket bool, registry *loader.Registry) *fiber.App {
-	return newConfiguredAppBase(assets, privateSocket, registry, nil)
+func newConfiguredApp(assets *httpserver.Assets, privateSocket bool, registry *loader.Registry, preRoute ...fiber.Handler) *fiber.App {
+	return newConfiguredAppBase(assets, privateSocket, registry, nil, nil, preRoute...)
 }
 
 // newConfiguredAppBase constructs the shared app shell. The CSRF middleware
 // must be registered BEFORE page routes: Fiber matches middleware and routes
 // in registration order, so a Use after route registration would never see
-// page requests.
-func newConfiguredAppBase(assets *httpserver.Assets, privateSocket bool, registry *loader.Registry, csrfManager *formcsrf.Manager, trustedOrigin ...string) *fiber.App {
+// page requests. preRoute (E06) lets tests install request-scoped principal
+// middleware the same way real auth middleware would: before any route.
+func newConfiguredAppBase(assets *httpserver.Assets, privateSocket bool, registry *loader.Registry, csrfManager *formcsrf.Manager, trustedOrigin []string, preRoute ...fiber.Handler) *fiber.App {
 	config := fiber.Config{
 		// D07: centralized HTML error pages; no stack traces or internals leak.
 		ErrorHandler:  render.HTTPErrorHandler,
@@ -93,6 +94,10 @@ func newConfiguredAppBase(assets *httpserver.Assets, privateSocket bool, registr
 	fapp := fiber.New(config)
 	if registry != nil {
 		fapp.State().Set(loaderRegistryKey, registry)
+	}
+
+	for _, h := range preRoute {
+		fapp.Use(h)
 	}
 
 	// Recover converts panics into 500 responses instead of killing the server.

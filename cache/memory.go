@@ -296,6 +296,7 @@ func (m *Memory) Close() error {
 // expired reports whether e's lifetime is over. The served interval is
 // [stored, stored+TTL): at exactly stored+TTL the entry is expired. Callers
 // hold m.mu.
+// expired reports whether e's TTL has passed.
 func (m *Memory) expired(e *memoryEntry) bool {
 	return !m.now().Before(e.expiresAt)
 }
@@ -307,11 +308,16 @@ func (m *Memory) remove(elem *list.Element) {
 	m.usage -= e.size
 }
 
-// reclaimExpired removes every expired entry in one sweep. Callers hold m.mu.
+// reclaimExpired removes every expired entry in one sweep. Callers hold
+// m.mu. The clock is read ONCE for the whole sweep: expiry decisions within
+// one sweep share a timestamp (hosts without a working vDSO clock can pay
+// microseconds per time.Now, which would otherwise make an O(n) sweep cost
+// n clock reads), and expiry already only needs second-scale accuracy.
 func (m *Memory) reclaimExpired() {
+	now := m.now()
 	for elem := m.lru.Front(); elem != nil; {
 		next := elem.Next()
-		if m.expired(elem.Value.(*memoryEntry)) {
+		if !now.Before(elem.Value.(*memoryEntry).expiresAt) {
 			m.remove(elem)
 		}
 		elem = next
