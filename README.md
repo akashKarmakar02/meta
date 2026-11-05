@@ -1706,3 +1706,110 @@ Animated inputs must be rejected until preservation is explicitly supported,
 not silently reduced to one frame. Frame counts and duration require bounds,
 and decoder dependencies must be maintained. SSR and CSR may use the same
 root-relative URL, and production continues to require no Node runtime.
+
+## Image processor backend (F02)
+
+F02 selects the image-processing backend and integrates it behind a small Go
+abstraction. **No optimized output is served yet**: `/_meta/image` still
+answers 501 for valid requests and 400 for invalid ones until F03 implements
+real transformations. F02 delivers: backend selection, the processor
+interface, capability detection, initialization/shutdown semantics, error
+taxonomy, a test fake, and build integration.
+
+### Decision record
+
+Candidates evaluated:
+
+1. **libvips via CGO bindings** — excellent pipelines, but on this Fedora 44
+   machine libvips is not installed; installing it pulls ~57 packages (~304 MiB)
+   plus a glib dependency chain, and every deployment target would need the same.
+   Encoder capability also varies across distro builds of libvips, so "libvips is
+   installed" would not prove AVIF encode availability. Rejected for deployment
+   weight and unverifiable capability claims.
+2. **Pure-Go pipeline** — simplest deployment, but no maintained pure-Go WebP
+   *encoder* or any pure-Go AVIF encoder exists (golang.org/x/image covers
+   decode only). This fails F03's required output formats outright. Rejected.
+3. **First-party CGO binding to libwebp + libavif** — selected. Both libraries
+   were already present as runtime `.so` files on the development host;
+   dedicated C probe programs verified actual encoding: libwebp 1.6.0 produced
+   a real WebP bitstream and libavif 1.3.0 (with its bound aom/rav1e encoders)
+   produced a real AVIF bitstream before this decision was recorded. JPEG/PNG
+   decode and encode use the Go standard library. The binding is ~150 lines of
+   first-party cgo — smaller than adopting an unmaintained third-party wrapper.
+
+Go 1.26.3 preserved; no go.mod changes required for the default build.
+
+### Packages
+
+- `imageproc` (public): `Processor`, `Capabilities`, `Source`, `Transform`,
+  `Result`, error taxonomy (`ErrUnsupportedFormat`, `ErrInvalidTransform`,
+  `ErrProcessing`, `ErrSourceInvalid`, `ErrBackendUnavailable`, ...), `NewFake`
+  test double, `NoopProcessor`, and `RegisterBackend`/`New`. No Fiber, templ,
+  Node, or native dependency; importing it links nothing native.
+- `internal/imageprocessor` (internal): the concrete backend. Under the
+  `imageproc_native` build tag it is the libwebp+libavif CGO adapter;
+  without the tag it fails closed with `ErrBackendUnavailable`.
+
+Applications interact through configuration; they never see C types.
+
+### Capabilities
+
+Detected once at `New` by probing the actual libraries: encoder-version
+query for libwebp, encoder create/destroy for libavif, stdlib for
+JPEG/PNG. Capabilities are immutable after construction and reported
+honestly — no codec found means `AVIFEncode: false`, and requests for
+unsupported formats fail with `ErrUnsupportedFormat` rather than silently
+falling back to another format.
+
+Verified on this host (Fedora 44, x86_64): JPEG decode/encode, PNG
+decode/encode, WebP encode (libwebp encoder 1.6.0), AVIF encode (libavif
+1.3.0 with aom/rav1e), each proven by decoding the produced output.
+
+### Build configuration
+
+Default build: `go build ./...` — no native headers or libraries needed.
+Native backend:
+
+```sh
+sudo dnf install libwebp-devel libavif-devel   # Fedora (also pulls codec -devel)
+go build -tags imageproc_native ./...
+```
+
+(Debian/Ubuntu: `libwebp-dev libavif-dev`; containers: the corresponding
+runtime libs `libwebp7`/`libavif16` must be present in the final image.)
+
+Tests requiring the native backend run only under the tag; all other suites
+are fully portable.
+
+### Runtime dependencies and Node-free production
+
+The native build dynamically links `libwebp.so.7` and `libavif.so.16`
+(libavif in turn needs its codec libs, e.g. `libaom`, `librav1e`,
+`libdav1d`). These are ordinary system libraries — no Node, no npm, no
+spawned processes. **Node-free does not mean dependency-free or static**:
+deployments using image optimization must ship those libraries. Missing
+libraries fail at process start with a clear linker error, never mid-request.
+
+### Lifecycle, concurrency, cancellation
+
+`Native` holds no state between calls; `Close` is an idempotent no-op and safe
+during active processing (the system libraries are process-global and outlive
+any processor instance; this is documented rather than pretended away).
+`Process` is safe for concurrent use; F04 can add bounded limits without API
+changes. Context cancellation is checked before work starts and between the
+decode and encode stages; an in-progress native encode call itself cannot be
+interrupted — documented limitation. Errors wrap their native causes for
+server logs but are never forwarded raw to HTTP clients.
+
+The processor version identity (backend name + library versions + pipeline
+version) is computed once at `New`, stable for the process lifetime, and
+reserved for F05's cache identity.
+
+### Known limitations
+
+- The F02 resize path is placeholder geometry (integer source-pixel sampling,
+  contain-box only, never upscale) so `Process` is end-to-end testable; F03
+  replaces it with the real resampler without contract changes.
+- AVIF encode speed is fixed at libavif speed 6 / max 2 threads pending F03
+  quality/perf tuning.
+- The endpoint returns 501 until F03.
