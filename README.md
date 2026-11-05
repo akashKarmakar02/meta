@@ -1775,6 +1775,24 @@ sudo dnf install libwebp-devel libavif-devel   # Fedora (also pulls codec -devel
 go build -tags imageproc_native ./...
 ```
 
+Without sudo, extract the `-devel` RPMs to a user-local tree and point the
+build at it (runtime libs `libwebp.so.7`/`libavif.so.16` are assumed
+installed system-wide):
+
+```sh
+rpm2cpio libwebp-devel-*.rpm | cpio -idm --quiet
+# ... same for libavif-devel, into /tmp/native-libs
+ln -s /usr/lib64/libwebp.so.7 /tmp/native-libs/usr/lib64/libwebp.so
+ln -s /usr/lib64/libavif.so.16 /tmp/native-libs/usr/lib64/libavif.so
+PKG_CONFIG_PATH=/tmp/native-libs/usr/lib64/pkgconfig \
+CGO_CFLAGS="-I/tmp/native-libs/usr/include" \
+go build -tags imageproc_native ./...
+```
+
+The unversioned `.so` symlinks are required because the extracted pkgconfig
+files carry `Libs: -lwebp` / `-lavif` and no dev symlinks ship in this
+setup; without them the link step fails with "cannot find -lwebp".
+
 (Debian/Ubuntu: `libwebp-dev libavif-dev`; containers: the corresponding
 runtime libs `libwebp7`/`libavif16` must be present in the final image.)
 
@@ -1813,3 +1831,163 @@ reserved for F05's cache identity.
 - AVIF encode speed is fixed at libavif speed 6 / max 2 threads pending F03
   quality/perf tuning.
 - The endpoint returns 501 until F03.
+
+## Real image optimization (F03)
+
+F03 activates the pipeline F02 selected: `GET /_meta/image` now serves real
+resized images as WebP, AVIF, JPEG, or PNG from approved local source roots.
+
+### Working endpoint
+
+```
+GET /_meta/image?src=%2Fimages%2Fhero.jpg&w=960&q=80&f=webp
+```
+
+Responds `200 OK`, `Content-Type: image/webp`, a complete RIFF/WEBP body
+whose decoded dimensions are the requested transformation of the source.
+The same request with `f=avif` returns a real decodable AVIF file; `f=jpeg`
+and `f=png` use the Go standard library. All responses are fully encoded
+before the 200 is written — no partial output.
+
+HTML usage:
+
+```html
+<img src="/_meta/image?src=%2Fimages%2Fhero.jpg&w=960&f=auto" alt="Hero">
+```
+
+Go usage via the F01 helper:
+
+```go
+u := imageopt.URL("/images/hero.jpg").
+    Width(960).
+    Quality(80).
+    Format(imageopt.FormatAuto)
+// u.String() -> /_meta/image?src=%2Fimages%2Fhero.jpg&w=960&q=80&f=auto
+```
+
+### Resize geometry
+
+- Width only (`w=800`): height derived to preserve aspect ratio.
+- Height only (`h=450`): width derived to preserve aspect ratio.
+- Both (`w=500&h=500`): contain fit — the image fits inside the box,
+  never stretched or cropped, never larger than requested in either axis.
+- **Never upscale:** an image smaller than the request is returned at its
+  original dimensions (conservative policy; identical across all encoders).
+- Rounding: standard integer rounding on the derived dimension (`round(a*b/c)`),
+  clamped to at least 1 pixel and never above the requested bound. Documented
+  example: a 1600×900 source requested as 500×500 yields 500×281.
+- Resampling: Catmull-Rom interpolation via `golang.org/x/image/draw`
+  (pinned v0.33.0), applied on the source's RGBA view; non-zero source
+  bounds are handled by converting through `image/draw` first.
+
+### Alpha handling
+
+- Transparent PNG and WebP sources keep their alpha channel through resize;
+  WebP and PNG output preserve transparency.
+- AVIF output currently encodes YUV420 without an alpha plane — transparent
+  pixels flatten onto black. This is a documented limitation (see F03 report).
+- JPEG output has no alpha channel; alpha flattens onto white. Any flattening
+  behavior is consistent for a given output format and does not vary per request.
+
+### Auto format negotiation
+
+`f=auto` selects a concrete format using the request's `Accept` header and
+the configured processor's actual encode capabilities:
+
+- Only formats whose encoders the processor reports are considered.
+- Media-range quality weights are honored (`image/avif;q=0.2,image/webp;q=0.9`
+  → WebP wins).
+- Explicit exclusions are honored (`image/avif;q=0,image/webp` → AVIF never).
+- `image/*` matches any image type; `*/*` (and a missing Accept header)
+  defaults to the framework preference order: AVIF, then WebP.
+- Tie-break at equal weight uses Accept-header position order (earlier listed
+  type wins), which is deterministic.
+- If no acceptable supported format exists, the endpoint returns 406 instead
+  of guessing.
+- Responses for auto requests include `Vary: Accept`, since the concrete
+  representation depends on the client header. Explicit-format requests
+  (`f=webp`) do not negotiate and are unaffected by the Accept header.
+
+### Source resolution
+
+Sources resolve only under approved namespace roots:
+
+- `/images/...` — the application public image root (`public/images/`)
+- `/assets/...` — Vite build outputs (hashed filenames under dist/assets)
+
+Resolution uses Go's `os.OpenRoot`: the file is opened relative to the
+root with the kernel enforcing containment. There is no lexical prefix check
+to race with — symlink escapes inside the root fail during open. Remote URLs
+are disabled entirely. Errors do not disclose filesystem paths.
+
+### Resource limits
+
+| Limit | Default | Enforcement |
+|---|---|---|
+| Max input file bytes | 50 MiB | resolver aborts bounded read |
+| Max decoded pixels | 40 MP | DecodeConfig check before decode allocation |
+| Max output dimension/pixels | per F01 MaxDimension/MaxPixels | transform validation |
+| Max concurrent transformations | 4 | semaphore at the HTTP boundary (waiting requests honor ctx cancellation) |
+
+Native encoding (libwebp/libavif calls) is not interruptible once started;
+cancellation is checked before source resolution, while waiting for a permit,
+before decode, after decode, and before encode. This is a documented
+limitation, not hidden.
+
+### Error statuses
+
+| Situation | Status |
+|---|---|
+| Valid request, no processor available (untagged build) | 501 |
+| Invalid parameters (bad w/h/q/f/src, unknown params, duplicates) | 400 |
+| Missing source file | 404 |
+| Unsupported source content type | 415 |
+| Input bytes over limit / decoded pixels over limit | 413 |
+| No acceptable supported format for f=auto | 406 |
+| Too many concurrent optimizations (permit wait exceeded) | 503 |
+| Internal processing failure | 500 (safe message only) |
+
+HEAD performs the full transformation so the status, `Content-Type`, and
+`Content-Length` are exact; no body is sent.
+
+Caching until F05: successful responses carry `Cache-Control: no-store`.
+No disk cache exists yet.
+
+### Build configuration
+
+Same tagged build strategy as F02:
+
+```sh
+sudo dnf install libwebp-devel libavif-devel   # Fedora
+go build -tags imageproc_native -o bin/example-native ./cmd/example
+```
+
+Or the user-local header extraction described in the F02 section above,
+if sudo is unavailable:
+
+```sh
+PKG_CONFIG_PATH=/tmp/native-libs/usr/lib64/pkgconfig \
+CGO_CFLAGS="-I/tmp/native-libs/usr/include" \
+go build -tags imageproc_native -o bin/example-native ./cmd/example
+```
+
+Untagged builds compile without native
+headers, start normally, serve all routes, and truthfully return 501
+for optimization requests with no fabricated bytes.
+
+Runtime libraries: libwebp.so.7, libavif.so.16 (+ codec libs) — system
+dependencies, not bundled; Node-free does not mean static. See the F02
+section for the full dependency discussion.
+
+`make build-native` builds the tagged binary; `make e2e-native` runs the
+focused native-image Chromium suite against it.
+`scripts/smoke-nodefree.sh [--untagged] [binary]` runs the node-free smoke
+in either mode.
+
+### Not in F03
+
+SVG rasterization, animated images (animated sources are rejected, not
+first-frame-optimized), remote sources, disk caching (F05), and the
+comprehensive security matrix (F04) remain out of scope. EXIF orientation
+is not applied: the stdlib JPEG decoder ignores it; images needing rotation
+are served unrotated — limitation documented for F04 review.

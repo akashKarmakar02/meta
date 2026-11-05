@@ -6,24 +6,18 @@ import (
 	"testing"
 
 	"go-meta/imageproc"
-	"go-meta/internal/imageprocessor"
 )
 
-// TestF02NativeBackendWiringSmoke: an in-module smoke that the native
-// backend constructs, registers, and reports capabilities — guarded by the
-// imageproc_native tag, so default builds skip it.
+// TestF02NativeBackendWiringSmoke: an in-module smoke that the single
+// registered constructor builds the backend and reports capabilities —
+// guarded by the imageproc_native tag; default builds skip it.
 func TestF02NativeBackendWiringSmoke(t *testing.T) {
-	backend, err := imageprocessor.New(context.Background())
-	if err != nil {
-		t.Skipf("native backend unavailable: %v", err)
-	}
-	imageproc.RegisterBackend(func(ctx context.Context) (imageproc.Processor, error) {
-		return backend, nil
-	})
-	_ = backend
+	// The wiring registers newImageProcessor exactly once; repeated
+	// registration is idempotent for the same function value.
+	imageproc.RegisterBackend(newImageProcessor)
 	p, err := imageproc.New(context.Background())
 	if err != nil {
-		t.Fatal(err)
+		t.Skipf("native backend unavailable: %v", err)
 	}
 	caps := p.Capabilities()
 	if !caps.WebPEncode || !caps.AVIFEncode {

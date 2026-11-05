@@ -39,5 +39,11 @@ verify: test build ## Full gate battery: test + build + gofmt + e2e in Chromium
 e2e: build ## Real-Chromium E2E against the production binary (needs make build's output fresh)
 	$(NPM) exec playwright -- test
 
+build-native: ## Build the example server with the native image backend (needs libwebp/libavif headers; see README)
+	$(GO) build -tags imageproc_native -o bin/example-native ./cmd/example
+
+e2e-native: build-native ## Focused native-image Chromium run against the tagged binary
+	$(NPM) exec playwright -- test --config playwright.native-image.config.ts
+
 clean: ## Remove build outputs (bin, dist)
 	rm -rf bin dist

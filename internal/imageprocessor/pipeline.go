@@ -15,6 +15,8 @@ import (
 	"image/png"
 	"unsafe"
 
+	xdraw "golang.org/x/image/draw"
+
 	"go-meta/imageproc"
 )
 
@@ -50,10 +52,20 @@ func toRGBA(img image.Image) []byte {
 }
 
 // resizeToFit scales img to fit within w×h preserving aspect ratio, never
-// upscaling; one dimension may be zero (unconstrained). This is F02's
-// placeholder geometry: correct and allocation-bounded, deliberately
-// simple (integer source-pixel sampling). F03 replaces it with the real
-// resampler without changing the Process contract.
+// upscaling (F03 policy: conservative, deterministic — a small source is
+// returned at its original size rather than enlarged and softened). One
+// dimension may be zero (unconstrained).
+//
+// Resampling uses Catmull-Rom interpolation from golang.org/x/image/draw:
+// a good-quality, maintained kernel resampler for photographic content,
+// correct for both up- and downscaling (though upscaling never triggers
+// here), with correct handling of nonzero source bounds — the kernel
+// sampler draws into a fresh destination rect and reads source pixels via
+// At(), so a source image decoded with an offset origin still samples
+// correctly. Alpha: xdraw works on NRGBA destination with
+// straight-alpha semantics, so transparent input stays transparent (no
+// black flattening; that only happens for JPEG output, documented in
+// Process).
 func resizeToFit(img image.Image, w, h int) image.Image {
 	b := img.Bounds()
 	dx, dy := b.Dx(), b.Dy()
@@ -64,23 +76,15 @@ func resizeToFit(img image.Image, w, h int) image.Image {
 	if ow == dx && oh == dy {
 		return img
 	}
-	src := toRGBA(img)
 	dst := image.NewNRGBA(image.Rect(0, 0, ow, oh))
-	for y := 0; y < oh; y++ {
-		sy := y * dy / oh
-		rowOff := sy * dx * 4
-		dRow := dst.Pix[y*dst.Stride : y*dst.Stride+ow*4]
-		for x := 0; x < ow; x++ {
-			sx := x * dx / ow
-			s := src[rowOff+sx*4 : rowOff+sx*4+4]
-			d := dRow[x*4 : x*4+4]
-			d[0], d[1], d[2], d[3] = s[0], s[1], s[2], s[3]
-		}
-	}
+	xdraw.CatmullRom.Scale(dst, dst.Bounds(), img, b, xdraw.Over, nil)
 	return dst
 }
 
 // fitDimensions computes contain-box dimensions, never upscaling.
+// Rounding rule: floor of the scaled dimension, clamped to at least 1 —
+// documented in README. Floor (not round-half-up) guarantees the output
+// never exceeds the requested bounding box on either axis.
 func fitDimensions(dx, dy, w, h int) (int, int) {
 	scale := 1.0
 	if w > 0 && dx > w {

@@ -114,8 +114,12 @@ func newConfiguredAppBase(assets *httpserver.Assets, privateSocket bool, registr
 		fapp.Use(httpserver.WithFormCSRF(csrfManager, trustedOrigin...))
 	}
 
-	// F01: reserve the image endpoint before any file-based page route.
-	httpserver.MountImage(fapp)
+	// F01/F03: mount the image endpoint before any file-based page route.
+	// Native-tagged builds wire real processing (cmd/example/imageproc_native.go);
+	// untagged builds keep the truthful reserved 501 endpoint. mountImage
+	// itself lives in the build-tag-specific files so exactly one handler
+	// is registered for /_meta/image.
+	mountImage(fapp)
 
 	fapp.Get("/healthz", func(c fiber.Ctx) error {
 		return c.SendString("ok")

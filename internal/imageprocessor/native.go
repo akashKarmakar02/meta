@@ -120,7 +120,8 @@ func New(ctx context.Context) (*Native, error) {
 	}
 	C.avifEncoderDestroy(enc)
 	n.caps.AVIFEncode = true
-	n.caps.AVIFDecode = true // dav1d is a hard dependency of Fedora's libavif
+	// AVIFDecode stays false: F03 encodes AVIF but does not decode AVIF
+	// sources (no dav1d pixel binding yet). Honesty over reach.
 
 	// JPEG/PNG via the Go standard library.
 	n.caps.JPEGDecode = true
@@ -144,7 +145,13 @@ func New(ctx context.Context) (*Native, error) {
 // pipelineVersion is bumped when the processing pipeline behavior (resize
 // algorithm, color handling, encoder mapping) changes in a way that would
 // invalidate cached optimized outputs (F05 folds it into cache identity).
-const pipelineVersion = "1"
+// F03 raised it: placeholder integer sampling → Catmull-Rom resampling.
+const pipelineVersion = "2"
+
+// maxDecodedPixels bounds the decoded source image before any pixel
+// allocation (F03 §26; F04 tightens per deployment). 40 MP with overflow-
+// safe comparison against int64 products.
+const maxDecodedPixels = 40_000_000
 
 // Capabilities is immutable after New.
 func (n *Native) Capabilities() imageproc.Capabilities { return n.caps }
@@ -177,9 +184,9 @@ func (n *Native) Process(ctx context.Context, src imageproc.Source, t imageproc.
 		return imageproc.Result{}, fmt.Errorf("%w: empty source", imageproc.ErrSourceInvalid)
 	}
 
-	img, formatName, err := image.Decode(bytesReader(src.Bytes))
+	img, formatName, err := n.decodeSource(src.Bytes)
 	if err != nil {
-		return imageproc.Result{}, fmt.Errorf("%w: decode: %v", imageproc.ErrSourceInvalid, err)
+		return imageproc.Result{}, err
 	}
 	if err := ctx.Err(); err != nil {
 		return imageproc.Result{}, err
@@ -213,6 +220,44 @@ func (n *Native) Process(ctx context.Context, src imageproc.Source, t imageproc.
 		Data: data, Format: t.Format, MIME: mime,
 		Width: w, Height: h, Version: n.version,
 	}, nil
+}
+
+// decodeSource decodes source bytes into an image, choosing the decoder by
+// actual content sniff (image.Decode's registry), not filename. WebP
+// inputs go through the native decoder (the stdlib has none); animated
+// WebP and AVIF sources are rejected rather than silently optimized as
+// frame 0.
+func (n *Native) decodeSource(b []byte) (image.Image, string, error) {
+	cfg, formatName, err := image.DecodeConfig(bytesReader(b))
+	if err != nil {
+		return nil, "", fmt.Errorf("%w: sniff: %v", imageproc.ErrSourceInvalid, err)
+	}
+	// Overflow-safe pixel ceiling before any allocation.
+	if int64(cfg.Width)*int64(cfg.Height) > maxDecodedPixels {
+		return nil, "", fmt.Errorf("%w: %dx%d pixels", imageproc.ErrSourceTooLarge, cfg.Width, cfg.Height)
+	}
+	switch formatName {
+	case "webp":
+		img, err := decodeWebPToRGBA(b)
+		if err != nil {
+			return nil, "", fmt.Errorf("%w: %v", imageproc.ErrSourceInvalid, err)
+		}
+		return img, "webp", nil
+	case "avif":
+		_, _, frames, err := avifInfo(b)
+		if err != nil {
+			return nil, "", fmt.Errorf("%w: %v", imageproc.ErrSourceInvalid, err)
+		}
+		if frames > 1 {
+			return nil, "", fmt.Errorf("%w: animated avif not supported", imageproc.ErrSourceInvalid)
+		}
+		return nil, "", fmt.Errorf("%w: avif sources are not decodable in F03 (dav1d binding pending)", imageproc.ErrUnsupportedFormat)
+	}
+	img, _, err := image.Decode(bytesReader(b))
+	if err != nil {
+		return nil, "", fmt.Errorf("%w: decode: %v", imageproc.ErrSourceInvalid, err)
+	}
+	return img, formatName, nil
 }
 
 func (n *Native) encodeWebP(img image.Image, quality int) ([]byte, error) {
