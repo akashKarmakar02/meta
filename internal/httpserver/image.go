@@ -60,7 +60,7 @@ type ImageEndpointConfig struct {
 	// Cache optionally stores completed optimized outputs on disk (F05).
 	// Nil disables disk caching entirely — no directory is created or
 	// touched. Cache failures never fail a request: they degrade to
-	// processing and are logged server-side only.
+	// processing. F06 does not add logging or metrics for these failures.
 	Cache *imagecache.Cache
 }
 
@@ -107,6 +107,9 @@ func MountImageProcessing(app *fiber.App, limits imageopt.Limits, cfg ImageEndpo
 	if cfg.MaxConcurrent < 1 {
 		cfg.MaxConcurrent = defaultMaxConcurrent
 	}
+	if cfg.MaxConcurrent > 64 {
+		return errors.New("httpserver: image processing concurrency exceeds 64")
+	}
 	if cfg.MaxOutputBytes < 1 {
 		cfg.MaxOutputBytes = defaultMaxOutputBytes
 	}
@@ -115,9 +118,12 @@ func MountImageProcessing(app *fiber.App, limits imageopt.Limits, cfg ImageEndpo
 }
 
 func mountImage(app *fiber.App, limits imageopt.Limits, cfg ImageEndpointConfig) {
-	var gate *semaphore
+	var gate, snapshotGate *semaphore
 	if cfg.MaxConcurrent >= 1 {
 		gate = newSemaphore(cfg.MaxConcurrent)
+		// Bound source snapshots independently of expensive transformations.
+		// Extra slots allow cache hits to proceed while encoders are busy.
+		snapshotGate = newSemaphore(cfg.MaxConcurrent * 2)
 	}
 	app.All(imageopt.Endpoint, func(c fiber.Ctx) error {
 		c.Set(fiber.HeaderCacheControl, "no-store")
@@ -133,14 +139,14 @@ func mountImage(app *fiber.App, limits imageopt.Limits, cfg ImageEndpointConfig)
 		if cfg.Resolver == nil || cfg.Processor == nil {
 			return c.Status(http.StatusNotImplemented).SendString("image optimization is not implemented")
 		}
-		return serveImage(c, r, cfg, gate)
+		return serveImage(c, r, cfg, gate, snapshotGate)
 	})
 }
 
 // serveImage runs the configured processing pipeline. It never writes a
 // partial body: the response is fully materialized before any status is
 // sent.
-func serveImage(c fiber.Ctx, r imageopt.Request, cfg ImageEndpointConfig, gate *semaphore) error {
+func serveImage(c fiber.Ctx, r imageopt.Request, cfg ImageEndpointConfig, gate, snapshotGate *semaphore) error {
 	// Total per-request processing budget (F04 §26): bounds decode,
 	// resize, and encode work together. Native encode calls are not
 	// interruptible mid-call (documented); the deadline stops work
@@ -164,6 +170,18 @@ func serveImage(c fiber.Ctx, r imageopt.Request, cfg ImageEndpointConfig, gate *
 		}
 	} else if !caps.Encode(r.Format) {
 		return c.Status(http.StatusNotAcceptable).SendString("requested format not supported")
+	}
+
+	// Every request holds a bounded snapshot slot until its response is ready.
+	// This protects memory before source reads, including on cache hits.
+	if snapshotGate != nil {
+		if err := snapshotGate.acquire(ctx); err != nil {
+			if errors.Is(err, errPermitTimeout) {
+				return c.Status(http.StatusServiceUnavailable).SendString("image processing busy, retry later")
+			}
+			return fiber.ErrRequestTimeout
+		}
+		defer snapshotGate.release()
 	}
 
 	// Root-confined source read. The F01 layer already rejected malformed
@@ -219,6 +237,9 @@ func serveImage(c fiber.Ctx, r imageopt.Request, cfg ImageEndpointConfig, gate *
 		if kerr == nil {
 			cacheKey = key
 			if cached, gerr := cfg.Cache.Get(ctx, key, selected, cfg.MaxOutputBytes); gerr == nil {
+				if err := ctx.Err(); err != nil {
+					return mapProcessError(c, err)
+				}
 				wantMIME, _ := selected.MIME()
 				c.Set(fiber.HeaderContentType, wantMIME)
 				c.Set(fiber.HeaderContentLength, strconv.Itoa(len(cached)))
@@ -262,6 +283,11 @@ func serveImage(c fiber.Ctx, r imageopt.Request, cfg ImageEndpointConfig, gate *
 	if err != nil {
 		return mapProcessError(c, err)
 	}
+	// A native encoder can finish after its context is canceled. Discard its
+	// result rather than returning or publishing work for an expired request.
+	if err := ctx.Err(); err != nil {
+		return mapProcessError(c, err)
+	}
 
 	// Validate the result before publishing anything (response atomicity).
 	if len(res.Data) == 0 || res.Format != selected {
@@ -282,11 +308,12 @@ func serveImage(c fiber.Ctx, r imageopt.Request, cfg ImageEndpointConfig, gate *
 
 	// F05 best-effort publication: a fully validated result is published
 	// under the canonical identity so later requests can hit. Publication
-	// failure never fails this response — the bytes are already valid and
-	// deliverable (§23). The context may be expired after a slow encode;
-	// that is a miss for future requests, not an error for this one.
+	// failure never fails this response unless the request itself expired.
 	if cfg.Cache != nil && cacheKey != "" {
-		_ = cfg.Cache.Put(context.WithoutCancel(ctx), cacheKey, selected, res.Data)
+		_ = cfg.Cache.Put(ctx, cacheKey, selected, res.Data)
+	}
+	if err := ctx.Err(); err != nil {
+		return mapProcessError(c, err)
 	}
 
 	c.Set(fiber.HeaderContentType, wantMIME)

@@ -11,7 +11,7 @@
 //     (§36 of the task spec); coordination would need cross-process locks.
 //   - The directory is trusted: an attacker who can modify it can already
 //     replace entries wholesale. Integrity checking detects ACCIDENTAL
-//     corruption (truncation, partial writes, format mixups), not a
+//     corruption (empty files, missing magic, format mixups), not a
 //     deliberate attacker. Hit verification checks format magic, exact
 //     size bound, and regular-file status; publication validates before
 //     making an entry visible. No cryptographic integrity is claimed.
@@ -62,8 +62,8 @@ var (
 // no accidental unlimited storage. An empty Dir is rejected: caching is
 // opt-in and the operator chooses the directory.
 type Config struct {
-	// Dir is the dedicated cache directory. Must not live inside a public
-	// source root; ownership is validated by Open (see below).
+	// Dir is the dedicated cache directory. The application must keep it
+	// separate from public source roots; Open cannot know those roots.
 	Dir string
 	// MaxTotalBytes bounds the sum of finalized entry sizes. Metadata,
 	// directories, and transient temporary files consume additional space.
@@ -193,7 +193,7 @@ func (c *Cache) Close() error {
 
 // Get returns the cached bytes for key in the expected concrete format,
 // verified against the format's magic bytes and within the per-entry size
-// bound. Corruption (wrong magic, truncation, oversize, non-regular file)
+// bound. Corruption (wrong magic, empty, oversize, non-regular file)
 // is treated as a miss after a best-effort removal of the bad entry, so
 // the next identical request republishes instead of serving bad bytes
 // forever (§26). Removal failure never serves the corrupt entry — it
@@ -224,28 +224,37 @@ func (c *Cache) Get(ctx context.Context, key string, expect imageopt.Format, max
 		c.mu.Unlock()
 		return nil, ErrCacheMiss
 	}
+	entryInfo, err := c.root.Lstat(rel)
+	if err != nil || !entryInfo.Mode().IsRegular() {
+		c.dropEntryLocked(rel)
+		if err == nil {
+			_ = c.root.Remove(rel)
+		}
+		c.mu.Unlock()
+		return nil, ErrCacheMiss
+	}
 	f, err := c.root.Open(rel) // confined open; descriptor outlives eviction
 	if err != nil {
 		c.mu.Unlock()
 		return nil, ErrCacheMiss // evicted between lookup and open
 	}
-	c.mu.Unlock()
-	defer f.Close()
-
 	st, err := f.Stat()
-	if err != nil || !st.Mode().IsRegular() {
-		c.removeBadEntry(rel)
+	if err != nil || !st.Mode().IsRegular() || !os.SameFile(entryInfo, st) {
+		_ = f.Close()
+		c.mu.Unlock()
 		return nil, ErrCacheMiss
 	}
+	c.mu.Unlock()
+	defer f.Close()
 	// Bounded read: at most the cap plus one byte so an exactly-at-limit
 	// entry succeeds and anything larger is detected.
 	buf, err := readAllBounded(f, maxEntryBytes+1)
 	if err != nil {
-		c.removeBadEntry(rel)
+		c.removeBadEntry(rel, st)
 		return nil, ErrCacheMiss
 	}
 	if int64(len(buf)) > maxEntryBytes || len(buf) == 0 || !validFormatMagic(expect, buf) {
-		c.removeBadEntry(rel)
+		c.removeBadEntry(rel, st)
 		return nil, ErrCacheMiss
 	}
 
@@ -314,6 +323,10 @@ func (c *Cache) Put(ctx context.Context, key string, format imageopt.Format, dat
 		_ = c.root.Remove(tmp)
 		return ErrCacheClosed
 	}
+	if err := ctx.Err(); err != nil {
+		_ = c.root.Remove(tmp)
+		return err
+	}
 	// Same-filesystem atomic publication via root-relative rename.
 	if err := c.root.Rename(tmp, rel); err != nil {
 		_ = c.root.Remove(tmp)
@@ -349,9 +362,18 @@ func (c *Cache) Stats() (entries int, totalBytes int64) {
 // removeBadEntry deletes a corrupt/unusable entry and drops it from
 // accounting. Failures still leave the entry unserved: it is gone from the
 // index, so corrupt bytes are never returned twice.
-func (c *Cache) removeBadEntry(rel string) {
+func (c *Cache) removeBadEntry(rel string, observed os.FileInfo) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	current, err := c.root.Lstat(rel)
+	if err != nil || !os.SameFile(current, observed) {
+		return // a replacement must not be removed by an older reader
+	}
+	c.dropEntryLocked(rel)
+	_ = c.root.Remove(rel)
+}
+
+func (c *Cache) dropEntryLocked(rel string) {
 	if e, ok := c.entries[rel]; ok {
 		delete(c.entries, rel)
 		c.total -= e.size
@@ -359,7 +381,6 @@ func (c *Cache) removeBadEntry(rel string) {
 			c.total = 0
 		}
 	}
-	_ = c.root.Remove(rel)
 }
 
 // bumpRecency marks an entry used. Runs after the bytes were successfully

@@ -20,7 +20,7 @@ export default defineConfig({
     // F05: cache enabled with a temporary directory so this suite
     // exercises real encode→disk-hit cycles.
     command:
-      'PORT=3139 GO_META_IMAGE_CACHE_DIR=/tmp/go-meta-f05-native-cache ./bin/example-native',
+      'PORT=3139 GO_META_IMAGE_CACHE_DIR="${GO_META_NATIVE_TEST_CACHE:-/tmp/go-meta-f05-native-cache}" ./bin/example-native',
     url: 'http://127.0.0.1:3139/healthz',
     // F04: never attach to an already-running server — a stale tagged
     // binary answering probes caused a false pass during F03R.

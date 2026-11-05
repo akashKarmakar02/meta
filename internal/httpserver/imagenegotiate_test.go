@@ -119,3 +119,21 @@ func TestSplitMediaTypes(t *testing.T) {
 		t.Fatalf("parts = %d (%v)", len(parts), parts)
 	}
 }
+
+func TestF06SpecificExclusionsOverrideWildcards(t *testing.T) {
+	for _, tc := range []struct{ accept, want string }{
+		{"image/webp;q=0,image/*;q=1", "avif"},
+		{"image/webp;q=0,*/*;q=1", "avif"},
+		{"image/*;q=0,*/*;q=1", ""},
+		{"image/webp;q=0,image/avif;q=0,image/jpeg;q=0,image/png;q=0,*/*;q=1", ""},
+		{"image/webp;q=0.1,image/*;q=0.9", "avif"},
+		{"*/*;q=0", ""},
+		{"image/webp;q=NaN,image/avif;q=0.5", "avif"},
+	} {
+		t.Run(tc.accept, func(t *testing.T) {
+			if got := selectFormat(tc.accept, fullCaps()); string(got) != tc.want {
+				t.Fatalf("got %q want %q", got, tc.want)
+			}
+		})
+	}
+}

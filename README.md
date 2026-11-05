@@ -2119,26 +2119,25 @@ response (F03R).
 
 ### Memory ownership (approximate worst case, one request)
 
-Source bytes ≤ 32 MiB (Go); decoded RGBA frame ≤ ~160 MB at the 40 MP
-ceiling (native or Go depending on family); resize destination ≤ ~64 MB at
-the 16 MP output ceiling; native encode input is that same buffer; encoder
-output bounded by the output cap. Peak simultaneous ownership is roughly
-source + frame + destination + encoded ≈ 260 MB for one maximal request,
-and the semaphore (default 4) bounds how many such requests run at once —
-so a rough process ceiling is 4 × 260 MB plus framework overhead. Native
-allocations are malloc'd outside Go heap accounting: size the process on
-RSS, not Go heap. Every native allocation has a paired free on success,
-error, and cancellation paths (audited in F04 §28 below); nothing relies
-on Go GC for native memory.
+Source snapshots are capped at 32 MiB each; F06 limits simultaneous snapshots
+to twice the configured processing concurrency, including cache hits. A 40 MP
+decoded RGBA image alone can require about 160 MB, and resizing can add a
+64 MB destination plus resampling intermediates. Native encoding also packs
+a separate RGBA input buffer and can allocate native working memory and output;
+WebP decoding temporarily holds native and Go copies. Go's garbage collector
+may retain earlier buffers. The 64 MiB encoded-output check happens *after*
+encoding and does not cap peak allocations. These limits therefore do not
+establish a strict RSS ceiling. Native memory is outside Go heap accounting;
+operators must use OS/container memory limits and measure their own workloads.
 
 ### Native allocation audit
 
 | Allocation | Owner | Free |
 |---|---|---|
-| `WebPEncode` → `writer.mem` | `encodeWebP` Go wrapper | `C.free` deferred immediately after copy |
-| `WebPDecodeRGBAInto` output | caller-owned slice | Go GC (raw slice) |
+| `WebPEncode` → `writer.mem` | `encodeWebP` Go wrapper | `WebPMemoryWriterClear` after copying |
+| WebP decoder buffer and copied native RGBA | decoder wrapper | `WebPFreeDecBuffer`, then `free` after Go copy |
 | libavif encode `avifImage`/`avifEncoder`/RGB | C helper | destroyed on both success and every error branch inside the helper |
-| libavif probe output | probe | freed before return |
+| libavif output and probe buffers | wrappers | `avifRWDataFree` after copying or probing |
 
 No function returns without freeing or transferring ownership of every
 allocation it made; error branches free partial state.
@@ -2265,9 +2264,10 @@ previous complete entry or the new one — never partial bytes. Crash
 leftovers (`tmp-` prefixed files) are reclaimed at next startup.
 
 Hit verification: open under `os.Root`, regular-file check, exact size
-bound, format magic bytes. Corruption (truncation, wrong magic, oversize,
-non-regular file) removes the entry, misses, and reprocesses once — bad
-bytes are never served twice, and recovery has no retry loop.
+bound, format magic bytes. Empty or too-short-for-signature files, wrong
+magic, oversize files, and non-regular entries miss and are removed on a
+best-effort basis. A truncated file retaining its signature can pass; no full
+decode or authenticated integrity check occurs on a hit.
 
 The trust model is honest: the cache directory is writable server data.
 Verification detects accidental corruption; it does NOT defend against an
@@ -2290,8 +2290,9 @@ background sweeper exists. Readers of a concurrently evicted entry finish
 safely: eviction unlinks, but open descriptors keep serving complete bytes
 (POSIX semantics).
 
-Concurrency: one mutex held only for bookkeeping — never across encoding,
-whole-file reads, or eviction scans. Same-key concurrent publications are
+Concurrency: one mutex guards bookkeeping and the eviction scan, including
+its per-entry filesystem metadata calls; it is not held across encoding or
+whole-file reads. Same-key concurrent publications are
 safe (unique temp names; later complete rename wins). Cache hits do not
 consume native permits. One process owns each cache directory;
 multi-process sharing is unsupported (cross-process locking would be
@@ -2347,3 +2348,61 @@ Versioned asset manifests could avoid the per-request source hash for
 trusted immutable assets; browser-cache policy at versioned URLs; cache-hit
 metrics. No generic disk-cache framework is planned — this subsystem stays
 image-specific.
+
+### Phase F integration and operational boundaries (F06)
+
+`/_meta/image` validates the F01 query, negotiates a supported concrete
+format, reads a root-confined regular-file snapshot, inspects source metadata,
+hashes that same snapshot for the optional F05 cache, and either serves a hit
+or enters the processing gate. The native backend decodes, resizes with
+Catmull-Rom, encodes, and returns a fully materialized result before any 200
+response. F06 rejects APNG rather than silently discarding animation and fixes
+straight-alpha packing. The native pipeline version is now 3 so old output
+cannot be reused after that color change.
+
+The snapshot gate admits at most twice the configured processing concurrency
+(default eight snapshots); the separate processing gate admits four expensive
+transforms by default and at most 64 by configuration. A cache hit does not
+acquire a processing permit, though it does need a snapshot permit. Both waits
+are bounded. Cancellation is cooperative: an in-progress native codec call
+cannot be interrupted; an expired request's completed output is discarded and
+not intentionally published. As with any concurrent cancellation, a rename
+that already happened cannot be rolled back. Fiber's request context does not
+guarantee cancellation on every client disconnect; the explicit processing
+deadline still applies.
+
+The image cache is opt-in and the example server rejects cache directories
+that overlap approved source roots, including through existing symlink parents.
+This startup check is for trusted operator configuration; it is not a substitute
+for OS ownership and permissions. Use a dedicated directory owned by one
+process, outside the source tree and public roots. Finalized-byte accounting is
+not a filesystem quota: temporary writes, directory metadata, foreign files,
+and filesystem allocation overhead are additional. Endpoint publications hold
+a processing permit, bounding simultaneous temporary writes there; the internal
+cache itself does not impose an independent global writer quota. The file is
+fsynced before rename, but the directory is not fsynced: readers see complete
+files or misses, while a crash or power loss may lose a recent entry.
+
+Hit checks cover regular-file status, size, and format signatures. They do not
+fully decode entries or detect changed payload bytes that retain a valid magic
+prefix. Cache storage is trusted operator-owned data, not authenticated storage;
+Go race tests also do not establish native-library memory safety. The built-in
+native processor enforces pre-decode checks; custom processors are trusted
+code and must supply equivalent inspection and resource limits. EXIF
+orientation and color-profile transformations are not implemented; AVIF source
+decoding, SVG rasterization, and animated inputs remain unsupported. Native
+WebP output is decoded for pixel tests, and the built-in AVIF checks parse its
+container metadata. Additional F06 tests decode a WebP sample and an AVIF
+sample with FFmpeg when it is installed. FFmpeg is a test-only optional tool,
+not a production dependency, and those samples do not prove correctness for
+every output.
+
+Disk caching tends to help repeated expensive encodes. Tiny images, cold or
+high-cardinality workloads, and large source reads with cheap encodes may gain
+little or lose time because each hit still reads, inspects, and hashes the source.
+These are workload-dependent observations, not latency guarantees. Native
+builds need libwebp/libavif development files at build time and shared libraries
+at runtime; untagged builds remain available without them. Neither requires
+Node in production. F06 adds no Phase G middleware or metrics; future work can
+add request timing, cache/overload counters, and tracing without logging source
+names or credentials.

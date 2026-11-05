@@ -34,13 +34,15 @@ func FuzzInspectSource(f *testing.F) {
 	} {
 		f.Add(seed)
 	}
+	// Construct the processor once for the whole campaign (the same
+	// hoisting rationale as FuzzProcessSmall).
+	n, err := New(nil)
+	if err != nil {
+		f.Skip("native unavailable")
+	}
 	f.Fuzz(func(t *testing.T, src []byte) {
 		if len(src) > 4096 {
 			src = src[:4096] // keep the corpus header-sized
-		}
-		n, err := New(nil)
-		if err != nil {
-			t.Skip("native unavailable")
 		}
 		ins, ierr := n.inspectSource(src)
 		if ierr != nil {
@@ -67,13 +69,16 @@ func FuzzProcessSmall(f *testing.F) {
 	} {
 		f.Add(seed)
 	}
+	// Construct the processor once for the whole campaign: New probes the
+	// AVIF encoder (~ms), which would otherwise dominate every iteration,
+	// and the processor is documented safe for concurrent Process calls.
+	n, err := New(nil)
+	if err != nil {
+		f.Skip("native unavailable")
+	}
 	f.Fuzz(func(t *testing.T, src []byte) {
 		if len(src) > 2048 {
 			src = src[:2048]
-		}
-		n, err := New(nil)
-		if err != nil {
-			t.Skip("native unavailable")
 		}
 		tr := imageproc.Transform{Width: 8, Quality: 50, Format: imageopt.FormatWebP}
 		_, _ = n.Process(context.Background(), imageproc.Source{Bytes: src}, tr)

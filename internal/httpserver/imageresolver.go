@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
+	"sort"
 	"strings"
 
 	"go-meta/imageproc"
@@ -51,7 +53,7 @@ func DefaultImageSourceLimits() ImageSourceLimits {
 
 // Validate rejects zero or negative limits.
 func (l ImageSourceLimits) Validate() error {
-	if l.MaxSourceBytes < 1 || l.MaxDecodedPixels < 1 {
+	if l.MaxSourceBytes < 1 || l.MaxSourceBytes == math.MaxInt64 || l.MaxDecodedPixels < 1 {
 		return fmt.Errorf("httpserver: image source limits must be positive")
 	}
 	return nil
@@ -95,10 +97,12 @@ func NewImageResolver(mapping map[string]string, limits ImageSourceLimits) (*Ima
 	r := &ImageResolver{roots: make(map[string]*fsRoot, len(mapping)), limits: limits}
 	for ns, dir := range mapping {
 		if !strings.HasPrefix(ns, "/") || !strings.HasSuffix(ns, "/") {
+			_ = r.Close()
 			return nil, fmt.Errorf("httpserver: image namespace %q must start and end with '/'", ns)
 		}
 		root, err := os.OpenRoot(dir)
 		if err != nil {
+			_ = r.Close()
 			return nil, fmt.Errorf("httpserver: image root for %s: %w", ns, err)
 		}
 		r.roots[ns] = &fsRoot{namespace: ns, root: root}
@@ -124,12 +128,12 @@ func (r *ImageResolver) Namespaces() []string {
 	for ns := range r.roots {
 		out = append(out, ns)
 	}
-	// Deterministic order: plain sort; lengths are equal enough for logs.
-	for i := 1; i < len(out); i++ {
-		for j := i; j > 0 && out[j] < out[j-1]; j-- {
-			out[j], out[j-1] = out[j-1], out[j]
+	sort.Slice(out, func(i, j int) bool {
+		if len(out[i]) != len(out[j]) {
+			return len(out[i]) > len(out[j])
 		}
-	}
+		return out[i] < out[j]
+	})
 	return out
 }
 
@@ -208,12 +212,17 @@ func (r *ImageResolver) namespaceFor(identity string) string {
 // F01 validation guarantees no leading '../' tricks; the root-relative
 // lookup still refuses any residual traversal or escaping symlink.
 func (r *ImageResolver) match(identity string) (*fsRoot, string) {
+	var selected *fsRoot
+	longest := 0
 	for ns, fr := range r.roots {
-		if strings.HasPrefix(identity, ns) {
-			return fr, strings.TrimPrefix(identity, ns)
+		if len(ns) > longest && strings.HasPrefix(identity, ns) {
+			selected, longest = fr, len(ns)
 		}
 	}
-	return nil, ""
+	if selected == nil {
+		return nil, ""
+	}
+	return selected, strings.TrimPrefix(identity, selected.namespace)
 }
 
 // mapOpenError converts root-scoped open failures into the two safe
@@ -235,7 +244,7 @@ func (l ImageSourceLimits) CheckDecodedPixels(w, h int) error {
 	if w <= 0 || h <= 0 {
 		return imageproc.ErrSourceInvalid
 	}
-	if int64(w)*int64(h) > l.MaxDecodedPixels {
+	if int64(w) > l.MaxDecodedPixels/int64(h) {
 		return imageproc.ErrSourceTooLarge
 	}
 	return nil

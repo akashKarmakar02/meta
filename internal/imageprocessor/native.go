@@ -19,7 +19,7 @@ package imageprocessor
 // ---- WebP ----
 
 // encodeWebP encodes packed RGBA rows into lossy WebP at the given
-// quality (0-100). Returns a malloc'd buffer the caller frees; *out_len
+// quality (0-100). Returns a buffer released with freeWebPOutput; *out_len
 // receives its size. Returns NULL on failure.
 static unsigned char* encodeWebP(const uint8_t* rgba, int width, int height, float quality, size_t* out_len) {
 	WebPPicture pic;
@@ -52,6 +52,13 @@ static unsigned char* encodeWebP(const uint8_t* rgba, int width, int height, flo
 	}
 	*out_len = writer.size;
 	return writer.mem; // ownership moves to caller; do not clear the writer
+}
+
+static void freeWebPOutput(uint8_t* data) {
+	WebPMemoryWriter writer;
+	WebPMemoryWriterInit(&writer);
+	writer.mem = data;
+	WebPMemoryWriterClear(&writer);
 }
 
 // webpEncoderVersion returns the linked encoder version, e.g. 0x010600.
@@ -155,8 +162,8 @@ func New(ctx context.Context) (*Native, error) {
 // pipelineVersion is bumped when the processing pipeline behavior (resize
 // algorithm, color handling, encoder mapping) changes in a way that would
 // invalidate cached optimized outputs (F05 folds it into cache identity).
-// F03 raised it: placeholder integer sampling → Catmull-Rom resampling.
-const pipelineVersion = "2"
+// F06 raised it for correct straight-alpha conversion in native encoders.
+const pipelineVersion = "3"
 
 // maxDecodedPixels bounds the decoded source image before any pixel
 // allocation (F03 §26; F04 tightens per deployment). 40 MP with overflow-
@@ -277,7 +284,14 @@ func (n *Native) inspectSource(b []byte) (inspectedSource, error) {
 		if err != nil {
 			return inspectedSource{}, fmt.Errorf("%w: png header: %v", imageproc.ErrSourceInvalid, err)
 		}
-		return checkedInspection("png", cfg.Width, cfg.Height, false)
+		inspected, err := checkedInspection("png", cfg.Width, cfg.Height, false)
+		if err != nil {
+			return inspectedSource{}, err
+		}
+		if err := rejectAnimatedPNG(b); err != nil {
+			return inspectedSource{}, fmt.Errorf("%w: %v", imageproc.ErrSourceInvalid, err)
+		}
+		return inspected, nil
 	case bytes.HasPrefix(b, []byte{0xff, 0xd8}):
 		cfg, err := jpegDecodeConfig(b)
 		if err != nil {
@@ -323,7 +337,7 @@ func checkedInspection(format string, w, h int, decoded bool) (inspectedSource, 
 	if w <= 0 || h <= 0 {
 		return inspectedSource{}, fmt.Errorf("%w: %s dimensions %dx%d", imageproc.ErrSourceInvalid, format, w, h)
 	}
-	if int64(w)*int64(h) > maxDecodedPixels {
+	if int64(w) > maxDecodedPixels/int64(h) {
 		return inspectedSource{}, fmt.Errorf("%w: %s declares %dx%d pixels", imageproc.ErrSourceTooLarge, format, w, h)
 	}
 	return inspectedSource{format: format, width: w, height: h, decoded: decoded}, nil
@@ -422,7 +436,7 @@ func (n *Native) encodeWebP(img image.Image, quality int) ([]byte, error) {
 	if ptr == nil {
 		return nil, fmt.Errorf("libwebp encode failed")
 	}
-	defer C.free(unsafePointer(ptr))
+	defer C.freeWebPOutput(ptr)
 	size := int(outLen)
 	out := make([]byte, size)
 	copySliceFromC(out, ptr)

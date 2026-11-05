@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"math"
 	"strconv"
 	"strings"
 
@@ -54,34 +55,50 @@ func selectFormat(accept string, caps imageproc.Capabilities) imageopt.Format {
 		return defaultFormat
 	}
 
-	var best imageopt.Format
-	bestQ := -1.0
-	namedAny := false
-	for _, element := range splitMediaTypes(accept) {
+	// A more specific media range determines each representation's quality,
+	// including q=0 exclusions; only then compare different representations.
+	type preference struct {
+		specificity, order int
+		q                  float64
+	}
+	prefs := make(map[imageopt.Format]preference)
+	parsed := false
+	for order, element := range splitMediaTypes(accept) {
 		mediaType, q, ok := parseMediaType(element)
-		if !ok || q <= 0 {
-			continue // malformed or explicitly excluded element
+		if !ok {
+			continue
+		}
+		parsed = true
+		specificity := 2
+		if mediaType == "*/*" {
+			specificity = 0
+		} else if strings.HasSuffix(mediaType, "/*") {
+			specificity = 1
 		}
 		for _, f := range negotiateOrder {
 			if !supported[f] {
 				continue
 			}
-			m, _ := f.MIME()
-			if !matchesRange(mediaType, m) {
+			mime, _ := f.MIME()
+			if !matchesRange(mediaType, mime) {
 				continue
 			}
-			namedAny = true
-			if q > bestQ { // strictly greater: earlier elements win ties
-				best, bestQ = f, q
+			old, exists := prefs[f]
+			if !exists || specificity > old.specificity {
+				prefs[f] = preference{specificity: specificity, order: order, q: q}
 			}
-			break // one format per element; the next element competes on q
 		}
 	}
-	if !namedAny && anyConcreteMention(accept) {
-		return "" // client named image formats, none acceptable
-	}
-	if string(best) == "" {
+	if !parsed {
 		return defaultFormat
+	}
+	var best imageopt.Format
+	bestQ, bestOrder := 0.0, int(^uint(0)>>1)
+	for _, f := range negotiateOrder {
+		p, ok := prefs[f]
+		if ok && p.q > 0 && (p.q > bestQ || (p.q == bestQ && p.order < bestOrder)) {
+			best, bestQ, bestOrder = f, p.q, p.order
+		}
 	}
 	return best
 }
@@ -100,22 +117,6 @@ func matchesRange(rangeType, mimeType string) bool {
 		return false
 	}
 	return rSub == "*" || rSub == mSub
-}
-
-// anyConcreteMention reports whether the header mentions any image/*
-// subtype at a positive weight — used to distinguish "stated preferences,
-// none acceptable" (→ 406) from "only junk/wildcards" (→ default).
-func anyConcreteMention(accept string) bool {
-	for _, element := range splitMediaTypes(accept) {
-		mediaType, q, ok := parseMediaType(element)
-		if !ok || q <= 0 || !strings.HasPrefix(mediaType, "image/") || strings.HasSuffix(mediaType, "/*") {
-			continue
-		}
-		// A concrete image subtype (webp, avif, gif, ...): the client talks
-		// images but none of ours are acceptable.
-		return true
-	}
-	return false
 }
 
 func firstSupported(supported map[imageopt.Format]bool) imageopt.Format {
@@ -166,7 +167,7 @@ func parseMediaType(element string) (mediaType string, q float64, ok bool) {
 			}
 			if strings.EqualFold(strings.TrimSpace(k), "q") {
 				f, err := strconv.ParseFloat(strings.Trim(strings.TrimSpace(v), `"`), 64)
-				if err != nil || f < 0 || f > 1 {
+				if err != nil || math.IsNaN(f) || f < 0 || f > 1 {
 					return "", 0, false // malformed q invalidates the element
 				}
 				q = f

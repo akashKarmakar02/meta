@@ -41,9 +41,21 @@ static unsigned char* encodeAVIFRGBA(const uint8_t* rgba, int width, int height,
 	r = avifEncoderFinish(enc, &out);
 	avifEncoderDestroy(enc);
 	avifImageDestroy(img);
-	if (r != AVIF_RESULT_OK) { *err_code = (int)r; return NULL; }
+	if (r != AVIF_RESULT_OK) {
+		// F06 §24: finish may allocate into out before failing; free it
+		// unconditionally on the error path (avifRWDataFree is a documented
+		// no-op on an empty/zeroed struct).
+		avifRWDataFree(&out);
+		*err_code = (int)r;
+		return NULL;
+	}
 	*out_len = out.size;
 	return out.data; // ownership moves to caller
+}
+
+static void freeAVIFOutput(uint8_t* data, size_t size) {
+	avifRWData output = { data, size };
+	avifRWDataFree(&output);
 }
 */
 import "C"
@@ -74,7 +86,7 @@ func encodeAVIFC(img image.Image, quality int) ([]byte, error) {
 	if ptr == nil {
 		return nil, fmt.Errorf("libavif encode failed: avifResult %d", int(errCode))
 	}
-	defer C.free(unsafePointer(ptr))
+	defer C.freeAVIFOutput(ptr, outLen)
 	out := make([]byte, int(outLen))
 	copySliceFromC(out, ptr)
 	return out, nil
@@ -91,6 +103,6 @@ func avifEncodeProbe() error {
 	if ptr == nil {
 		return fmt.Errorf("libavif probe encode failed: avifResult %d", int(errCode))
 	}
-	C.free(unsafePointer(ptr))
+	C.freeAVIFOutput(ptr, outLen)
 	return nil
 }

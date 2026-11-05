@@ -10,7 +10,10 @@ import "C"
 
 import (
 	"bytes"
+	"encoding/binary"
+	"errors"
 	"image"
+	"image/color"
 	"image/jpeg"
 	"image/png"
 	"io"
@@ -38,6 +41,28 @@ func bytesReader(b []byte) *bytes.Reader { return bytes.NewReader(b) }
 // inspection stage's cost proportional to the header, not the file.
 const headerReadBudget = 64 << 10
 
+// rejectAnimatedPNG examines the already size-bounded source snapshot until
+// IDAT. APNG requires acTL before IDAT. Bounds are checked before every slice;
+// ordinary PNG decoding still verifies the image and its checksums.
+func rejectAnimatedPNG(b []byte) error {
+	for offset := 8; offset <= len(b)-12; {
+		size := uint64(binary.BigEndian.Uint32(b[offset : offset+4]))
+		remaining := uint64(len(b) - offset - 12)
+		kind := string(b[offset+4 : offset+8])
+		if kind == "acTL" {
+			return errors.New("animated png not supported")
+		}
+		if size > remaining {
+			return nil // the PNG decoder reports malformed or truncated data
+		}
+		if kind == "IDAT" {
+			return nil
+		}
+		offset += 12 + int(size)
+	}
+	return nil // the decoder handles missing image data
+}
+
 // pngDecodeConfig parses the PNG IHDR only (stdlib png.DecodeConfig).
 func pngDecodeConfig(b []byte) (image.Config, error) {
 	return png.DecodeConfig(io.LimitReader(bytes.NewReader(b), headerReadBudget))
@@ -55,14 +80,26 @@ func toRGBA(img image.Image) []byte {
 	b := img.Bounds()
 	dx, dy := b.Dx(), b.Dy()
 	out := make([]byte, dx*dy*4)
+	// The resizer produces NRGBA, already in the encoders' straight-alpha
+	// layout. Copy each row directly, respecting subimages and nonzero bounds.
+	if nrgba, ok := img.(*image.NRGBA); ok {
+		stride := dx * 4
+		for y := 0; y < dy; y++ {
+			start := nrgba.PixOffset(b.Min.X, b.Min.Y+y)
+			copy(out[y*stride:(y+1)*stride], nrgba.Pix[start:start+stride])
+		}
+		return out
+	}
 	i := 0
 	for y := 0; y < dy; y++ {
 		for x := 0; x < dx; x++ {
-			r, g, bl, a := img.At(b.Min.X+x, b.Min.Y+y).RGBA()
-			out[i] = byte(r >> 8)
-			out[i+1] = byte(g >> 8)
-			out[i+2] = byte(bl >> 8)
-			out[i+3] = byte(a >> 8)
+			// Color.RGBA returns alpha-premultiplied channels; native encoders
+			// consume straight alpha, so convert explicitly before packing.
+			px := color.NRGBAModel.Convert(img.At(b.Min.X+x, b.Min.Y+y)).(color.NRGBA)
+			out[i] = px.R
+			out[i+1] = px.G
+			out[i+2] = px.B
+			out[i+3] = px.A
 			i += 4
 		}
 	}

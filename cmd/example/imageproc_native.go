@@ -47,9 +47,10 @@ func mountImage(fapp *fiber.App) {
 		os.Exit(1)
 	}
 	imageproc.RegisterBackend(newImageProcessor)
-	maxConcurrent := 4
-	if v, err := strconv.Atoi(os.Getenv("GO_META_IMAGE_CONCURRENCY")); err == nil && v > 0 && v <= 64 {
-		maxConcurrent = v
+	concurrency, err := envImageLimit("GO_META_IMAGE_CONCURRENCY", 4, 64)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "image endpoint: %v\n", err)
+		os.Exit(1)
 	}
 	backend, perr := imageproc.New(context.Background())
 	if perr != nil {
@@ -59,14 +60,25 @@ func mountImage(fapp *fiber.App) {
 	cfg := httpserver.ImageEndpointConfig{
 		Resolver:      resolver,
 		Processor:     backend,
-		MaxConcurrent: maxConcurrent,
+		MaxConcurrent: int(concurrency),
 	}
 	if dir := os.Getenv("GO_META_IMAGE_CACHE_DIR"); dir != "" {
+		if err := imageCachePath(dir, mapping); err != nil {
+			fmt.Fprintf(os.Stderr, "image cache: %v\n", err)
+			os.Exit(1)
+		}
+		total, terr := envImageLimit("GO_META_IMAGE_CACHE_MAX_TOTAL", 256<<20, 1<<30)
+		entries, eerr := envImageLimit("GO_META_IMAGE_CACHE_MAX_ENTRIES", 4096, 1<<30)
+		entry, xerr := envImageLimit("GO_META_IMAGE_CACHE_MAX_ENTRY", 64<<20, 1<<30)
+		if terr != nil || eerr != nil || xerr != nil {
+			fmt.Fprintf(os.Stderr, "image cache: invalid configured limit\n")
+			os.Exit(1)
+		}
 		cache, cerr := imagecache.Open(imagecache.Config{
 			Dir:           dir,
-			MaxTotalBytes: envImageBytes("GO_META_IMAGE_CACHE_MAX_TOTAL", 256<<20),
-			MaxEntries:    int(envImageBytes("GO_META_IMAGE_CACHE_MAX_ENTRIES", 4096)),
-			MaxEntryBytes: envImageBytes("GO_META_IMAGE_CACHE_MAX_ENTRY", 64<<20),
+			MaxTotalBytes: total,
+			MaxEntries:    int(entries),
+			MaxEntryBytes: entry,
 		})
 		if cerr != nil {
 			fmt.Fprintf(os.Stderr, "image cache: %v\n", cerr)
@@ -80,18 +92,18 @@ func mountImage(fapp *fiber.App) {
 	}
 }
 
-// envImageBytes reads a positive byte count from env; def is used when
-// unset or invalid. Values are clamped to a sane ceiling (1 GiB) so a typo
-// cannot configure an unbounded cache.
-func envImageBytes(name string, def int64) int64 {
-	v, err := strconv.ParseInt(os.Getenv(name), 10, 64)
-	if err != nil || v < 1 {
-		return def
+// envImageLimit uses defaults only for unset settings and rejects invalid
+// explicit values rather than silently running with a different limit.
+func envImageLimit(name string, def, max int64) (int64, error) {
+	raw, ok := os.LookupEnv(name)
+	if !ok {
+		return def, nil
 	}
-	if v > 1<<30 {
-		return 1 << 30
+	v, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || v < 1 || v > max {
+		return 0, fmt.Errorf("%s must be a positive integer at most %d", name, max)
 	}
-	return v
+	return v, nil
 }
 
 // parseImageRoots parses "namespace=dir" comma pairs. Duplicate

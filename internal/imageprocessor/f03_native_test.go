@@ -410,8 +410,8 @@ func TestF03PipelineVersionBumped(t *testing.T) {
 	if !bytes.Contains([]byte(n.version), []byte(want)) {
 		t.Fatalf("version %q lacks %q", n.version, want)
 	}
-	if pipelineVersion != "2" {
-		t.Fatalf("pipelineVersion = %q want 2", pipelineVersion)
+	if pipelineVersion != "3" {
+		t.Fatalf("pipelineVersion = %q want 3", pipelineVersion)
 	}
 }
 
