@@ -6,8 +6,9 @@ soft navigation.
 
 The Go module is `github.com/akashKarmakar02/meta`. This is an early
 pre-release: its APIs can change. To add a specific release to an existing
-Go module, run `go get github.com/akashKarmakar02/meta@v0.1.0-alpha.1`.
-The `meta init` project generator is not yet implemented.
+Go module, run `go get github.com/akashKarmakar02/meta@v0.1.0-alpha.2`.
+Install the matching CLI with
+`go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-alpha.2`.
 
 The implementation plan lives in [`phase1-implementation-blueprint.md`](phase1-implementation-blueprint.md).
 
@@ -54,8 +55,97 @@ route registry into `generated/` and `frontend/`. It also accepts an app
 directory and module-root output directory as positional arguments; the app
 directory must be inside that module root. Dynamic templ packages are compiled
 into `generated/routepages/`, without creating Go files under bracket-named
-route directories. A public application runtime and `meta init` are separate
-work; generation alone does not create a runnable independent application.
+route directories. The public runtime below can serve these generated routes.
+
+## Create a project
+
+Install the CLI as shown above, make sure your Go binary directory is on
+`PATH`, and run:
+
+```sh
+meta init my-app
+cd my-app
+make setup
+meta dev
+```
+
+`meta init` creates an independent Go module, an SSR home page, a Svelte
+page, the browser runtime, and build/dev configuration. It does not install
+dependencies or overwrite an existing directory. The default module path is
+`example.com/my-app`; use `--module github.com/you/my-app` to choose another.
+Go 1.26.10+, Node/npm, Make, and Air are required for development. The
+production build is Go plus prebuilt assets and does not need Node.
+
+An unreleased development build of the CLI uses a local framework checkout;
+run it from the framework repository or pass `--framework-dir /path/to/meta`.
+It records that checkout as a Go module replacement. A released CLI pins its
+own released framework version instead. Remove a local replacement before
+publishing the application.
+
+## Public application runtime
+
+A consumer can pass its generated functions and typed bindings to
+`server.New`. For example, in a module named `example.com/myapp` with an SSR
+`about/page.templ` route and a Vite production build in `dist/client`:
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+
+    generated "example.com/myapp/generated"
+    "github.com/akashKarmakar02/meta/action"
+    "github.com/akashKarmakar02/meta/loader"
+    "github.com/akashKarmakar02/meta/routecontext"
+    "github.com/akashKarmakar02/meta/server"
+)
+
+type SaveInput struct { Name string `json:"name"` }
+
+func main() {
+    app, err := server.New(server.Config{
+        Routes: generated.RegisterRoutes(),
+        SSRPage: generated.SSRPage,
+        BarePage: generated.BarePage,
+        VisualLayout: generated.VisualLayout,
+        ClientDir: "dist/client",
+        TrustedOrigin: "https://example.com",
+        Loaders: []loader.Binding{
+            loader.Bind("about/page.templ", func(ctx context.Context, route routecontext.Route) (string, error) {
+                return "Hello", nil
+            }),
+        },
+        Actions: []action.Binding{
+            action.Bind("save", func(ctx context.Context, route routecontext.Route, in SaveInput) (string, error) {
+                return in.Name, nil
+            }),
+        },
+    })
+    if err != nil { log.Fatal(err) }
+    log.Fatal(app.Listen(":3000"))
+}
+```
+
+`server.New` validates route descriptors and bindings at startup, mounts the
+existing typed loader and action dispatchers, and serves built files from the
+client directory’s `assets/` directory. SSR-only applications may omit
+`ClientDir`; CSR routes require production assets or an explicitly configured
+`DevOrigin`. Development asset URLs expect the meta dev proxy; creating a
+complete independent development project remains future work. Node is not
+needed by the production server.
+
+Actions require an explicit trusted browser-facing origin. For form-capable
+bindings, construct a `formcsrf.Manager` with a secret of at least 32 bytes and
+supply it as `Config.CSRF`; use the same persistent secret across production
+instances. The origin must reflect HTTPS in HTTPS deployments so secure cookies
+are issued. The framework does not provide authentication or authorization;
+applications must enforce those in their actions and loaders. The server uses
+Fiber's default application body limit in addition to `MaxActionBodyBytes`.
+This API creates a Fiber app; integrating middleware before its route handlers,
+image processing setup, and a complete build/dev workflow are not yet exposed
+by this package.
 
 ## Request route context
 

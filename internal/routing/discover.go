@@ -387,3 +387,6 @@ func FiberRegistrationPath(p string) string {
 	}
 	return out.String()
 }
+
+// SortRoutes orders routes by the same precedence used during discovery.
+func SortRoutes(routes []Route) { sortRoutes(routes) }

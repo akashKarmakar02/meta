@@ -1,0 +1,36 @@
+package main
+
+import (
+	"log"
+	"net"
+	"os"
+
+	generated "{{MODULE}}/generated"
+	"github.com/akashKarmakar02/meta/server"
+)
+
+func main() {
+	cfg := server.Config{
+		Routes: generated.RegisterRoutes(), SSRPage: generated.SSRPage,
+		BarePage: generated.BarePage, VisualLayout: generated.VisualLayout, HealthCheck: true,
+	}
+	if origin := os.Getenv("GO_META_VITE_ORIGIN"); origin != "" {
+		cfg.DevOrigin = origin
+	} else {
+		cfg.ClientDir = "dist/client"
+	}
+	app, err := server.New(cfg)
+	if err != nil { log.Fatal(err) }
+	if socket := os.Getenv("GO_META_DEV_SOCKET"); socket != "" {
+		if info, err := os.Lstat(socket); err == nil {
+			if info.Mode() & os.ModeSocket == 0 { log.Fatal("development socket path is not a socket") }
+			if err := os.Remove(socket); err != nil { log.Fatal(err) }
+		} else if !os.IsNotExist(err) { log.Fatal(err) }
+		listener, err := net.Listen("unix", socket)
+		if err != nil { log.Fatal(err) }
+		log.Fatal(app.Listener(listener))
+	}
+	port := os.Getenv("PORT")
+	if port == "" { port = "3000" }
+	log.Fatal(app.Listen(":" + port))
+}

@@ -1,0 +1,11 @@
+module {{MODULE}}
+
+go 1.26.10
+
+require (
+	github.com/a-h/templ v0.3.1100
+	github.com/akashKarmakar02/meta {{META_VERSION}}
+)
+
+tool github.com/a-h/templ/cmd/templ
+{{META_REPLACE}}

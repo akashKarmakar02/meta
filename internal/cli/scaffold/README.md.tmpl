@@ -1,0 +1,17 @@
+# Meta app
+
+Requirements: Go 1.26.10+, Node.js/npm, and Air on PATH.
+
+```sh
+make setup
+meta dev
+```
+
+Open http://localhost:3000. To build a Node-free production server:
+
+```sh
+make build
+./bin/app
+```
+
+Run the binary from this project directory so it can find `dist/client`.

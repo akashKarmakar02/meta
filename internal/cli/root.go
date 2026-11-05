@@ -144,9 +144,10 @@ Usage:
 
 Commands:
   dev    Start the development server (orchestrates Go, templ, and Vite)
+  init   Create a new meta project
   help   Show this help, or help for a command
 
-Available in later phases: build, start, generate, check, init.
+Available in later phases: build, start, generate, check.
 
 Flags:
   -h, --help          Show this help

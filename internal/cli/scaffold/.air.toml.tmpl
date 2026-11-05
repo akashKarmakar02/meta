@@ -1,0 +1,11 @@
+root = "."
+tmp_dir = ".tmp/air"
+[build]
+  cmd = "GOFLAGS=-mod=mod meta devgen && go build -mod=mod -o ./.tmp/air/server ./cmd/app"
+  entrypoint = ["./.tmp/air/server"]
+  include_ext = ["go", "templ"]
+  exclude_dir = ["node_modules", "dist", ".tmp", ".git"]
+  exclude_regex = ["_test.go"]
+  delay = 500
+[misc]
+  clean_on_exit = true

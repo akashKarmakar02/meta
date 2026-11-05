@@ -1,0 +1,10 @@
+import { defineConfig } from 'vite';
+import { svelte } from '@sveltejs/vite-plugin-svelte';
+
+export default defineConfig({
+  plugins: [svelte()],
+  ...(process.env.GO_META_PUBLIC_PORT ? {
+    server: { ws: { clientPort: Number(process.env.GO_META_PUBLIC_PORT) } },
+  } : {}),
+  build: { manifest: true, outDir: 'dist/client', rollupOptions: { input: 'frontend/entry.ts' } },
+});
