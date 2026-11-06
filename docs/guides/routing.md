@@ -1,0 +1,76 @@
+# Pages and layouts
+
+Meta discovers routes under `app/`. The filename determines how a page renders:
+
+- `page.templ` is rendered on the server with templ.
+- `page.svelte` is rendered in the browser with Svelte 5. It is not server-rendered.
+
+For example:
+
+```text
+app/page.templ                  /
+app/about/page.templ            /about
+app/dashboard/page.svelte       /dashboard
+app/users/[id]/page.templ       /users/:id
+app/docs/[...slug]/page.templ   /docs/*
+```
+
+A directory cannot contain both page filenames. Static routes take precedence over parameter and catch-all routes. A catch-all must be the last path segment and matches one or more segments. Do not use a dynamic route directory for general Go code. Dynamic templ directories are staged into generated packages, so put Go helpers in an ordinary Go package and import them.
+
+## Add a server-rendered page
+
+Create `app/about/page.templ`:
+
+```templ
+package about
+
+templ About() {
+    <main>
+        <h1>About</h1>
+        <p>This page renders on the server.</p>
+    </main>
+}
+```
+
+Run `meta generate` if you are not using `meta dev`. Visit `/about`. Static templ page component names are formed by joining the directory segments and capitalizing the first letter of each segment. For example, `app/about/page.templ` uses `About` and `app/docs/intro/page.templ` uses `DocsIntro`. The root page and pages in dynamic directories use `Page`. Static templ layouts use the same directory-derived name followed by `Layout`; the root layout and dynamic layouts use `Layout`. Choose static directory names that form valid Go identifiers.
+
+## Read a route parameter
+
+For `app/users/[id]/page.templ`, use the request context:
+
+```templ
+package users
+
+import "github.com/akashKarmakar02/meta/routeparams"
+
+templ Page() {
+    {{ id, _ := routeparams.FromContext(ctx).Get("id") }}
+    <main>
+        <h1>User</h1>
+        <p>User ID: { id }</p>
+    </main>
+}
+```
+
+`Get` returns a string and a boolean. Use typed methods such as `Int64` when the value must be numeric, and handle missing or invalid input in a real application. A catch-all value is a slash-joined string. For data access and proper error responses, use a [loader](loaders.md).
+
+## Add a Svelte page
+
+Create `app/counter/page.svelte`:
+
+```svelte
+<script lang="ts">
+  let count = $state(0);
+</script>
+
+<main>
+  <h1>Counter</h1>
+  <button onclick={() => count++}>Count: {count}</button>
+</main>
+```
+
+## Layouts
+
+Add `layout.templ` or `layout.svelte` to a route directory to apply a visual layout. Meta selects the nearest layout in the page's directory or an ancestor directory. It does not compose every ancestor layout. A templ layout can wrap templ or Svelte pages. A Svelte layout can wrap Svelte pages only. Do not put both layout types in the same directory.
+
+The framework creates the surrounding HTML document. A templ layout accepts a `templ.Component` and renders it with `@content`. It should not create its own `<html>`, `<head>`, or `<body>` elements. See [page titles and metadata](metadata.md) for current document limitations.

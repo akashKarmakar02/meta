@@ -10,7 +10,8 @@ Go module, run `go get github.com/akashKarmakar02/meta@v0.1.0-alpha.3`.
 Install the matching CLI with
 `go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-alpha.3`.
 
-The implementation plan lives in [`phase1-implementation-blueprint.md`](phase1-implementation-blueprint.md).
+Start with the [developer documentation](docs/README.md) for installation,
+project structure, routing, APIs, styling, and deployment.
 
 ## Visual layouts
 
@@ -29,8 +30,8 @@ share the same package. Generation compiles these files in a Go-safe generated
 package, while route IDs retain their source paths. Dynamic directories cannot
 contain `.go` files; put Go helpers in a normal Go package and import them.
 Package-local `//go:embed` assets in dynamic templ packages are not yet staged.
-Run `make generate` rather than invoking `templ generate` directly, so generated
-Go is kept out of bracket-named source directories.
+Run `meta generate` in an application rather than invoking `templ generate`
+directly, so generated Go is kept out of bracket-named source directories.
 
 ## Public route descriptors
 
@@ -134,9 +135,8 @@ func main() {
 existing typed loader and action dispatchers, and serves built files from the
 client directory’s `assets/` directory. SSR-only applications may omit
 `ClientDir`; CSR routes require production assets or an explicitly configured
-`DevOrigin`. Development asset URLs expect the meta dev proxy; creating a
-complete independent development project remains future work. Node is not
-needed by the production server.
+`DevOrigin`. Development asset URLs expect the meta dev proxy. Use `meta init`
+to create an independent application. Node is not needed by the production server.
 
 Actions require an explicit trusted browser-facing origin. For form-capable
 bindings, construct a `formcsrf.Manager` with a secret of at least 32 bytes and
@@ -145,9 +145,9 @@ instances. The origin must reflect HTTPS in HTTPS deployments so secure cookies
 are issued. The framework does not provide authentication or authorization;
 applications must enforce those in their actions and loaders. The server uses
 Fiber's default application body limit in addition to `MaxActionBodyBytes`.
-This API creates a Fiber app; integrating middleware before its route handlers,
-image processing setup, and a complete build/dev workflow are not yet exposed
-by this package.
+This API creates a Fiber app. Integrating middleware before its route handlers
+and configuring image processing are not yet exposed by this package. The `meta` CLI
+provides the build and development workflow.
 
 ## Request route context
 
