@@ -453,6 +453,11 @@ func runDevWith(c *Context, deps devDeps) error {
 	airCtx := withWorkingDir(context.Background(), root)
 	env := append([]string(nil), envValues...)
 	env = append(env, "GO_META_DEV=1")
+	// Air pipes backend output, so pass the parent terminal's color capability
+	// to the development logger explicitly.
+	if devEnvValue("GO_META_LOG_COLOR", envValues) == "" && outputIsTerminal(c.Stdout) {
+		env = append(env, "GO_META_LOG_COLOR=1")
+	}
 	if origin != "" {
 		env = append(env, "GO_META_VITE_ORIGIN="+origin)
 		if proxy != nil {
@@ -544,6 +549,18 @@ func runDevWith(c *Context, deps devDeps) error {
 			return nil
 		}
 	}
+}
+
+func outputIsTerminal(w io.Writer) bool {
+	if _, disabled := os.LookupEnv("NO_COLOR"); disabled || os.Getenv("TERM") == "dumb" {
+		return false
+	}
+	file, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 // stopChildren tears down Vite and Air: both are signaled first so they

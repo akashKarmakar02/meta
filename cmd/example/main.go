@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
-	"github.com/gofiber/fiber/v3/middleware/logger"
 	"github.com/gofiber/fiber/v3/middleware/recover"
 
 	"github.com/akashKarmakar02/meta/action"
@@ -19,6 +18,7 @@ import (
 	"github.com/akashKarmakar02/meta/env"
 	"github.com/akashKarmakar02/meta/formcsrf"
 	"github.com/akashKarmakar02/meta/loader"
+	"github.com/akashKarmakar02/meta/observability"
 	"github.com/akashKarmakar02/meta/server"
 
 	routes "github.com/akashKarmakar02/meta/generated"
@@ -104,9 +104,6 @@ func newConfiguredAppBase(assets *httpserver.Assets, privateSocket bool, registr
 
 	// Recover converts panics into 500 responses instead of killing the server.
 	fapp.Use(recover.New())
-	// Request logging; default config logs method, path, status, latency —
-	// never request or response bodies.
-	fapp.Use(logger.New())
 	fapp.Use(httpserver.ValidatePagePath)
 
 	// Serve public/ directly in both development and production.
@@ -178,9 +175,10 @@ func main() {
 		log.Fatalf("cache configuration: %v", err)
 	}
 	defer demoCache.Close()
+	demoStore := observability.WrapCache(demoCache)
 	// E04: one invalidator coordinates this store; every cached binding over
 	// it attaches the same invalidator (enforced at registry construction).
-	demoInvalidator, err := loader.NewInvalidator(demoCache)
+	demoInvalidator, err := loader.NewInvalidator(demoStore)
 	if err != nil {
 		log.Fatalf("cache invalidator: %v", err)
 	}
@@ -189,7 +187,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("cache flights: %v", err)
 	}
-	bindings := append(loaders.Bindings(), loaders.CachedDemoBindingsWithFlights(demoCache, demoInvalidator, demoFlights)...)
+	bindings := append(loaders.Bindings(), loaders.CachedDemoBindingsWithFlights(demoStore, demoInvalidator, demoFlights)...)
 	registry, err := newLoaderRegistry(bindings)
 	if err != nil {
 		log.Fatalf("loader registration: %v", err)
@@ -213,7 +211,29 @@ func main() {
 	if err != nil {
 		log.Fatalf("form csrf manager: %v", err)
 	}
-	app := newConfiguredAppWithActions(&assets, devOrigin != "" && socket != "", registry, actionRegistry, trustedActionOrigin(), csrfManager)
+	var metrics *observability.Collector
+	telemetry := observability.Config{}
+	if devOrigin != "" || os.Getenv("GO_META_DEV") == "1" {
+		telemetry.Logger = observability.DevelopmentLogger(os.Stderr)
+	}
+	if os.Getenv("GO_META_OBSERVABILITY") != "0" {
+		metrics = observability.NewCollector()
+		telemetry.Metrics = metrics
+	}
+	middleware := []fiber.Handler{observability.Middleware(telemetry)}
+	// The example diagnostics endpoint is intended for the loopback-only
+	// development proxy. Do not expose it on the production listener.
+	if metrics != nil && os.Getenv("GO_META_DEV") == "1" && devOrigin != "" && socket != "" {
+		middleware = append(middleware, func(c fiber.Ctx) error {
+			if c.Method() != fiber.MethodGet || c.Path() != "/_meta/diagnostics" {
+				return c.Next()
+			}
+			observability.SetRoute(c.Context(), "diagnostics")
+			c.Set(fiber.HeaderCacheControl, "no-store")
+			return c.JSON(metrics.Snapshot())
+		})
+	}
+	app := newConfiguredAppWithActions(&assets, devOrigin != "" && socket != "", registry, actionRegistry, trustedActionOrigin(), csrfManager, middleware...)
 	// E09: serve the hashed production bundle at the same /assets prefix
 	// the shells reference. Fails explicitly when the build output is
 	// missing rather than serving pages that cannot boot.

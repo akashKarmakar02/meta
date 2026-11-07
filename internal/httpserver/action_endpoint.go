@@ -9,10 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -20,6 +20,7 @@ import (
 
 	"github.com/akashKarmakar02/meta/action"
 	"github.com/akashKarmakar02/meta/formcsrf"
+	"github.com/akashKarmakar02/meta/observability"
 	"github.com/akashKarmakar02/meta/routecontext"
 	"github.com/akashKarmakar02/meta/routeparams"
 )
@@ -83,6 +84,7 @@ func MountActions(app *fiber.App, registry *action.Registry, cfg ActionEndpointC
 }
 
 func dispatchAction(c fiber.Ctx, registry *action.Registry, cfg ActionEndpointConfig) error {
+	observability.SetRoute(c.Context(), "action")
 	c.Set(fiber.HeaderCacheControl, "no-store")
 	id := strings.TrimPrefix(c.Path(), ActionsPrefix)
 	if !action.ValidID(id) {
@@ -156,6 +158,7 @@ func dispatchFormAction(c fiber.Ctx, registry *action.Registry, cfg ActionEndpoi
 		// 404 with no information about the registry.
 		return formErrorPage(c, fiber.StatusNotFound, "Unknown action.")
 	}
+	observability.SetRoute(c.Context(), "action:"+id)
 	if !binding.FormCapable() {
 		// The action exists but has opted out of form submissions. Answering
 		// with 415 (not a look-alike 404) tells a browser form author their
@@ -164,7 +167,7 @@ func dispatchFormAction(c fiber.Ctx, registry *action.Registry, cfg ActionEndpoi
 		return formErrorPage(c, http.StatusUnsupportedMediaType, "This form is not available.")
 	}
 	if cfg.CSRF == nil {
-		log.Printf("go-meta: form action %s rejected: no CSRF manager configured", id)
+		observability.Record(c.Context(), "action", "action:"+id, "csrf", "error", 0)
 		return formErrorPage(c, http.StatusInternalServerError, "This form is not available right now.")
 	}
 	formToken := values.Get(formcsrf.FieldName)
@@ -192,7 +195,11 @@ func dispatchFormAction(c fiber.Ctx, registry *action.Registry, cfg ActionEndpoi
 		return handleActionError(c, id, fmt.Errorf("%w: %v", action.ErrInvalidInput, derr), !enhanced)
 	}
 	route := actionRouteSnapshot(c, id)
-	if _, err = binding.InvokeForm(c.Context(), route, input); err != nil {
+	started := time.Now()
+	_, err = binding.InvokeForm(c.Context(), route, input)
+	outcome := actionTelemetryOutcome(err)
+	observability.Record(c.Context(), "action", "action:"+id, "execute", outcome, time.Since(started))
+	if err != nil {
 		var validation *action.ValidationError
 		if errors.As(err, &validation) && validation != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			if enhanced {
@@ -220,7 +227,7 @@ func dispatchFormAction(c fiber.Ctx, registry *action.Registry, cfg ActionEndpoi
 		}
 		return c.Redirect().Status(fiber.StatusSeeOther).To(loc)
 	}
-	log.Printf("go-meta: action %s has invalid redirect target %q", id, dest)
+	observability.Record(c.Context(), "action", "action:"+id, "redirect", "error", 0)
 	return formErrorPage(c, http.StatusInternalServerError, "Something went wrong. Please try again.")
 }
 
@@ -234,15 +241,19 @@ func dispatchJSONAction(c fiber.Ctx, registry *action.Registry, cfg ActionEndpoi
 	if !ok {
 		return actionError(c, fiber.StatusNotFound, "unknown action")
 	}
+	observability.SetRoute(c.Context(), "action:"+id)
 
 	route := actionRouteSnapshot(c, id)
+	started := time.Now()
 	result, err := binding.Invoke(c.Context(), route, c.Body())
+	outcome := actionTelemetryOutcome(err)
+	observability.Record(c.Context(), "action", "action:"+id, "execute", outcome, time.Since(started))
 	if err != nil {
 		return handleActionError(c, id, err, false)
 	}
 	data, err := json.Marshal(result)
 	if err != nil {
-		log.Printf("go-meta: action %s result is not JSON-serializable: %v", id, err)
+		observability.Record(c.Context(), "action", "action:"+id, "serialize", "error", 0)
 		return actionError(c, http.StatusInternalServerError, "action result not serializable")
 	}
 	c.Set(fiber.HeaderContentType, "application/json")
@@ -284,8 +295,8 @@ func parseActionQuery(c fiber.Ctx) url.Values {
 	return query
 }
 
-// handleActionError maps action errors to the HTTP contract using errors.Is,
-// logging only genuine failures server-side. It never leaks the underlying
+// handleActionError maps action errors to the HTTP contract using errors.Is.
+// It never leaks the underlying
 // error to the client. The mapping parallels C05's loader mapping for the
 // shared vocabulary while remaining separate: action errors never reuse loader
 // types or endpoints. htmlMode selects the browser-form response shape; JSON
@@ -300,7 +311,6 @@ func handleActionError(c fiber.Ctx, id string, err error, htmlMode bool) error {
 		}
 		return actionError(c, statusClientClosedRequest, "client canceled request")
 	case errors.Is(err, context.DeadlineExceeded):
-		log.Printf("go-meta: action %s exceeded its deadline: %v", id, err)
 		if htmlMode {
 			return formErrorPage(c, http.StatusGatewayTimeout, "The request timed out.")
 		}
@@ -344,11 +354,25 @@ func handleActionError(c fiber.Ctx, id string, err error, htmlMode bool) error {
 		}
 		return actionError(c, http.StatusNotFound, "not found")
 	default:
-		log.Printf("go-meta: action %s failed: %v", id, err)
 		if htmlMode {
 			return formErrorPage(c, http.StatusInternalServerError, "Something went wrong. Please try again.")
 		}
 		return actionError(c, http.StatusInternalServerError, "action failed")
+	}
+}
+
+func actionTelemetryOutcome(err error) string {
+	switch {
+	case err == nil:
+		return "ok"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	case errors.Is(err, action.ErrInvalidInput), errors.Is(err, action.ErrUnauthorized), errors.Is(err, action.ErrForbidden), errors.Is(err, action.ErrNotFound), isValidation(err):
+		return "rejected"
+	default:
+		return "error"
 	}
 }
 
@@ -365,7 +389,7 @@ func formValidation(c fiber.Ctx, binding action.Binding, values url.Values, vali
 	var buf bytes.Buffer
 	ctx := formcsrf.WithContext(c.Context(), token)
 	if err := component.Render(ctx, &buf); err != nil {
-		log.Printf("go-meta: form feedback render failed: %v", err)
+		observability.Record(c.Context(), "action", "action", "feedback", "error", 0)
 		return formErrorPage(c, http.StatusInternalServerError, "Something went wrong. Please try again.")
 	}
 	c.Set(fiber.HeaderContentType, "text/html; charset=utf-8")

@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/akashKarmakar02/meta/internal/routing"
+	"github.com/akashKarmakar02/meta/observability"
 	"github.com/akashKarmakar02/meta/routecontext"
 	"github.com/akashKarmakar02/meta/routeparams"
 	"github.com/gofiber/fiber/v3"
@@ -47,6 +48,7 @@ func safePagePath(path string) bool {
 // segment and stored under the route's declared catch-all name (B03).
 func WithRouteParams(route routing.Route, next fiber.Handler) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		observability.SetRoute(c.Context(), route.ID)
 		params := make(map[string]string)
 		for _, segment := range strings.Split(route.Path, "/") {
 			switch {

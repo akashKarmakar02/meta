@@ -3,14 +3,15 @@ package httpserver
 import (
 	"encoding/json"
 	"errors"
-	"log"
 	"net/http"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 
 	"github.com/akashKarmakar02/meta/internal/routing"
 	"github.com/akashKarmakar02/meta/loader"
 	"github.com/akashKarmakar02/meta/loaderdata"
+	"github.com/akashKarmakar02/meta/observability"
 	"github.com/akashKarmakar02/meta/routecontext"
 )
 
@@ -61,7 +62,24 @@ func WithLoader(registry *loader.Registry, route routing.Route, next fiber.Handl
 			// rather than render a page with no data.
 			return fiber.NewError(http.StatusInternalServerError, "loader route context missing")
 		}
+		start := time.Now()
 		result, err := registration.Execute(c.Context(), snapshot)
+		outcome := "ok"
+		if err != nil {
+			switch classifyLoaderError(err) {
+			case outcomeRedirect:
+				outcome = "redirect"
+			case outcomeNotFound, outcomeUnauthorized, outcomeForbidden, outcomeInvalidInput:
+				outcome = "rejected"
+			case outcomeCanceled:
+				outcome = "canceled"
+			case outcomeDeadline:
+				outcome = "timeout"
+			default:
+				outcome = "error"
+			}
+		}
+		observability.Record(c.Context(), "loader", route.ID, "execute", outcome, time.Since(start))
 		if err != nil {
 			return handleLoaderError(c, route.ID, err)
 		}
@@ -71,7 +89,7 @@ func WithLoader(registry *loader.Registry, route routing.Route, next fiber.Handl
 			// rather than publishing a page with missing data.
 			data, err := json.Marshal(result)
 			if err != nil {
-				log.Printf("go-meta: loader result for route %s is not JSON-serializable: %v", route.ID, err)
+				observability.Record(c.Context(), "loader", route.ID, "serialize", "error", 0)
 				return fiber.NewError(http.StatusInternalServerError, "loader result not serializable")
 			}
 			c.SetContext(WithCSRLoaderData(c.Context(), data))
@@ -94,8 +112,8 @@ func handleLoaderError(c fiber.Ctx, routeID string, err error) error {
 		if !validRedirectLocation(redirect.Location) {
 			// An invalid target is a loader bug, not a client condition: fail
 			// closed with a 500 rather than emit a redirect the client could
-			// follow off-origin. The real target is logged for diagnosis.
-			log.Printf("go-meta: loader for route %s returned an invalid redirect location %q; refusing", routeID, redirect.Location)
+			// follow off-origin. Do not log the untrusted target.
+			observability.Record(c.Context(), "loader", routeID, "redirect", "error", 0)
 			return fiber.NewError(http.StatusInternalServerError, "invalid loader redirect")
 		}
 		// A redirect is a successful outcome, not a failure: no error log.
@@ -107,12 +125,9 @@ func handleLoaderError(c fiber.Ctx, routeID string, err error) error {
 		return c.Status(redirectStatus).SendString("")
 	case outcomeCanceled:
 		// The client aborted the request (closed the tab, navigated away).
-		// 499 is the nginx convention for "client closed request". Deliberately
-		// NOT logged: it is not a server failure, and logging every aborted
-		// request would turn normal user behavior into noise.
+		// 499 is the nginx convention for "client closed request".
 		return fiber.NewError(statusClientClosedRequest, "client canceled request")
 	case outcomeDeadline:
-		log.Printf("go-meta: loader for route %s exceeded its deadline: %v", routeID, err)
 		return fiber.NewError(http.StatusGatewayTimeout, "loader timed out")
 	case outcomeNotFound:
 		return fiber.NewError(http.StatusNotFound, "not found")
@@ -123,10 +138,7 @@ func handleLoaderError(c fiber.Ctx, routeID string, err error) error {
 	case outcomeInvalidInput:
 		return fiber.NewError(http.StatusBadRequest, "invalid input")
 	default:
-		// Internal: the real error is logged server-side; the client sees only
-		// a generic message so no internals (paths, stack fragments, DB errors)
-		// leak into the response.
-		log.Printf("go-meta: loader for route %s failed: %v", routeID, err)
+		// Do not expose arbitrary internal errors in responses or logs.
 		return fiber.NewError(http.StatusInternalServerError, "loader failed")
 	}
 }

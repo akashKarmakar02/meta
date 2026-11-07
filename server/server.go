@@ -5,6 +5,7 @@ package server
 import (
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/a-h/templ"
@@ -17,6 +18,7 @@ import (
 	"github.com/akashKarmakar02/meta/internal/render"
 	internalrouting "github.com/akashKarmakar02/meta/internal/routing"
 	"github.com/akashKarmakar02/meta/loader"
+	"github.com/akashKarmakar02/meta/observability"
 	"github.com/akashKarmakar02/meta/routing"
 )
 
@@ -37,6 +39,7 @@ type Config struct {
 	APIRoutes          []APIRoute
 	Middleware         []fiber.Handler
 	Policies           []Policy
+	Observability      *observability.Config
 	SSRPage            PageResolver
 	BarePage           PageResolver
 	VisualLayout       LayoutResolver
@@ -187,6 +190,14 @@ func New(cfg Config) (*fiber.App, error) {
 	}
 	app := fiber.New(fiber.Config{ErrorHandler: render.HTTPErrorHandler, CaseSensitive: true})
 	app.Use(recover.New())
+	var telemetry observability.Config
+	if cfg.Observability != nil {
+		telemetry = *cfg.Observability
+	}
+	if telemetry.Logger == nil && !telemetry.DisableLogging && (cfg.DevOrigin != "" || os.Getenv("GO_META_DEV") == "1") {
+		telemetry.Logger = observability.DevelopmentLogger(os.Stderr)
+	}
+	app.Use(observability.Middleware(telemetry))
 	app.Use(httpserver.ValidatePagePath)
 	for _, middleware := range cfg.Middleware {
 		app.Use(middleware)
@@ -197,6 +208,7 @@ func New(cfg Config) (*fiber.App, error) {
 		}
 	}
 	actionPolicies := append([]fiber.Handler{func(c fiber.Ctx) error {
+		observability.SetRoute(c.Context(), "action")
 		c.Set(fiber.HeaderCacheControl, "no-store")
 		return c.Next()
 	}}, policies.middleware()...)

@@ -12,6 +12,7 @@ import (
 	"github.com/akashKarmakar02/meta/imageopt"
 	"github.com/akashKarmakar02/meta/imageproc"
 	"github.com/akashKarmakar02/meta/internal/imagecache"
+	"github.com/akashKarmakar02/meta/observability"
 )
 
 // The image endpoint (F01 contract, F03 processing).
@@ -125,7 +126,16 @@ func mountImage(app *fiber.App, limits imageopt.Limits, cfg ImageEndpointConfig)
 		// Extra slots allow cache hits to proceed while encoders are busy.
 		snapshotGate = newSemaphore(cfg.MaxConcurrent * 2)
 	}
-	app.All(imageopt.Endpoint, func(c fiber.Ctx) error {
+	app.All(imageopt.Endpoint, func(c fiber.Ctx) (result error) {
+		observability.SetRoute(c.Context(), "image")
+		started := time.Now()
+		defer func() {
+			outcome := "ok"
+			if result != nil || c.Response().StatusCode() >= 400 {
+				outcome = "error"
+			}
+			observability.Record(c.Context(), "image", "image", "request", outcome, time.Since(started))
+		}()
 		c.Set(fiber.HeaderCacheControl, "no-store")
 		c.Set(fiber.HeaderContentType, "text/plain; charset=utf-8")
 		if m := c.Method(); m != http.MethodGet && m != http.MethodHead {
@@ -236,7 +246,16 @@ func serveImage(c fiber.Ctx, r imageopt.Request, cfg ImageEndpointConfig, gate, 
 		key, kerr := id.Key()
 		if kerr == nil {
 			cacheKey = key
-			if cached, gerr := cfg.Cache.Get(ctx, key, selected, cfg.MaxOutputBytes); gerr == nil {
+			cacheStart := time.Now()
+			cached, gerr := cfg.Cache.Get(ctx, key, selected, cfg.MaxOutputBytes)
+			cacheOutcome := "hit"
+			if errors.Is(gerr, imagecache.ErrCacheMiss) {
+				cacheOutcome = "miss"
+			} else if gerr != nil {
+				cacheOutcome = "error"
+			}
+			observability.Record(ctx, "cache", "image", "get", cacheOutcome, time.Since(cacheStart))
+			if gerr == nil {
 				if err := ctx.Err(); err != nil {
 					return mapProcessError(c, err)
 				}
@@ -279,7 +298,13 @@ func serveImage(c fiber.Ctx, r imageopt.Request, cfg ImageEndpointConfig, gate, 
 		Quality: r.Quality,
 		Format:  selected,
 	}
+	start := time.Now()
 	res, err := cfg.Processor.Process(ctx, src, transform)
+	outcome := "ok"
+	if err != nil {
+		outcome = "error"
+	}
+	observability.Record(ctx, "image", "image", "transform", outcome, time.Since(start))
 	if err != nil {
 		return mapProcessError(c, err)
 	}
@@ -310,7 +335,13 @@ func serveImage(c fiber.Ctx, r imageopt.Request, cfg ImageEndpointConfig, gate, 
 	// under the canonical identity so later requests can hit. Publication
 	// failure never fails this response unless the request itself expired.
 	if cfg.Cache != nil && cacheKey != "" {
-		_ = cfg.Cache.Put(ctx, cacheKey, selected, res.Data)
+		cacheStart := time.Now()
+		cacheErr := cfg.Cache.Put(ctx, cacheKey, selected, res.Data)
+		cacheOutcome := "ok"
+		if cacheErr != nil {
+			cacheOutcome = "error"
+		}
+		observability.Record(ctx, "cache", "image", "set", cacheOutcome, time.Since(cacheStart))
 	}
 	if err := ctx.Err(); err != nil {
 		return mapProcessError(c, err)
