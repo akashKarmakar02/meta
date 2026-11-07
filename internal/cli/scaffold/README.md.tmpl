@@ -9,7 +9,9 @@ meta dev
 
 Create a `.env` file for local configuration. Values prefixed `VITE_` are public in the browser. Development uses `.env.local` over `.env`; production uses `.env.production` over `.env`. Shell variables take precedence. Restart after changing env files.
 
-Open http://localhost:3000. Files in `public/` are available at the site root, such as `public/robots.txt` at `/robots.txt`. To build a Node-free production server:
+Open http://localhost:3000. Files in `public/` are available at the site root, such as `public/robots.txt` at `/robots.txt`. Tailwind CSS is configured in `frontend/app.css`; use utility classes in templ and Svelte files, or add your own global CSS there.
+
+To build a Node-free production server:
 
 ```sh
 meta build

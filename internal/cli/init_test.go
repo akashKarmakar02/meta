@@ -21,9 +21,28 @@ func TestInitCreatesIndependentProject(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}
-	for _, name := range []string{"go.mod", ".air.toml", "app/page.templ", "app/dashboard/page.svelte", "cmd/app/main.go", "frontend/entry.ts", "frontend/router.ts", "public/robots.txt"} {
+	for _, name := range []string{"go.mod", ".air.toml", "app/page.templ", "app/dashboard/page.svelte", "cmd/app/main.go", "frontend/entry.ts", "frontend/app.css", "frontend/router.ts", "public/robots.txt"} {
 		if _, err := os.Stat(filepath.Join(dest, name)); err != nil {
 			t.Errorf("missing %s: %v", name, err)
+		}
+	}
+	for name, want := range map[string][]string{
+		"package.json":              {`"tailwindcss"`, `"@tailwindcss/vite"`},
+		"vite.config.ts":            {"tailwindcss()"},
+		"frontend/app.css":          {`@import "tailwindcss"`, `@source "../app"`},
+		"frontend/entry.ts":         {"import './app.css'"},
+		"app/page.templ":            {"text-3xl", "font-bold"},
+		"app/dashboard/page.svelte": {"text-3xl", "font-bold"},
+	} {
+		data, err := os.ReadFile(filepath.Join(dest, name))
+		if err != nil {
+			t.Errorf("read %s: %v", name, err)
+			continue
+		}
+		for _, value := range want {
+			if !strings.Contains(string(data), value) {
+				t.Errorf("%s is missing %q", name, value)
+			}
 		}
 	}
 	for _, name := range []string{"app/envexample", "app/envbrowser"} {

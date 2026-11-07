@@ -1,8 +1,9 @@
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
+import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
-  plugins: [svelte()],
+  plugins: [tailwindcss(), svelte()],
   // Meta serves public files directly, without Vite following symlinks.
   publicDir: false,
   // Meta selects the env files and passes public VITE_ values explicitly.
