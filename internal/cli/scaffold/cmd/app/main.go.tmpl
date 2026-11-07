@@ -16,7 +16,7 @@ func main() {
 	}
 	cfg := server.Config{
 		PublicDir: "public",
-		Routes: generated.RegisterRoutes(), SSRPage: generated.SSRPage,
+		Routes: generated.RegisterRoutes(), APIRoutes: generated.RegisterAPIRoutes(), SSRPage: generated.SSRPage,
 		BarePage: generated.BarePage, VisualLayout: generated.VisualLayout, HealthCheck: true,
 	}
 	if origin := os.Getenv("GO_META_VITE_ORIGIN"); origin != "" {

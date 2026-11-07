@@ -19,6 +19,7 @@ import (
 	"github.com/akashKarmakar02/meta/env"
 	"github.com/akashKarmakar02/meta/formcsrf"
 	"github.com/akashKarmakar02/meta/loader"
+	"github.com/akashKarmakar02/meta/server"
 
 	routes "github.com/akashKarmakar02/meta/generated"
 	"github.com/akashKarmakar02/meta/internal/httpserver"
@@ -135,8 +136,19 @@ func newConfiguredAppBase(assets *httpserver.Assets, privateSocket bool, registr
 	// compiled data — no request-time discovery, no reflection. Order is
 	// the manifest (path-sorted) order; paths are unique post-validation
 	// (B08), so no route can be registered twice.
-	for _, r := range routes.RegisterRoutes() {
+	ordered := routes.RegisterRoutes()
+	apiByID := make(map[string]server.APIRoute)
+	for _, api := range routes.RegisterAPIRoutes() {
+		apiByID[api.SourceFile] = api
+		ordered = append(ordered, routing.Route{ID: api.SourceFile, Path: api.Path, SourceFile: api.SourceFile, Mode: routing.ModeSSR, CatchAll: api.CatchAll})
+	}
+	routing.SortRoutes(ordered)
+	for _, r := range ordered {
 		route := r
+		if api, ok := apiByID[route.ID]; ok {
+			server.MountAPI(fapp, api)
+			continue
+		}
 		switch route.Mode {
 		case routing.ModeSSR:
 			// C03: run the route's registered loader (if any) before rendering,

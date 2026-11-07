@@ -6,9 +6,9 @@ soft navigation.
 
 The Go module is `github.com/akashKarmakar02/meta`. This is an early
 pre-release: its APIs can change. To add a specific release to an existing
-Go module, run `go get github.com/akashKarmakar02/meta@v0.1.0-alpha.7`.
+Go module, run `go get github.com/akashKarmakar02/meta@v0.1.0-alpha.8`.
 Install the matching CLI with
-`go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-alpha.7`.
+`go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-alpha.8`.
 
 Start with the [developer documentation](docs/README.md) for installation,
 project structure, routing, APIs, styling, and deployment.
@@ -129,6 +129,7 @@ type SaveInput struct { Name string `json:"name"` }
 func main() {
     app, err := server.New(server.Config{
         Routes: generated.RegisterRoutes(),
+        APIRoutes: generated.RegisterAPIRoutes(),
         SSRPage: generated.SSRPage,
         BarePage: generated.BarePage,
         VisualLayout: generated.VisualLayout,

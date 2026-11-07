@@ -438,3 +438,26 @@ func (p *killOnlyProcess) Signal(sig os.Signal) error {
 	return nil // accepted but ignored: does not unblock Wait
 }
 func (p *killOnlyProcess) Kill() error { return p.f.Kill() }
+
+type stuckProcess struct{ done chan struct{} }
+
+func (p *stuckProcess) Wait() error            { <-p.done; return nil }
+func (p *stuckProcess) Signal(os.Signal) error { return nil }
+func (p *stuckProcess) Kill() error            { return nil }
+
+func TestStopDoesNotWaitForeverAfterKill(t *testing.T) {
+	p := &stuckProcess{done: make(chan struct{})}
+	child := supervise(p)
+	returned := make(chan struct{})
+	go func() {
+		child.stop(os.Interrupt, 10*time.Millisecond)
+		close(returned)
+	}()
+	select {
+	case <-returned:
+	case <-time.After(time.Second):
+		t.Error("stop did not return after the forced-kill wait")
+	}
+	close(p.done)
+	<-child.done
+}

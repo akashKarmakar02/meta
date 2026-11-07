@@ -30,7 +30,7 @@ func routeManifest(root string) (string, error) {
 				return err
 			}
 			switch entry.Name() {
-			case "page.templ", "page.svelte", "layout.templ", "layout.svelte":
+			case "page.templ", "page.svelte", "layout.templ", "layout.svelte", "route.go":
 				paths = append(paths, rel)
 			default:
 				for _, segment := range strings.Split(filepath.ToSlash(filepath.Dir(rel)), "/") {

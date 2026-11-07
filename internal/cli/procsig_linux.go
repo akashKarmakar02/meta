@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"os"
 	"os/exec"
 	"syscall"
 )
@@ -13,5 +14,13 @@ import (
 // running after the development session exits). Applied to every child of
 // meta dev; other platforms fall back to the session's signal handling.
 func setParentDeathSignal(cmd *exec.Cmd, sig syscall.Signal) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: sig}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: sig, Setpgid: true}
+}
+
+// signalChild also reaches descendants that inherited the child's output pipes.
+func signalChild(cmd *exec.Cmd, sig os.Signal) error {
+	if signal, ok := sig.(syscall.Signal); ok {
+		return syscall.Kill(-cmd.Process.Pid, signal)
+	}
+	return cmd.Process.Signal(sig)
 }

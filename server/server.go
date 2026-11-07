@@ -34,6 +34,7 @@ type LayoutResolver func(routing.Route, templ.Component) (templ.Component, error
 // from an application-owned, persistent secret shared by all instances.
 type Config struct {
 	Routes             []routing.Route
+	APIRoutes          []APIRoute
 	SSRPage            PageResolver
 	BarePage           PageResolver
 	VisualLayout       LayoutResolver
@@ -119,10 +120,42 @@ func New(cfg Config) (*fiber.App, error) {
 		routes[i] = route
 		ids[i] = route.ID
 	}
-	if err := internalrouting.ValidateRoutes(routes); err != nil {
+	apiByID := make(map[string]APIRoute, len(cfg.APIRoutes))
+	ordered := append([]routing.Route(nil), routes...)
+	for _, api := range cfg.APIRoutes {
+		route, err := routing.NewRoute(api.Path, api.SourceFile, routing.ModeSSR, nil)
+		if err != nil {
+			return nil, fmt.Errorf("server: invalid API route: %w", err)
+		}
+		route.CatchAll = api.CatchAll
+		for _, prefix := range []string{"/_meta", "/assets", "/_go_meta_vite", "/healthz"} {
+			if route.Path == prefix || strings.HasPrefix(route.Path, prefix+"/") {
+				return nil, fmt.Errorf("server: API route %q uses reserved path %q", route.Path, prefix)
+			}
+		}
+		if len(api.Handlers) == 0 {
+			return nil, fmt.Errorf("server: API route %q has no handlers", api.SourceFile)
+		}
+		for method, handler := range api.Handlers {
+			switch method {
+			case "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS":
+			default:
+				return nil, fmt.Errorf("server: API route %q has unsupported method %q", api.SourceFile, method)
+			}
+			if handler == nil {
+				return nil, fmt.Errorf("server: API route %q has nil %s handler", api.SourceFile, method)
+			}
+		}
+		if _, exists := apiByID[route.ID]; exists {
+			return nil, fmt.Errorf("server: duplicate API route %q", route.ID)
+		}
+		apiByID[route.ID] = api
+		ordered = append(ordered, route)
+	}
+	if err := internalrouting.ValidateRoutes(ordered); err != nil {
 		return nil, fmt.Errorf("server: routes: %w", err)
 	}
-	internalrouting.SortRoutes(routes)
+	internalrouting.SortRoutes(ordered)
 	loaders, err := loader.NewRegistry(ids, cfg.Loaders...)
 	if err != nil {
 		return nil, fmt.Errorf("server: loaders: %w", err)
@@ -156,7 +189,11 @@ func New(cfg Config) (*fiber.App, error) {
 	if err := httpserver.MountPublic(app, cfg.PublicDir); err != nil {
 		return nil, fmt.Errorf("server: %w", err)
 	}
-	for _, route := range routes {
+	for _, route := range ordered {
+		if api, ok := apiByID[route.ID]; ok {
+			MountAPI(app, api)
+			continue
+		}
 		var handler fiber.Handler
 		switch route.Mode {
 		case routing.ModeSSR:

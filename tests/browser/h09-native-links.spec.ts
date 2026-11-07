@@ -89,6 +89,9 @@ test.describe('H09: native link behavior and interceptor exclusions', () => {
       const envelopes = trackEnvelopeRequests(page);
 
       const sel = await injectAnchor(page, 'h09-modified', { href: '/docs' });
+      // Earlier cases can open and close browser windows. Activate this page
+      // before testing a native middle click in the shared browser process.
+      await page.bringToFront();
       const [popup] = await Promise.all([
         context.waitForEvent('page'),
         page.click(sel, tc.opts),

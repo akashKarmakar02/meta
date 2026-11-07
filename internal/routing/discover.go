@@ -49,7 +49,7 @@ func Discover(fsys fs.FS) ([]Route, error) {
 			return nil
 		}
 		dir, base := path.Split(p)
-		if pathHasParamSegment(path.Dir(p)) && strings.HasSuffix(base, ".go") {
+		if pathHasParamSegment(path.Dir(p)) && strings.HasSuffix(base, ".go") && base != "route.go" {
 			return fmt.Errorf("routing: Go source %q is inside a dynamic route directory; move helpers to a Go-valid package and import them", p)
 		}
 

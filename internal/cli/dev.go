@@ -80,8 +80,8 @@ type runner interface {
 type osProcess struct{ cmd *exec.Cmd }
 
 func (p *osProcess) Wait() error                { return p.cmd.Wait() }
-func (p *osProcess) Signal(sig os.Signal) error { return p.cmd.Process.Signal(sig) }
-func (p *osProcess) Kill() error                { return p.cmd.Process.Kill() }
+func (p *osProcess) Signal(sig os.Signal) error { return signalChild(p.cmd, sig) }
+func (p *osProcess) Kill() error                { return signalChild(p.cmd, os.Kill) }
 
 // execRunner starts real subprocesses.
 type execRunner struct{}
@@ -99,6 +99,9 @@ func (execRunner) Start(ctx context.Context, stdout io.Writer, name string, arg 
 	}
 	cmd.Stdout = stdout
 	cmd.Stderr = stdout
+	// A descendant may inherit the output pipe after the child exits.
+	// Do not let exec.Cmd.Wait block indefinitely waiting for its closure.
+	cmd.WaitDelay = 2 * time.Second
 	// Children die with the meta dev process even under SIGKILL, so no
 	// orphaned proxy/Air/Vite outlives the session (A06 §10).
 	setParentDeathSignal(cmd, syscall.SIGKILL)
@@ -175,7 +178,10 @@ func (c *supervisedChild) stop(sig os.Signal, grace time.Duration) {
 	case <-c.done:
 	case <-timer.C:
 		_ = c.proc.Kill()
-		<-c.done
+		select {
+		case <-c.done:
+		case <-time.After(grace):
+		}
 	}
 }
 

@@ -46,6 +46,10 @@ func run(appDir, outDir string) error {
 	}
 
 	manifest := routing.NewManifest(routes)
+	apiRoutes, err := routing.DiscoverAPI(fsys, routes)
+	if err != nil {
+		return fmt.Errorf("discover API routes in %s: %w", appDir, err)
+	}
 
 	if err := codegen.VerifySymbols(fsys, manifest); err != nil {
 		return fmt.Errorf("verify SSR page symbols in %s: %w", appDir, err)
@@ -57,6 +61,9 @@ func run(appDir, outDir string) error {
 
 	if err := codegen.WriteRoutesFileForProject(outDir, manifest, modulePath, appImportDir); err != nil {
 		return err
+	}
+	if err := codegen.WriteAPI(appDir, outDir, modulePath, apiRoutes); err != nil {
+		return fmt.Errorf("generate API routes: %w", err)
 	}
 
 	if err := codegen.WriteRouteRegistryTSForProject(outDir, manifest, appImportDir); err != nil {

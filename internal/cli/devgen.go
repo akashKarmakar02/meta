@@ -153,7 +153,7 @@ func scanGenerationInputs(root string) genNeeds {
 		}
 		mtime := info.ModTime().UnixNano()
 		switch d.Name() {
-		case "page.svelte", "layout.svelte":
+		case "page.svelte", "layout.svelte", "route.go":
 			if mtime > markerTime {
 				needs.routes = true
 			}
