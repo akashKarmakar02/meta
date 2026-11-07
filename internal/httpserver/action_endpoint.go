@@ -63,13 +63,23 @@ type ActionEndpointConfig struct {
 // body-size check → Content-Type check → registry lookup → strict JSON decode
 // → action Execute (once) → JSON response. The action runs only after every
 // security and decoding gate passes.
-func MountActions(app *fiber.App, registry *action.Registry, cfg ActionEndpointConfig) {
+func MountActions(app *fiber.App, registry *action.Registry, cfg ActionEndpointConfig, middleware ...fiber.Handler) {
 	if cfg.MaxBodyBytes <= 0 {
 		cfg.MaxBodyBytes = DefaultMaxActionBodyBytes
 	}
-	app.Post(ActionsPrefix+"*", func(c fiber.Ctx) error {
+	handler := func(c fiber.Ctx) error {
 		return dispatchAction(c, registry, cfg)
-	})
+	}
+	if len(middleware) == 0 {
+		app.Post(ActionsPrefix+"*", handler)
+		return
+	}
+	handlers := make([]any, 0, len(middleware))
+	for _, item := range middleware[1:] {
+		handlers = append(handlers, item)
+	}
+	handlers = append(handlers, handler)
+	app.Post(ActionsPrefix+"*", middleware[0], handlers...)
 }
 
 func dispatchAction(c fiber.Ctx, registry *action.Registry, cfg ActionEndpointConfig) error {

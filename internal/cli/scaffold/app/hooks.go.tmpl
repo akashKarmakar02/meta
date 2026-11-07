@@ -1,0 +1,16 @@
+package app
+
+import (
+ "github.com/akashKarmakar02/meta/server"
+ "github.com/gofiber/fiber/v3"
+)
+
+// Handle runs for incoming requests before Meta's routes.
+func Handle(c fiber.Ctx) error {
+ return c.Next()
+}
+
+// Policies returns ordered middleware chains for protected paths.
+func Policies() []server.Policy {
+ return nil
+}

@@ -35,6 +35,8 @@ type LayoutResolver func(routing.Route, templ.Component) (templ.Component, error
 type Config struct {
 	Routes             []routing.Route
 	APIRoutes          []APIRoute
+	Middleware         []fiber.Handler
+	Policies           []Policy
 	SSRPage            PageResolver
 	BarePage           PageResolver
 	VisualLayout       LayoutResolver
@@ -56,6 +58,15 @@ type Config struct {
 // action endpoints, and generated routes wired to the existing dispatchers.
 // Callers own listening and shutdown. No Node process is used at runtime.
 func New(cfg Config) (*fiber.App, error) {
+	policies, err := compilePolicies(cfg.Policies)
+	if err != nil {
+		return nil, err
+	}
+	for _, middleware := range cfg.Middleware {
+		if middleware == nil {
+			return nil, fmt.Errorf("server: middleware must not be nil")
+		}
+	}
 	if cfg.ClientDir != "" && cfg.DevOrigin != "" {
 		return nil, fmt.Errorf("server: choose either ClientDir or DevOrigin")
 	}
@@ -177,12 +188,19 @@ func New(cfg Config) (*fiber.App, error) {
 	app := fiber.New(fiber.Config{ErrorHandler: render.HTTPErrorHandler, CaseSensitive: true})
 	app.Use(recover.New())
 	app.Use(httpserver.ValidatePagePath)
+	for _, middleware := range cfg.Middleware {
+		app.Use(middleware)
+	}
 	if cfg.ClientDir != "" {
 		if err := httpserver.MountAssets(app, cfg.ClientDir); err != nil {
 			return nil, fmt.Errorf("server: assets: %w", err)
 		}
 	}
-	httpserver.MountActions(app, registry, httpserver.ActionEndpointConfig{TrustedOrigin: cfg.TrustedOrigin, CSRF: cfg.CSRF, MaxBodyBytes: cfg.MaxActionBodyBytes})
+	actionPolicies := append([]fiber.Handler{func(c fiber.Ctx) error {
+		c.Set(fiber.HeaderCacheControl, "no-store")
+		return c.Next()
+	}}, policies.middleware()...)
+	httpserver.MountActions(app, registry, httpserver.ActionEndpointConfig{TrustedOrigin: cfg.TrustedOrigin, CSRF: cfg.CSRF, MaxBodyBytes: cfg.MaxActionBodyBytes}, actionPolicies...)
 	if cfg.HealthCheck {
 		app.Get("/healthz", func(c fiber.Ctx) error { return c.SendString("ok") })
 	}
@@ -191,7 +209,9 @@ func New(cfg Config) (*fiber.App, error) {
 	}
 	for _, route := range ordered {
 		if api, ok := apiByID[route.ID]; ok {
-			MountAPI(app, api)
+			middleware := []fiber.Handler{httpserver.WithRouteParams(route, func(c fiber.Ctx) error { return c.Next() })}
+			middleware = append(middleware, policies.middleware()...)
+			MountAPI(app, api, middleware...)
 			continue
 		}
 		var handler fiber.Handler
@@ -201,13 +221,19 @@ func New(cfg Config) (*fiber.App, error) {
 		case routing.ModeCSR:
 			handler = render.CSRNavigationHandler(route, assets, render.VisualLayoutResolver(cfg.VisualLayout))
 		}
-		handler = httpserver.WithRouteParams(route, httpserver.WithLoader(loaders, route, handler))
+		handler = httpserver.WithLoader(loaders, route, handler)
 		path := internalrouting.FiberRegistrationPath(route.Path)
+		middleware := []fiber.Handler{httpserver.WithRouteParams(route, func(c fiber.Ctx) error { return c.Next() })}
+		middleware = append(middleware, policies.middleware()...)
 		if cfg.CSRF != nil {
-			app.Get(path, httpserver.WithFormCSRF(cfg.CSRF, cfg.TrustedOrigin), handler)
-		} else {
-			app.Get(path, handler)
+			middleware = append(middleware, httpserver.WithFormCSRF(cfg.CSRF, cfg.TrustedOrigin))
 		}
+		handlers := make([]any, 0, len(middleware))
+		for _, item := range middleware[1:] {
+			handlers = append(handlers, item)
+		}
+		handlers = append(handlers, handler)
+		app.Get(path, middleware[0], handlers...)
 	}
 	return app, nil
 }

@@ -4,8 +4,10 @@ import (
 	"log"
 	"net"
 	"os"
+	"github.com/gofiber/fiber/v3"
 
 	generated "{{MODULE}}/generated"
+	apphooks "{{MODULE}}/app"
 	"github.com/akashKarmakar02/meta/server"
 	"github.com/akashKarmakar02/meta/env"
 )
@@ -16,6 +18,7 @@ func main() {
 	}
 	cfg := server.Config{
 		PublicDir: "public",
+		Middleware: []fiber.Handler{apphooks.Handle}, Policies: apphooks.Policies(),
 		Routes: generated.RegisterRoutes(), APIRoutes: generated.RegisterAPIRoutes(), SSRPage: generated.SSRPage,
 		BarePage: generated.BarePage, VisualLayout: generated.VisualLayout, HealthCheck: true,
 	}

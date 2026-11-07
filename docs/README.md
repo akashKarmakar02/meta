@@ -1,6 +1,6 @@
 # Meta documentation
 
-Meta is a Go web framework with server-rendered templ pages and client-rendered Svelte pages. This documentation describes the current `v0.1.0-alpha.9` starter and public APIs. The project is an alpha release, so pin the CLI and module versions and check release notes before upgrading.
+Meta is a Go web framework with server-rendered templ pages and client-rendered Svelte pages. This documentation describes the current `v0.1.0-alpha.10` starter and public APIs. The project is an alpha release, so pin the CLI and module versions and check release notes before upgrading.
 
 ## Start here
 
@@ -15,6 +15,7 @@ Meta is a Go web framework with server-rendered templ pages and client-rendered 
 - [Public files](guides/public-files.md)
 - [Page titles and metadata](guides/metadata.md)
 - [Create an API](guides/api.md)
+- [Middleware and route policies](guides/middleware.md)
 - [Load data for a page](guides/loaders.md)
 - [Forms and validation](guides/forms.md)
 - [Build and deploy](guides/deployment.md)
