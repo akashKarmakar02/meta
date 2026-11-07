@@ -10,6 +10,7 @@ my-app/
     dashboard/page.svelte     # browser-rendered /dashboard
   cmd/app/main.go             # server configuration and entry point
   frontend/                   # copied browser runtime
+  public/robots.txt           # public file served at /robots.txt
   go.mod                      # Go module and templ tool version
   package.json                # frontend dependencies and build script
   vite.config.ts              # Vite configuration
@@ -34,7 +35,7 @@ The starter's `.gitignore` excludes generated source, dependencies, and build ou
 
 ## What to edit
 
-Edit `app/` pages, layouts, components, and your own Go packages. Add loader and action bindings to `cmd/app/main.go` or import them from your own packages. You can change `go.mod`, `package.json`, `vite.config.ts`, `.air.toml`, and `.gitignore` for your application. Keep the Vite manifest, entry point, output directory, and Air build steps consistent with the server and CLI.
+Edit `app/` pages, layouts, components, and your own Go packages. Put publicly accessible files in `public/`. Add loader and action bindings to `cmd/app/main.go` or import them from your own packages. You can change `go.mod`, `package.json`, `vite.config.ts`, `.air.toml`, and `.gitignore` for your application. Keep the Vite manifest, entry point, output directory, and Air build steps consistent with the server and CLI.
 
 `frontend/` is copied into each new project. It includes Meta's browser navigation and Svelte mounting code. You can add a global stylesheet import to `frontend/entry.ts`, but treat the runtime files as framework code. Changes there can affect navigation, and updating the Go module does not automatically update the copied runtime. Review runtime changes when upgrading Meta.
 

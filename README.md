@@ -6,12 +6,18 @@ soft navigation.
 
 The Go module is `github.com/akashKarmakar02/meta`. This is an early
 pre-release: its APIs can change. To add a specific release to an existing
-Go module, run `go get github.com/akashKarmakar02/meta@v0.1.0-alpha.4`.
+Go module, run `go get github.com/akashKarmakar02/meta@v0.1.0-alpha.5`.
 Install the matching CLI with
-`go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-alpha.4`.
+`go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-alpha.5`.
 
 Start with the [developer documentation](docs/README.md) for installation,
 project structure, routing, APIs, styling, and deployment.
+
+## Public files
+
+Place public files in `public/`; for example, `public/robots.txt` is served at
+`/robots.txt`. See the [public files guide](docs/guides/public-files.md) for
+development, production, and configuration details.
 
 ## Page metadata
 

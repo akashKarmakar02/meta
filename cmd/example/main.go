@@ -107,6 +107,11 @@ func newConfiguredAppBase(assets *httpserver.Assets, privateSocket bool, registr
 	fapp.Use(logger.New())
 	fapp.Use(httpserver.ValidatePagePath)
 
+	// Serve public/ directly in both development and production.
+	if err := httpserver.MountPublic(fapp, "public"); err != nil {
+		log.Printf("public files: %v", err)
+	}
+
 	// D03: issue a per-browser CSRF cookie + render-context token for pages
 	// that render protected forms. Registered BEFORE page routes; no-op
 	// without a manager (pre-D03 apps are unaffected).

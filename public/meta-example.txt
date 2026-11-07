@@ -1,0 +1,2 @@
+This file is served directly from the example application's public directory.
+Edit public/meta-example.txt and refresh the browser to see your changes.

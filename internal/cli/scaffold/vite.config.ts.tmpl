@@ -3,6 +3,8 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 
 export default defineConfig({
   plugins: [svelte()],
+  // Meta serves public files directly, without Vite following symlinks.
+  publicDir: false,
   ...(process.env.GO_META_PUBLIC_PORT ? {
     server: { ws: { clientPort: Number(process.env.GO_META_PUBLIC_PORT) } },
   } : {}),

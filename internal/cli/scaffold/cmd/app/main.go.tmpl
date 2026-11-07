@@ -11,6 +11,7 @@ import (
 
 func main() {
 	cfg := server.Config{
+		PublicDir: "public",
 		Routes: generated.RegisterRoutes(), SSRPage: generated.SSRPage,
 		BarePage: generated.BarePage, VisualLayout: generated.VisualLayout, HealthCheck: true,
 	}
