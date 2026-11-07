@@ -21,7 +21,7 @@ func TestPageMetadataOverridesLayoutForDocumentAndNavigation(t *testing.T) {
 	page := func(routing.Route) (templ.Component, error) {
 		return templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
 			pageCount++
-			metadata.Set(ctx, metadata.Page{Title: `A <title> & "quote"`})
+			metadata.Set(ctx, metadata.Page{Title: `A <title> & "quote"`, Canonical: "https://example.com/post?a=1&b=2", OpenGraph: metadata.OpenGraph{Title: "Post", Image: "/images/post.jpg"}, Twitter: metadata.Twitter{Card: "summary_large_image"}})
 			_, err := io.WriteString(w, "<h1>Post</h1>")
 			return err
 		}), nil
@@ -63,11 +63,11 @@ func TestPageMetadataOverridesLayoutForDocumentAndNavigation(t *testing.T) {
 			if err := json.Unmarshal(body, &env); err != nil {
 				t.Fatal(err)
 			}
-			if env.Title != `A <title> & "quote"` || env.Metadata == nil || env.Metadata.Description != `Safe <text> & "quotes"` {
+			if env.Title != `A <title> & "quote"` || env.Metadata == nil || env.Metadata.Description != `Safe <text> & "quotes"` || env.Metadata.OpenGraph.Image != "/images/post.jpg" || env.Metadata.Canonical != "https://example.com/post?a=1&b=2" {
 				t.Fatalf("metadata: %+v", env)
 			}
 		} else {
-			for _, want := range []string{`<title>A &lt;title&gt; &amp; &#34;quote&#34;</title>`, `content="Safe &lt;text&gt; &amp; &#34;quotes&#34;"`} {
+			for _, want := range []string{`<title>A &lt;title&gt; &amp; &#34;quote&#34;</title>`, `content="Safe &lt;text&gt; &amp; &#34;quotes&#34;"`, `<link rel="canonical" data-meta-managed="canonical" href="https://example.com/post?a=1&amp;b=2">`, `<meta property="og:image" data-meta-managed="og:image" content="/images/post.jpg">`, `<meta name="twitter:card" data-meta-managed="twitter:card" content="summary_large_image">`} {
 				if !strings.Contains(string(body), want) {
 					t.Fatalf("missing %q in %s", want, body)
 				}

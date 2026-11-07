@@ -229,7 +229,7 @@ func SSRNavigationHandler(route routing.Route, assets *httpserver.Assets, compos
 		if meta.Title != "" {
 			env.Title = meta.Title
 		}
-		if meta.Title != "" || meta.Description != "" {
+		if meta != (metastate.Page{}) {
 			env.Metadata = &meta
 		}
 		return SendNavigation(c, env)
@@ -293,7 +293,7 @@ func CSRNavigationHandler(route routing.Route, assets *httpserver.Assets, resolv
 		if meta.Title != "" {
 			env.Title = meta.Title
 		}
-		if meta.Title != "" || meta.Description != "" {
+		if meta != (metastate.Page{}) {
 			env.Metadata = &meta
 		}
 		if len(route.Layouts) > 0 && route.Layouts[0].Mode == routing.ModeSSR {

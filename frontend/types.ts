@@ -25,13 +25,21 @@ export type NavigationMode = 'ssr' | 'csr';
  * - `html` includes the server-owned visual layout when one is selected,
  *   including the mount element for a Svelte page in a templ layout.
  */
+export interface PageMetadata {
+  title?: string;
+  description?: string;
+  canonical?: string;
+  openGraph?: { title?: string; description?: string; image?: string; url?: string; type?: string; siteName?: string };
+  twitter?: { card?: string; title?: string; description?: string; image?: string; site?: string };
+}
+
 export interface NavigationResponse {
   version: number;
   url: string;
   routeId: string;
   mode: NavigationMode;
   title: string;
-  metadata?: { title?: string; description?: string };
+  metadata?: PageMetadata;
   layouts: string[];
   html: string;
   clientEntry: string | null;

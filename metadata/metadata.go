@@ -14,6 +14,12 @@ import (
 // templ layout's value, if any.
 type Page = metastate.Page
 
+// OpenGraph describes Open Graph fields such as the sharing image.
+type OpenGraph = metastate.OpenGraph
+
+// Twitter describes X/Twitter card fields.
+type Twitter = metastate.Twitter
+
 // Set records metadata for the current page or layout render. The latest call
 // within that render replaces its previous value. Set has no effect when ctx
 // does not belong to a Meta page render.

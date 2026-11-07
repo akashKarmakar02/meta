@@ -90,6 +90,22 @@ describe('fetchNavigation (F06)', () => {
     expect(env.clientEntry).toBeNull();
   });
 
+  it('preserves social metadata in an SSR envelope', async () => {
+    const metadata = {
+      title: 'A post',
+      canonical: '/posts/42',
+      openGraph: { title: 'A post', image: '/images/hero.jpg' },
+      twitter: { card: 'summary_large_image' },
+    };
+    mockFetch(() => jsonResponse({ ...ssrFixture, metadata }));
+    expect((await fetchNavigation('/posts/42')).metadata).toEqual(metadata);
+  });
+
+  it('rejects malformed social metadata', async () => {
+    mockFetch(() => jsonResponse({ ...ssrFixture, metadata: { twitter: { card: 42 } } }));
+    await expect(fetchNavigation('/about')).rejects.toThrow();
+  });
+
   it('parses a valid CSR envelope', async () => {
     mockFetch(() => jsonResponse(csrFixture));
     const env = await fetchNavigation('/dashboard/settings');

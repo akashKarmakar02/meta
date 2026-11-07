@@ -26,17 +26,35 @@ func document(content, tags, title, dataScript string) string {
 }
 
 func documentWithMetadata(content, tags, title, dataScript string, meta metastate.Page) string {
-	description := ""
-	if meta.Description != "" {
-		description = `<meta name="description" data-meta-managed="description" content="` + html.EscapeString(meta.Description) + `">`
+	var head strings.Builder
+	metaTag := func(attribute, name, value string) {
+		if value == "" {
+			return
+		}
+		head.WriteString(`<meta ` + attribute + `="` + name + `" data-meta-managed="` + name + `" content="` + html.EscapeString(value) + `">`)
 	}
+	metaTag("name", "description", meta.Description)
+	if meta.Canonical != "" {
+		head.WriteString(`<link rel="canonical" data-meta-managed="canonical" href="` + html.EscapeString(meta.Canonical) + `">`)
+	}
+	metaTag("property", "og:title", meta.OpenGraph.Title)
+	metaTag("property", "og:description", meta.OpenGraph.Description)
+	metaTag("property", "og:image", meta.OpenGraph.Image)
+	metaTag("property", "og:url", meta.OpenGraph.URL)
+	metaTag("property", "og:type", meta.OpenGraph.Type)
+	metaTag("property", "og:site_name", meta.OpenGraph.SiteName)
+	metaTag("name", "twitter:card", meta.Twitter.Card)
+	metaTag("name", "twitter:title", meta.Twitter.Title)
+	metaTag("name", "twitter:description", meta.Twitter.Description)
+	metaTag("name", "twitter:image", meta.Twitter.Image)
+	metaTag("name", "twitter:site", meta.Twitter.Site)
 	styles, script := tags, ""
 	if i := strings.Index(tags, "<script"); i >= 0 {
 		styles, script = tags[:i], tags[i:]
 	}
 	return "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">" +
 		"<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>" +
-		html.EscapeString(title) + "</title>" + description + styles + "</head><body><div data-go-page-outlet>" +
+		html.EscapeString(title) + "</title>" + head.String() + styles + "</head><body><div data-go-page-outlet>" +
 		content + "</div>" + dataScript + script + "</body></html>"
 }
 

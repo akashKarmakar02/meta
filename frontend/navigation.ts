@@ -180,9 +180,21 @@ function validateNavigationResponse(parsed: unknown, sourceURL: string): Navigat
       fail('metadata must be an object');
     }
     const meta = env.metadata as Record<string, unknown>;
-    if ((meta.title !== undefined && typeof meta.title !== 'string') ||
-        (meta.description !== undefined && typeof meta.description !== 'string')) {
-      fail('invalid metadata fields');
+    const validateFields = (value: Record<string, unknown>, names: string[]) => {
+      for (const name of names) {
+        if (value[name] !== undefined && typeof value[name] !== 'string') fail('invalid metadata fields');
+      }
+    };
+    validateFields(meta, ['title', 'description', 'canonical']);
+    for (const [name, fields] of [
+      ['openGraph', ['title', 'description', 'image', 'url', 'type', 'siteName']],
+      ['twitter', ['card', 'title', 'description', 'image', 'site']],
+    ] as const) {
+      const value = meta[name];
+      if (value !== undefined) {
+        if (typeof value !== 'object' || value === null || Array.isArray(value)) fail('invalid metadata fields');
+        validateFields(value as Record<string, unknown>, [...fields]);
+      }
     }
   }
   if (!Array.isArray(env.layouts) || env.layouts.some((l) => typeof l !== 'string')) {

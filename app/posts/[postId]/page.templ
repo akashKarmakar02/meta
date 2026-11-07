@@ -21,7 +21,13 @@ templ Page() {
 		post, ok := loaderdata.Get[loaders.PostData](ctx)
 		var idText, titleText, contentText, missing string
 		if ok {
-			metadata.Set(ctx, metadata.Page{Title: post.Title, Description: post.Content})
+			metadata.Set(ctx, metadata.Page{
+                Title: post.Title,
+                Description: post.Content,
+                Canonical: fmt.Sprintf("/posts/%d", post.ID),
+                OpenGraph: metadata.OpenGraph{Title: post.Title, Description: post.Content, Image: "/images/hero.jpg", Type: "article"},
+                Twitter: metadata.Twitter{Card: "summary_large_image", Title: post.Title, Description: post.Content, Image: "/images/hero.jpg"},
+            })
 			idText = fmt.Sprint(post.ID)
 			titleText = post.Title
 			contentText = post.Content

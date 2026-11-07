@@ -1,6 +1,6 @@
 # Page titles and metadata
 
-Templ pages and templ layouts can set the document title and description with `metadata.Set`. Meta renders those values into the initial HTML `<head>` and updates them during soft navigation.
+Templ pages and templ layouts can set document titles, descriptions, canonical URLs, Open Graph tags, and X/Twitter cards with `metadata.Set`. Meta renders those values into the initial HTML `<head>` and updates them during soft navigation.
 
 Set application defaults in the root `app/layout.templ`:
 
@@ -80,4 +80,35 @@ Register the loader for the route as described in [loaders](loaders.md). Meta re
 
 Svelte pages run in the browser. A nearest templ layout can supply their initial title and description, but Meta cannot extract server-rendered metadata from a Svelte component. Svelte's `<svelte:head>` can add client-side tags after JavaScript runs. Meta's current navigation runtime also updates titles, so check title behavior when combining them. Client-side tags are not reliable for crawlers that do not run JavaScript.
 
-Only `Title` and `Description` are supported by this API. Canonical URLs and Open Graph tags are not yet available through `metadata.Page`.
+## Canonical and social metadata
+
+Set the canonical URL and sharing fields in the same templ component:
+
+```templ
+{{ metadata.Set(ctx, metadata.Page{
+    Title: "About us",
+    Description: "Meet our team.",
+    Canonical: "https://example.com/about",
+    OpenGraph: metadata.OpenGraph{
+        Title: "About us",
+        Description: "Meet the team.",
+        Image: "https://example.com/images/team.jpg",
+        URL: "https://example.com/about",
+        Type: "website",
+        SiteName: "Example",
+    },
+    Twitter: metadata.Twitter{
+        Card: "summary_large_image",
+        Title: "About us",
+        Description: "Meet the team.",
+        Image: "https://example.com/images/team.jpg",
+        Site: "@example",
+    },
+}) }}
+```
+
+Each nested field inherits independently from the nearest templ layout when omitted. Meta does not automatically copy the page title or description into social fields, or derive a canonical URL. Set a canonical URL for each page rather than inheriting the same URL for unrelated pages. For social previews, use publicly reachable absolute HTTPS URLs: a crawler may not resolve root-relative image URLs as you expect.
+
+URL fields accept absolute HTTP(S) URLs or root-relative paths. Meta omits values with other schemes, network-path references such as `//example.com`, credentials, or invalid syntax. Values are escaped in HTML. During soft navigation Meta updates and removes only the head elements it owns. It does not edit unrelated tags.
+
+The repository's [`app/posts/[postId]/page.templ`](../../app/posts/%5BpostId%5D/page.templ) demonstrates loader-backed canonical and sharing metadata. Its relative URLs are suitable for local testing; use absolute URLs for actual sharing.
