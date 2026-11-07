@@ -49,6 +49,8 @@ type Config struct {
 	CSRF               *formcsrf.Manager
 	MaxActionBodyBytes int64
 	ClientDir          string
+	// GlobalStylesheet enables the independent frontend/app.css Vite entry.
+	GlobalStylesheet bool
 	// PublicDir contains files served at root-relative URLs. An empty value
 	// disables public file serving; missing directories may be created later.
 	PublicDir string
@@ -176,13 +178,13 @@ func New(cfg Config) (*fiber.App, error) {
 	}
 	var assets *httpserver.Assets
 	if cfg.ClientDir != "" {
-		a, err := httpserver.LoadAssets(cfg.ClientDir)
+		a, err := httpserver.LoadAssets(cfg.ClientDir, cfg.GlobalStylesheet)
 		if err != nil {
 			return nil, fmt.Errorf("server: assets: %w", err)
 		}
 		assets = &a
 	} else if cfg.DevOrigin != "" {
-		a, err := httpserver.DevelopmentAssets(cfg.DevOrigin)
+		a, err := httpserver.DevelopmentAssets(cfg.DevOrigin, cfg.GlobalStylesheet)
 		if err != nil {
 			return nil, fmt.Errorf("server: development assets: %w", err)
 		}

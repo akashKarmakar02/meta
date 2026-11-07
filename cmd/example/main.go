@@ -199,9 +199,9 @@ func main() {
 	var assets httpserver.Assets
 	devOrigin := os.Getenv("GO_META_VITE_ORIGIN")
 	if devOrigin != "" {
-		assets, err = httpserver.DevelopmentAssets(devOrigin)
+		assets, err = httpserver.DevelopmentAssets(devOrigin, true)
 	} else {
-		assets, err = httpserver.LoadAssets("dist/client")
+		assets, err = httpserver.LoadAssets("dist/client", true)
 	}
 	if err != nil {
 		log.Fatalf("load client assets: %v", err)

@@ -1,0 +1,4 @@
+/* Global stylesheet served directly by Vite in development. */
+[data-go-page="home"] h1 {
+  color: rgb(37, 99, 235);
+}

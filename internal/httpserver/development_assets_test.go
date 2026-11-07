@@ -1,6 +1,8 @@
 package httpserver
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -17,5 +19,26 @@ func TestDevelopmentAssets(t *testing.T) {
 		if _, err := DevelopmentAssets(origin); err == nil || !strings.Contains(err.Error(), "Vite") {
 			t.Errorf("accepted %q: %v", origin, err)
 		}
+	}
+}
+
+func TestDevelopmentGlobalStylesheet(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	if err := os.MkdirAll("frontend", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DevelopmentAssets("http://127.0.0.1:5173", true); err == nil {
+		t.Fatal("missing stylesheet accepted")
+	}
+	if err := os.WriteFile(filepath.Join("frontend", "app.css"), []byte("body {}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	assets, err := DevelopmentAssets("http://127.0.0.1:5173", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(assets.EntryCSSURLs) != 1 || assets.EntryCSSURLs[0] != "/_go_meta_vite/frontend/app.css?direct" {
+		t.Fatalf("CSS URLs: %v", assets.EntryCSSURLs)
 	}
 }

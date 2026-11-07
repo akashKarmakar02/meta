@@ -28,9 +28,9 @@ func TestInitCreatesIndependentProject(t *testing.T) {
 	}
 	for name, want := range map[string][]string{
 		"package.json":              {`"tailwindcss"`, `"@tailwindcss/vite"`},
-		"vite.config.ts":            {"tailwindcss()"},
+		"vite.config.ts":            {"tailwindcss()", "frontend/app.css"},
 		"frontend/app.css":          {`@import "tailwindcss"`, `@source "../app"`},
-		"frontend/entry.ts":         {"import './app.css'"},
+		"cmd/app/main.go":           {"GlobalStylesheet: true"},
 		"app/page.templ":            {"text-3xl", "font-bold"},
 		"app/dashboard/page.svelte": {"text-3xl", "font-bold"},
 	} {
@@ -44,6 +44,13 @@ func TestInitCreatesIndependentProject(t *testing.T) {
 				t.Errorf("%s is missing %q", name, value)
 			}
 		}
+	}
+	entry, err := os.ReadFile(filepath.Join(dest, "frontend", "entry.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(entry), "import './app.css'") {
+		t.Fatal("global CSS must not be injected by JavaScript")
 	}
 	for _, name := range []string{"app/envexample", "app/envbrowser"} {
 		if _, err := os.Stat(filepath.Join(dest, name)); !os.IsNotExist(err) {

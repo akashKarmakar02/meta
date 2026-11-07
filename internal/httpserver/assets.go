@@ -21,6 +21,9 @@ const viteManifestPath = ".vite/manifest.json"
 // viteEntryKey identifies the client entry in the Vite manifest.
 const viteEntryKey = "frontend/entry.ts"
 
+// GlobalStylesheetKey is the optional independent CSS entry used by starters.
+const GlobalStylesheetKey = "frontend/app.css"
+
 // Assets carries resolved production client asset URLs. Hashed filenames
 // come only from the manifest — nothing hardcodes them.
 type Assets struct {
@@ -35,7 +38,7 @@ type Assets struct {
 
 // DevelopmentAssets constructs script URLs for the explicitly configured
 // local Vite origin. Production never consults the development server.
-func DevelopmentAssets(origin string) (Assets, error) {
+func DevelopmentAssets(origin string, globalStylesheet ...bool) (Assets, error) {
 	u, err := url.Parse(origin)
 	if err != nil || u.Scheme != "http" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
 		return Assets{}, fmt.Errorf("invalid Vite development origin %q", origin)
@@ -45,7 +48,15 @@ func DevelopmentAssets(origin string) (Assets, error) {
 	if err != nil || host != "127.0.0.1" || portErr != nil || portNumber < 1 || portNumber > 65535 {
 		return Assets{}, fmt.Errorf("Vite development origin must use 127.0.0.1 and an explicit port")
 	}
-	return Assets{DevClientURL: "/_go_meta_vite/@vite/client", EntryScriptURL: "/_go_meta_vite/" + viteEntryKey}, nil
+	assets := Assets{DevClientURL: "/_go_meta_vite/@vite/client", EntryScriptURL: "/_go_meta_vite/" + viteEntryKey}
+	if len(globalStylesheet) > 0 && globalStylesheet[0] {
+		info, err := os.Stat(GlobalStylesheetKey)
+		if err != nil || !info.Mode().IsRegular() {
+			return Assets{}, fmt.Errorf("development stylesheet %s must exist as a regular file", GlobalStylesheetKey)
+		}
+		assets.EntryCSSURLs = append(assets.EntryCSSURLs, "/_go_meta_vite/"+GlobalStylesheetKey+"?direct")
+	}
+	return assets, nil
 }
 
 // viteManifestChunk mirrors the fields go-meta consumes from Vite's
@@ -65,7 +76,7 @@ type viteManifestChunk struct {
 // clientDir is interpreted relative to the process working directory;
 // the example server assumes the repository root (blueprint §6 accepts
 // `go run ./cmd/example` from the repo root in Phase 1).
-func LoadAssets(clientDir string) (Assets, error) {
+func LoadAssets(clientDir string, globalStylesheet ...bool) (Assets, error) {
 	manifestPath := filepath.Join(clientDir, ".vite", "manifest.json")
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -97,6 +108,29 @@ func LoadAssets(clientDir string) (Assets, error) {
 			return Assets{}, fmt.Errorf("vite manifest %s: entry css: %w", manifestPath, err)
 		}
 		assets.EntryCSSURLs = append(assets.EntryCSSURLs, cssURL)
+	}
+	if len(globalStylesheet) > 0 && globalStylesheet[0] {
+		stylesheet, ok := manifest[GlobalStylesheetKey]
+		if !ok {
+			return Assets{}, fmt.Errorf("client manifest missing stylesheet %s", GlobalStylesheetKey)
+		}
+		if !strings.HasSuffix(stylesheet.File, ".css") {
+			return Assets{}, fmt.Errorf("client stylesheet %s is not a CSS asset", GlobalStylesheetKey)
+		}
+		cssURL, err := resolveAssetURL(clientDir, stylesheet.File)
+		if err != nil {
+			return Assets{}, fmt.Errorf("client stylesheet: %w", err)
+		}
+		found := false
+		for _, existing := range assets.EntryCSSURLs {
+			if existing == cssURL {
+				found = true
+				break
+			}
+		}
+		if !found {
+			assets.EntryCSSURLs = append([]string{cssURL}, assets.EntryCSSURLs...)
+		}
 	}
 	return assets, nil
 }

@@ -6,7 +6,7 @@ Projects created with `meta init` include Tailwind CSS. Use utility classes in t
 <h1 class="text-3xl font-bold">Hello, Meta</h1>
 ```
 
-Add global CSS or customize Tailwind in `frontend/app.css`. The starter imports this file through `frontend/entry.ts`, and the Vite plugin builds the stylesheet. In production, Meta includes the generated stylesheet in the HTML; Node is only needed to build it. During development Vite delivers CSS updates through its JavaScript client.
+Add global CSS or customize Tailwind in `frontend/app.css`. The starter configures this file as a separate Vite entry. Meta puts a stylesheet link in the initial HTML in both development and production, so templ pages receive their styles without waiting for JavaScript. In development, Vite processes the stylesheet and delivers live updates when JavaScript is enabled; with JavaScript disabled, refresh after editing. Production uses a hashed CSS file and needs Node only during the build.
 
 Tailwind scans your source for complete class names. Write `text-red-600` or `text-blue-600` in full rather than assembling a class such as `text-` plus a color at runtime. See [Tailwind's source detection guide](https://tailwindcss.com/docs/detecting-classes-in-source-files).
 
@@ -55,15 +55,15 @@ The Tailwind starter already includes this setup. In an existing project, instal
 @source "../app";
 ```
 
-Then add this import near the top of `frontend/entry.ts`:
+Add both entries to `vite.config.ts` under `build`:
 
 ```ts
-import './app.css';
+rollupOptions: { input: ['frontend/entry.ts', 'frontend/app.css'] },
 ```
 
-Run `meta dev` to develop, or `meta build` to produce the client assets. Vite includes the CSS in its build, and Meta adds a stylesheet link for the hashed production asset. In development, Vite delivers updates through its JavaScript client. If you use the public runtime directly, configure `ClientDir` for production or `DevOrigin` behind the Meta development proxy.
+Set `GlobalStylesheet: true` in `server.Config` in `cmd/app/main.go`. Remove `import './app.css'` from `frontend/entry.ts` if present so the stylesheet isn't loaded twice. Run `meta dev` to develop, or `meta build` to produce the client assets. If you use the public runtime directly, configure `ClientDir` for production or `DevOrigin` behind the Meta development proxy.
 
-`frontend/entry.ts` is part of the copied Meta browser runtime. Keep its existing imports and boot logic. When upgrading, review changes to the starter runtime before merging your CSS import into a newer entry file.
+Projects that keep the existing JavaScript CSS import and leave `GlobalStylesheet` unset continue to work as before. `frontend/entry.ts` is part of the copied Meta browser runtime; keep its other imports and boot logic intact.
 
 ## Svelte component styles
 

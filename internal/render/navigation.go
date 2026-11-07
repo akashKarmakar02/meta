@@ -147,15 +147,15 @@ func entryTags(assets *httpserver.Assets) string {
 		return ""
 	}
 	var b strings.Builder
-	if assets.DevClientURL != "" {
-		b.WriteString(`<script type="module" src="`)
-		b.WriteString(html.EscapeString(assets.DevClientURL))
-		b.WriteString(`"></script>`)
-	}
 	for _, css := range assets.EntryCSSURLs {
 		b.WriteString(`<link rel="stylesheet" href="`)
 		b.WriteString(html.EscapeString(css))
 		b.WriteString(`">`)
+	}
+	if assets.DevClientURL != "" {
+		b.WriteString(`<script type="module" src="`)
+		b.WriteString(html.EscapeString(assets.DevClientURL))
+		b.WriteString(`"></script>`)
 	}
 	b.WriteString(`<script type="module" src="`)
 	b.WriteString(html.EscapeString(assets.EntryScriptURL))

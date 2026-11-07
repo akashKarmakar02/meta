@@ -118,9 +118,6 @@ func runInit(ctx *Context, args []string) error {
 		return fmt.Errorf("meta init: read client runtime: %w", err)
 	}
 	for name, data := range client {
-		if name == "entry.ts" {
-			data = append([]byte("import './app.css';\n\n"), data...)
-		}
 		files["frontend/"+name] = data
 	}
 	if err := os.Mkdir(dest, 0o755); err != nil {

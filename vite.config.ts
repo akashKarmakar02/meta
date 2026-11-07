@@ -20,7 +20,7 @@ export default defineConfig({
     manifest: true,
     outDir: 'dist/client',
     rollupOptions: {
-      input: 'frontend/entry.ts',
+      input: ['frontend/entry.ts', 'frontend/app.css'],
     },
   },
 });

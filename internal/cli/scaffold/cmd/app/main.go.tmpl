@@ -18,6 +18,7 @@ func main() {
 	}
 	cfg := server.Config{
 		PublicDir: "public",
+		GlobalStylesheet: true,
 		Middleware: []fiber.Handler{apphooks.Handle}, Policies: apphooks.Policies(),
 		Routes: generated.RegisterRoutes(), APIRoutes: generated.RegisterAPIRoutes(), SSRPage: generated.SSRPage,
 		BarePage: generated.BarePage, VisualLayout: generated.VisualLayout, HealthCheck: true,

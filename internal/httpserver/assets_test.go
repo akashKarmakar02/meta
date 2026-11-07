@@ -38,6 +38,25 @@ const validManifest = `{
   }
 }`
 
+func TestLoadIndependentGlobalStylesheet(t *testing.T) {
+	manifest := `{"frontend/entry.ts":{"file":"assets/entry.js","isEntry":true},"frontend/app.css":{"file":"assets/app-123.css","src":"frontend/app.css"}}`
+	dir := writeClientDir(t, manifest, map[string]string{"assets/entry.js": "", "assets/app-123.css": "body{}"})
+	assets, err := LoadAssets(dir, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(assets.EntryCSSURLs) != 1 || assets.EntryCSSURLs[0] != "/assets/app-123.css" {
+		t.Fatalf("CSS URLs: %v", assets.EntryCSSURLs)
+	}
+	if _, err := LoadAssets(dir); err != nil {
+		t.Fatal(err)
+	}
+	missing := writeClientDir(t, validManifest, map[string]string{"assets/entry-ABC123.js": ""})
+	if _, err := LoadAssets(missing, true); err == nil {
+		t.Fatal("missing global stylesheet accepted")
+	}
+}
+
 // TestLoadAssetsResolvesEntry: a valid manifest resolves the correct entry
 // filename as a serving URL (E08 test 1).
 func TestLoadAssetsResolvesEntry(t *testing.T) {
