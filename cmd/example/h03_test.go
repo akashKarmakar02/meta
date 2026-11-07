@@ -36,7 +36,7 @@ func h03Get(t *testing.T, path string) (int, string, string) {
 // first, exactly one html/head/body (the root layout owns the document),
 // the persistent nav and page outlet present, and no client runtime —
 // the content reads without JavaScript.
-func h03AssertDocument(t *testing.T, path, body string) {
+func h03AssertDocument(t *testing.T, path, body, title string) {
 	t.Helper()
 	if !strings.HasPrefix(body, "<!DOCTYPE html>") && !strings.HasPrefix(body, "<!doctype html>") {
 		t.Errorf("%s: document must start with doctype, got %q", path, clip(body))
@@ -46,8 +46,8 @@ func h03AssertDocument(t *testing.T, path, body string) {
 			t.Errorf("%s: %d occurrences of %s, want exactly 1 (root layout owns the document)", path, n, tag)
 		}
 	}
-	if !strings.Contains(body, "<title>go-meta</title>") {
-		t.Errorf("%s: missing root layout <title>", path)
+	if !strings.Contains(body, "<title>"+title+"</title>") {
+		t.Errorf("%s: missing expected document title %q", path, title)
 	}
 	if !strings.Contains(body, `<div data-go-layout="app/layout.templ">`) {
 		t.Errorf("%s: missing root layout marker", path)
@@ -85,9 +85,10 @@ func TestH03RootServesFullHTMLDocument(t *testing.T) {
 	if ctype != "text/html; charset=utf-8" {
 		t.Fatalf("GET /: content-type = %q, want text/html; charset=utf-8", ctype)
 	}
-	h03AssertDocument(t, "/", body)
+	h03AssertDocument(t, "/", body, "Meta Framework Project")
 	for _, want := range []string{
 		`<main data-go-page="home">`,
+		`<meta name="description" data-meta-managed="description" content="A Go-first full-stack web framework.">`,
 		"<h1>go-meta</h1>",
 		"<p>A Go-first full-stack web framework.</p>",
 	} {
@@ -107,9 +108,10 @@ func TestH03AboutServesFullHTMLDocument(t *testing.T) {
 	if ctype != "text/html; charset=utf-8" {
 		t.Fatalf("GET /about: content-type = %q, want text/html; charset=utf-8", ctype)
 	}
-	h03AssertDocument(t, "/about", body)
+	h03AssertDocument(t, "/about", body, "About")
 	for _, want := range []string{
 		"<main data-go-page-about>",
+		`<meta name="description" data-meta-managed="description" content="Learn how Meta renders Go and Svelte pages.">`,
 		"<h1>About</h1>",
 		"<p>go-meta renders templ pages server-side; this one is distinct from the root page.</p>",
 	} {

@@ -19,6 +19,7 @@ describe('navigation protocol fixtures (F01)', () => {
     expect(resp.routeId).toBe('about/page.templ');
     expect(resp.mode).toBe('ssr');
     expect(resp.title).toBe('About');
+    expect(resp.metadata).toEqual({ title: 'About', description: 'Learn how Meta renders Go and Svelte pages.' });
     expect(resp.layouts).toEqual(['app/layout.templ']);
     expect(resp.html).toContain('<h1>About</h1>');
     expect(resp.clientEntry).toBeNull();

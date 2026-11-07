@@ -1,8 +1,13 @@
 package app
 
+import "github.com/akashKarmakar02/meta/metadata"
+
 // Layout is the root visual layout. The framework owns the surrounding
 // document and page outlet independently of this wrapper.
 templ Layout(pageContent templ.Component) {
+	{{ metadata.Set(ctx, metadata.Page{Title: "Meta Framework Project", Description: "A Go-first full-stack web framework."}) }}
+
+
 	<div data-go-layout="app/layout.templ">
 		@Nav()
 		@pageContent

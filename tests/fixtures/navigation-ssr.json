@@ -8,5 +8,9 @@
     "app/layout.templ"
   ],
   "html": "<div data-go-layout=\"app/layout.templ\"><nav data-go-site-nav><ul><li><a href=\"/\">Home</a></li><li><a href=\"/about\">About</a></li><li><a href=\"/docs\">Docs</a></li><li><a href=\"/dashboard\">Dashboard</a></li><li><a href=\"/dashboard/settings\">Settings</a></li><li><a href=\"/products/new\">New product</a></li></ul></nav><main data-go-page-about><h1>About</h1><p>go-meta renders templ pages server-side; this one is distinct from the root page.</p></main></div>",
-  "clientEntry": null
+  "clientEntry": null,
+  "metadata": {
+    "title": "About",
+    "description": "Learn how Meta renders Go and Svelte pages."
+  }
 }

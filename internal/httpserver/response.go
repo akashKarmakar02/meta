@@ -1,6 +1,9 @@
 package httpserver
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"github.com/akashKarmakar02/meta/internal/metastate"
+)
 
 // NavigationVersion is the soft-navigation protocol version this build
 // speaks. Unsupported versions trigger a normal full page navigation on
@@ -35,6 +38,7 @@ type NavigationResponse struct {
 	HTML        string          `json:"html"`
 	ClientEntry *string         `json:"clientEntry"`
 	Data        json.RawMessage `json:"data,omitempty"`
+	Metadata    *metastate.Page `json:"metadata,omitempty"`
 }
 
 // MarshalNavigation serializes the envelope with the exact wire shape

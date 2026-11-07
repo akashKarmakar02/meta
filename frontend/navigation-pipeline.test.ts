@@ -143,6 +143,19 @@ afterEach(async () => {
 });
 
 describe('F12 integration pipeline', () => {
+  it('updates and removes Meta-owned descriptions after navigation', async () => {
+    renderShell('ssr-root');
+    const first = navigateTo('/about');
+    await settleFetch('/about', { ...ssrAbout, metadata: { description: '<safe> & text' } });
+    await first;
+    const tag = document.head.querySelector('meta[data-meta-managed="description"]');
+    expect(tag?.getAttribute('content')).toBe('<safe> & text');
+    const second = navigateTo('/another');
+    await settleFetch('/another', { ...ssrAbout, url: '/another', metadata: undefined });
+    await second;
+    expect(document.head.querySelector('meta[data-meta-managed="description"]')).toBeNull();
+  });
+
   it('1. SSR → SSR transition applies outlet content and commits title/URL', async () => {
     renderShell('ssr-root');
     const p = navigateTo('/about');

@@ -14,6 +14,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 
 	"github.com/akashKarmakar02/meta/internal/httpserver"
+	"github.com/akashKarmakar02/meta/internal/metastate"
 	"github.com/akashKarmakar02/meta/internal/routing"
 )
 
@@ -21,13 +22,21 @@ import (
 type VisualLayoutResolver func(routing.Route, templ.Component) (templ.Component, error)
 
 func document(content, tags, title, dataScript string) string {
+	return documentWithMetadata(content, tags, title, dataScript, metastate.Page{})
+}
+
+func documentWithMetadata(content, tags, title, dataScript string, meta metastate.Page) string {
+	description := ""
+	if meta.Description != "" {
+		description = `<meta name="description" data-meta-managed="description" content="` + html.EscapeString(meta.Description) + `">`
+	}
 	styles, script := tags, ""
 	if i := strings.Index(tags, "<script"); i >= 0 {
 		styles, script = tags[:i], tags[i:]
 	}
 	return "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">" +
 		"<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>" +
-		html.EscapeString(title) + "</title>" + styles + "</head><body><div data-go-page-outlet>" +
+		html.EscapeString(title) + "</title>" + description + styles + "</head><body><div data-go-page-outlet>" +
 		content + "</div>" + dataScript + script + "</body></html>"
 }
 

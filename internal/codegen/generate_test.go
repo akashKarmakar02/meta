@@ -185,9 +185,9 @@ func TestRoutesFileSSRPageMapping(t *testing.T) {
 	src := string(srcB)
 	for _, want := range []string{
 		`if r.ID == "page.templ" {`,
-		"return layout0.Layout(page0.Page())",
+		"return layout0.Layout(metadata.PageComponent(page0.Page()))",
 		`if r.ID == "about/page.templ" {`,
-		"return layout0.Layout(page1.About())",
+		"return layout0.Layout(metadata.PageComponent(page1.About()))",
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("generated source missing %q:\n%s", want, src)
@@ -234,8 +234,8 @@ func TestRoutesFileContent(t *testing.T) {
 		// wrap first so the final nesting matches the manifest's
 		// outermost-first chain order.
 		"layout0 \"github.com/akashKarmakar02/meta/app\"",
-		"return layout0.Layout(page0.Page())",
-		"return layout0.Layout(page1.About())",
+		"return layout0.Layout(metadata.PageComponent(page0.Page()))",
+		"return layout0.Layout(metadata.PageComponent(page1.About()))",
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("generated source missing %q:\n%s", want, src)

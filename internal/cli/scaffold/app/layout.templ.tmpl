@@ -1,6 +1,9 @@
 package app
 
+import "github.com/akashKarmakar02/meta/metadata"
+
 templ Layout(content templ.Component) {
+  {{ metadata.Set(ctx, metadata.Page{Title: "My Meta app", Description: "A web application built with Meta."}) }}
   <div data-go-layout="app/layout.templ">
     <nav><a href="/">Home</a> <a href="/dashboard">Dashboard</a></nav>
     @content

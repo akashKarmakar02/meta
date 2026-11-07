@@ -475,6 +475,20 @@ async function applyEnvelope(
       popstateScroll = null;
     }
 
+    // Only touch the description tag created by Meta. Avoid interpolating
+    // server data into selectors or HTML, and commit after the stale check.
+    const oldDescription = document.head.querySelector('meta[data-meta-managed="description"]');
+    const description = env.metadata?.description;
+    if (description) {
+      const tag = oldDescription ?? document.createElement('meta');
+      tag.setAttribute('name', 'description');
+      tag.setAttribute('data-meta-managed', 'description');
+      tag.setAttribute('content', description);
+      if (!oldDescription) document.head.appendChild(tag);
+    } else {
+      oldDescription?.remove();
+    }
+
     focusMainRegion();
   };
 

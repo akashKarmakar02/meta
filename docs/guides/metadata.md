@@ -1,18 +1,83 @@
 # Page titles and metadata
 
-Meta currently owns the HTML document. There is no public per-page metadata API for setting the initial `<title>`, description, canonical URL, or Open Graph tags in the server-rendered `<head>`. Adding those tags inside a page or visual layout puts them in the document body, so it is not a reliable metadata solution.
+Templ pages and templ layouts can set the document title and description with `metadata.Set`. Meta renders those values into the initial HTML `<head>` and updates them during soft navigation.
 
-On a direct request, the current SSR document title is `go-meta`. A direct Svelte page request uses its route ID as the title. During soft navigation to a templ page, Meta derives the title from the first `<h1>` in the rendered page. During soft navigation to a Svelte page, it derives the title from the last path segment. Keep the first heading plain text, since the current SSR title extraction reads HTML between the opening and closing heading tags.
-
-For example, this heading supplies `About our team` as the soft-navigation title for a templ page:
+Set application defaults in the root `app/layout.templ`:
 
 ```templ
-templ Page() {
+package app
+
+import "github.com/akashKarmakar02/meta/metadata"
+
+templ Layout(content templ.Component) {
+    {{ metadata.Set(ctx, metadata.Page{
+        Title: "My site",
+        Description: "Updates from my site.",
+    }) }}
+    <div>
+        @content
+    </div>
+}
+```
+
+The project created by `meta init` includes a metadata example in its root layout. Edit it to suit your application. The repository example also sets defaults in [`app/layout.templ`](../../app/layout.templ), overrides them in [`app/about/page.templ`](../../app/about/page.templ), and uses loader data in [`app/posts/[postId]/page.templ`](../../app/posts/%5BpostId%5D/page.templ).
+
+## Override a page
+
+Call `metadata.Set` in the page's templ component:
+
+```templ
+package about
+
+import "github.com/akashKarmakar02/meta/metadata"
+
+templ About() {
+    {{ metadata.Set(ctx, metadata.Page{
+        Title: "About us",
+        Description: "Meet our team.",
+    }) }}
     <main>
-        <h1>About our team</h1>
-        <p>Meet the team.</p>
+        <h1>About</h1>
     </main>
 }
 ```
 
-This does not change the title in the initial HTML response. Client-side code can assign `document.title`, but that requires JavaScript and Meta may replace it during navigation. It also cannot supply server-rendered metadata to crawlers. Applications that need reliable page-specific head tags must provide that capability outside the current public Meta runtime or wait for a public metadata API. Avoid editing the framework's `internal/render` package from an application: it is not an importable extension point.
+The page's nonempty fields override the same fields in its nearest templ visual layout. If a page omits a field, it inherits that field from the layout. Meta uses only the nearest visual layout, not every ancestor layout. Empty strings mean “inherit”; they do not explicitly remove a layout value. If neither sets a title, Meta retains its existing default title behavior. Each render has its own metadata, and values are escaped in HTML.
+
+## Use loader data
+
+Read the same loader result used by the page. Replace the module path and `posts.Post` with your application's types:
+
+```templ
+package blog
+
+import "example.com/my-app/app/posts"
+import "github.com/akashKarmakar02/meta/loaderdata"
+import "github.com/akashKarmakar02/meta/metadata"
+
+templ Page() {
+    {{
+        post, ok := loaderdata.Get[posts.Post](ctx)
+        if ok {
+            metadata.Set(ctx, metadata.Page{
+                Title: post.Title,
+                Description: post.Excerpt,
+            })
+        }
+    }}
+    <main>
+        if ok {
+            <h1>{ post.Title }</h1>
+            <p>{ post.Content }</p>
+        }
+    </main>
+}
+```
+
+Register the loader for the route as described in [loaders](loaders.md). Meta renders the page once and does not run the loader a second time for metadata.
+
+## Svelte pages
+
+Svelte pages run in the browser. A nearest templ layout can supply their initial title and description, but Meta cannot extract server-rendered metadata from a Svelte component. Svelte's `<svelte:head>` can add client-side tags after JavaScript runs. Meta's current navigation runtime also updates titles, so check title behavior when combining them. Client-side tags are not reliable for crawlers that do not run JavaScript.
+
+Only `Title` and `Description` are supported by this API. Canonical URLs and Open Graph tags are not yet available through `metadata.Page`.

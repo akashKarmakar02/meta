@@ -11,6 +11,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 
 	"github.com/akashKarmakar02/meta/internal/httpserver"
+	"github.com/akashKarmakar02/meta/internal/metastate"
 	"github.com/akashKarmakar02/meta/internal/routing"
 )
 
@@ -187,37 +188,50 @@ func SSRNavigationHandler(route routing.Route, assets *httpserver.Assets, compos
 	tags := entryTags(assets)
 	return func(c fiber.Ctx) error {
 		if !IsNavigationRequest(c) {
+			ctx := metastate.New(c.Context())
 			component, err := composed(route)
 			if err != nil {
 				return fmt.Errorf("routes: SSRPage: %w", err)
 			}
-			htmlDoc, err := RenderComponent(c.Context(), component)
+			htmlDoc, err := RenderComponent(ctx, component)
 			if err != nil {
 				return fmt.Errorf("render %s: %w", route.Path, err)
 			}
+			meta := metastate.Get(ctx)
+			title := "go-meta"
+			if meta.Title != "" {
+				title = meta.Title
+			}
 			c.Set(fiber.HeaderContentType, "text/html; charset=utf-8")
-			return c.SendString(document(string(htmlDoc), tags, "go-meta", ""))
+			return c.SendString(documentWithMetadata(string(htmlDoc), tags, title, "", meta))
 		}
+		pageCtx := metastate.New(c.Context())
+		layoutCtx := metastate.New(c.Context())
 		bareComponent, err := bare(route)
 		if err != nil {
 			return fmt.Errorf("routes: BarePage: %w", err)
 		}
-		bareHTML, err := RenderComponent(c.Context(), bareComponent)
+		bareHTML, err := RenderComponent(pageCtx, bareComponent)
 		if err != nil {
-			return fmt.Errorf("render bare page %s: %w", route.Path, err)
+			return fmt.Errorf("render page %s: %w", route.Path, err)
 		}
-		// bareHTML is already escaped, server-owned templ output. Compose it
-		// once so the title and visible page come from the same render.
 		visual, err := resolve(route, templ.Raw(string(bareHTML)))
 		if err != nil {
 			return fmt.Errorf("routes: VisualLayout: %w", err)
 		}
-		visualHTML, err := RenderComponent(c.Context(), visual)
+		visualHTML, err := RenderComponent(layoutCtx, visual)
 		if err != nil {
 			return fmt.Errorf("render visual layout %s: %w", route.Path, err)
 		}
+		meta := metastate.Merge(metastate.Get(layoutCtx), metastate.Get(pageCtx))
 		env := NavigationEnvelope(c, route, string(bareHTML))
 		env.HTML = string(visualHTML)
+		if meta.Title != "" {
+			env.Title = meta.Title
+		}
+		if meta.Title != "" || meta.Description != "" {
+			env.Metadata = &meta
+		}
 		return SendNavigation(c, env)
 	}
 }
@@ -255,10 +269,12 @@ func CSRNavigationHandler(route routing.Route, assets *httpserver.Assets, resolv
 		resolve = resolvers[0]
 	}
 	return func(c fiber.Ctx) error {
-		visual, err := csrVisual(c.Context(), route, resolve, string(c.Request().URI().PathOriginal()))
+		layoutCtx := metastate.New(c.Context())
+		visual, err := csrVisual(layoutCtx, route, resolve, string(c.Request().URI().PathOriginal()))
 		if err != nil {
 			return err
 		}
+		meta := metastate.Get(layoutCtx)
 		// C04: the loader result (if any) was attached to the context by
 		// WithLoader. It is delivered the same way on both response modes —
 		// embedded in the boot shell for a direct load, or attached to the
@@ -267,9 +283,19 @@ func CSRNavigationHandler(route routing.Route, assets *httpserver.Assets, resolv
 		data, hasData := httpserver.CSRLoaderData(c.Context())
 		if !IsNavigationRequest(c) {
 			c.Set(fiber.HeaderContentType, "text/html; charset=utf-8")
-			return c.SendString(document(visual, entryTags(assets), route.ID, csrDataScript(data, hasData)))
+			title := route.ID
+			if meta.Title != "" {
+				title = meta.Title
+			}
+			return c.SendString(documentWithMetadata(visual, entryTags(assets), title, csrDataScript(data, hasData), meta))
 		}
 		env := CSRNavigationEnvelope(c, route, csrDataRaw(data, hasData))
+		if meta.Title != "" {
+			env.Title = meta.Title
+		}
+		if meta.Title != "" || meta.Description != "" {
+			env.Metadata = &meta
+		}
 		if len(route.Layouts) > 0 && route.Layouts[0].Mode == routing.ModeSSR {
 			env.HTML = visual
 		}

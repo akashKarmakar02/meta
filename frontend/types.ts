@@ -31,6 +31,7 @@ export interface NavigationResponse {
   routeId: string;
   mode: NavigationMode;
   title: string;
+  metadata?: { title?: string; description?: string };
   layouts: string[];
   html: string;
   clientEntry: string | null;

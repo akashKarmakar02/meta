@@ -38,6 +38,9 @@ func TestNavigationSSRFixture(t *testing.T) {
 	if resp.Title != "About" {
 		t.Errorf("title = %q", resp.Title)
 	}
+	if resp.Metadata == nil || resp.Metadata.Title != "About" || resp.Metadata.Description != "Learn how Meta renders Go and Svelte pages." {
+		t.Errorf("metadata = %+v", resp.Metadata)
+	}
 	if len(resp.Layouts) != 1 || resp.Layouts[0] != "app/layout.templ" {
 		t.Errorf("layouts = %v", resp.Layouts)
 	}

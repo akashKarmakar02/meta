@@ -62,6 +62,12 @@ func RoutesFileForProject(m routing.Manifest, modulePath, appDir string) ([]byte
 	b.WriteString("\t\"github.com/a-h/templ\"\n")
 	b.WriteString("\t\"github.com/akashKarmakar02/meta/routing\"\n")
 	for _, r := range m.Routes {
+		if r.Mode == routing.ModeSSR {
+			b.WriteString("\t\"github.com/akashKarmakar02/meta/metadata\"\n")
+			break
+		}
+	}
+	for _, r := range m.Routes {
 		if r.Mode != routing.ModeSSR {
 			continue
 		}
@@ -100,7 +106,7 @@ func RoutesFileForProject(m routing.Manifest, modulePath, appDir string) ([]byte
 		}
 		fmt.Fprintf(&b, "\tif r.ID == %q {\n", r.ID)
 		// Discovery has selected at most one visual layout.
-		expr := fmt.Sprintf("page%d.%s()", ssrIndex(r, m), pageSymbol(r))
+		expr := fmt.Sprintf("metadata.PageComponent(page%d.%s())", ssrIndex(r, m), pageSymbol(r))
 		for i := len(r.Layouts) - 1; i >= 0; i-- {
 			l := r.Layouts[i]
 			expr = fmt.Sprintf("layout%d.%s(%s)", layoutIndex(layouts, l.SourceFile), layoutSymbol(l.SourceFile), expr)

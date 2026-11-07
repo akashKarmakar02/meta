@@ -6,12 +6,19 @@ soft navigation.
 
 The Go module is `github.com/akashKarmakar02/meta`. This is an early
 pre-release: its APIs can change. To add a specific release to an existing
-Go module, run `go get github.com/akashKarmakar02/meta@v0.1.0-alpha.3`.
+Go module, run `go get github.com/akashKarmakar02/meta@v0.1.0-alpha.4`.
 Install the matching CLI with
-`go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-alpha.3`.
+`go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-alpha.4`.
 
 Start with the [developer documentation](docs/README.md) for installation,
 project structure, routing, APIs, styling, and deployment.
+
+## Page metadata
+
+Templ pages and their nearest templ layouts can set a document title and
+description with `metadata.Set(ctx, metadata.Page{...})`. Page fields override
+layout defaults. See the [metadata guide](docs/guides/metadata.md) for static
+and loader-backed examples and Svelte limitations.
 
 ## Visual layouts
 

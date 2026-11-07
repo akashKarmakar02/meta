@@ -175,6 +175,16 @@ function validateNavigationResponse(parsed: unknown, sourceURL: string): Navigat
   if (typeof env.title !== 'string') {
     fail('missing or invalid title');
   }
+  if (env.metadata !== undefined) {
+    if (typeof env.metadata !== 'object' || env.metadata === null || Array.isArray(env.metadata)) {
+      fail('metadata must be an object');
+    }
+    const meta = env.metadata as Record<string, unknown>;
+    if ((meta.title !== undefined && typeof meta.title !== 'string') ||
+        (meta.description !== undefined && typeof meta.description !== 'string')) {
+      fail('invalid metadata fields');
+    }
+  }
   if (!Array.isArray(env.layouts) || env.layouts.some((l) => typeof l !== 'string')) {
     fail('layouts must be an array of strings');
   }
@@ -213,6 +223,7 @@ function validateNavigationResponse(parsed: unknown, sourceURL: string): Navigat
     routeId: env.routeId as string,
     mode: env.mode as NavigationMode,
     title: env.title as string,
+    ...(env.metadata !== undefined ? { metadata: env.metadata as NavigationResponse['metadata'] } : {}),
     layouts: env.layouts as string[],
     html: env.html as string,
     clientEntry:
