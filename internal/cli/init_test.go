@@ -26,6 +26,14 @@ func TestInitCreatesIndependentProject(t *testing.T) {
 			t.Errorf("missing %s: %v", name, err)
 		}
 	}
+	for _, name := range []string{"app/envexample", "app/envbrowser"} {
+		if _, err := os.Stat(filepath.Join(dest, name)); !os.IsNotExist(err) {
+			t.Errorf("generated project must not contain example route %s", name)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dest, ".env.example")); !os.IsNotExist(err) {
+		t.Fatal("generated project must not contain .env.example")
+	}
 	if _, err := os.Stat(filepath.Join(dest, "Makefile")); !os.IsNotExist(err) {
 		t.Fatal("generated project must not contain a Makefile")
 	}

@@ -68,8 +68,9 @@ func (l trackedListener) Accept() (net.Conn, error) {
 	return wrapped, nil
 }
 
-func publicDevPort() (string, error) {
-	port := os.Getenv("PORT")
+func publicDevPort() (string, error) { return publicDevPortValue(os.Getenv("PORT")) }
+
+func publicDevPortValue(port string) (string, error) {
 	if port == "" {
 		port = "3000"
 	}
@@ -85,6 +86,10 @@ func startDevProxy(viteOrigin string, log io.Writer) (*devProxy, error) {
 	if err != nil {
 		return nil, err
 	}
+	return startDevProxyWithPort(viteOrigin, port, log)
+}
+
+func startDevProxyWithPort(viteOrigin, port string, log io.Writer) (*devProxy, error) {
 	vite, err := url.Parse(viteOrigin)
 	if err != nil || vite.Scheme != "http" || vite.Hostname() != "127.0.0.1" || vite.Port() == "" || vite.Path != "" || vite.RawQuery != "" || vite.Fragment != "" || vite.User != nil {
 		return nil, fmt.Errorf("meta dev: invalid Vite target")

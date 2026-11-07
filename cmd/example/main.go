@@ -16,6 +16,7 @@ import (
 	"github.com/akashKarmakar02/meta/app/actions"
 	"github.com/akashKarmakar02/meta/app/loaders"
 	"github.com/akashKarmakar02/meta/cache"
+	"github.com/akashKarmakar02/meta/env"
 	"github.com/akashKarmakar02/meta/formcsrf"
 	"github.com/akashKarmakar02/meta/loader"
 
@@ -155,6 +156,11 @@ func newConfiguredAppBase(assets *httpserver.Assets, privateSocket bool, registr
 }
 
 func main() {
+	if os.Getenv("GO_META_DEV") != "1" {
+		if err := env.LoadProduction("."); err != nil {
+			log.Fatal(err)
+		}
+	}
 	demoCache, err := cache.NewMemory(cache.MemoryConfig{MaxEntries: 128, MaxBytes: 1 << 20})
 	if err != nil {
 		log.Fatalf("cache configuration: %v", err)

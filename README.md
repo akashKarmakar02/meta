@@ -6,12 +6,18 @@ soft navigation.
 
 The Go module is `github.com/akashKarmakar02/meta`. This is an early
 pre-release: its APIs can change. To add a specific release to an existing
-Go module, run `go get github.com/akashKarmakar02/meta@v0.1.0-alpha.5`.
+Go module, run `go get github.com/akashKarmakar02/meta@v0.1.0-alpha.6`.
 Install the matching CLI with
-`go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-alpha.5`.
+`go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-alpha.6`.
 
 Start with the [developer documentation](docs/README.md) for installation,
 project structure, routing, APIs, styling, and deployment.
+
+## Environment variables
+
+`meta dev` loads `.env.local` over `.env`. Production uses `.env.production`
+over `.env`. Vite exposes user-defined `VITE_` values to browser code. See the [environment guide](docs/guides/environment.md)
+for file precedence, secrets, examples, and production configuration.
 
 ## Public files
 

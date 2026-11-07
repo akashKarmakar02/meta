@@ -97,7 +97,7 @@ func TestDevSupervisesViteAndAir(t *testing.T) {
 					t.Error("Air still running")
 				}
 			}
-			if env, ok := runner.contexts[1].Value(ctxKeyEnv).([]string); !ok || len(env) != 1 || !strings.HasPrefix(env[0], "GO_META_VITE_ORIGIN=http://127.0.0.1:") {
+			if env, ok := runner.contexts[1].Value(ctxKeyEnv).([]string); !ok || len(env) != 2 || env[0] != "GO_META_DEV=1" || !strings.HasPrefix(env[1], "GO_META_VITE_ORIGIN=http://127.0.0.1:") {
 				t.Errorf("Air environment: %v", env)
 			}
 		})

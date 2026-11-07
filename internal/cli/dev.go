@@ -38,6 +38,8 @@ Flags:
   --dir <path>    Project root directory (skips discovery)
 
 Environment:
+  Development .env files supply application variables to the Go process.
+  Shell variables take precedence; restart meta dev after editing files.
   PORT            Public loopback port (default 3000)
   GO_META_VITE_PORT  Vite port override (default 5173)
 
@@ -129,7 +131,7 @@ type devDeps struct {
 	runner     runner
 	signals    func() (<-chan os.Signal, func())
 	grace      time.Duration // override for the shutdown grace period in tests
-	startProxy func(string, io.Writer) (*devProxy, error)
+	startProxy func(string, string, io.Writer) (*devProxy, error)
 }
 
 // supervisedChild pairs a process with a close-once completion signal, so
@@ -210,7 +212,7 @@ var prodDeps = devDeps{
 	runner:     execRunner{},
 	signals:    watchInterrupt,
 	grace:      airShutdownGrace,
-	startProxy: startDevProxy,
+	startProxy: startDevProxyWithPort,
 }
 
 func nodeLookPath() (string, error) {
@@ -222,6 +224,10 @@ func nodeLookPath() (string, error) {
 }
 
 func viteCommand(root string, lookNode func() (string, error)) (string, []string, string, error) {
+	return viteCommandWithPort(root, lookNode, os.Getenv("GO_META_VITE_PORT"))
+}
+
+func viteCommandWithPort(root string, lookNode func() (string, error), port string) (string, []string, string, error) {
 	node, err := lookNode()
 	if err != nil {
 		return "", nil, "", err
@@ -230,7 +236,6 @@ func viteCommand(root string, lookNode func() (string, error)) (string, []string
 	if _, err := os.Stat(vite); err != nil {
 		return "", nil, "", fmt.Errorf("meta dev: Vite dependencies missing (node_modules not installed).\n\nInstall:\n  cd %s\n  npm ci", root)
 	}
-	port := os.Getenv("GO_META_VITE_PORT")
 	if port == "" {
 		port = "5173"
 	}
@@ -340,6 +345,14 @@ func runDevWith(c *Context, deps devDeps) error {
 	if err != nil {
 		return err
 	}
+	envValues, err := developmentEnv(root)
+	if err != nil {
+		return err
+	}
+	viteEnv, err := fileEnv(root, "development", true)
+	if err != nil {
+		return err
+	}
 	s := &devSession{c: c, deps: deps, root: root}
 	s.log = c.Stderr
 	s.out = newDevOutput(c.Stderr)
@@ -363,7 +376,7 @@ func runDevWith(c *Context, deps devDeps) error {
 		if err := checkDevToolchain(root); err != nil {
 			return err
 		}
-		node, viteArgs, origin, err = viteCommand(root, deps.lookNode)
+		node, viteArgs, origin, err = viteCommandWithPort(root, deps.lookNode, devEnvValue("GO_META_VITE_PORT", envValues))
 		if err != nil {
 			return err
 		}
@@ -376,7 +389,7 @@ func runDevWith(c *Context, deps devDeps) error {
 	}
 
 	publicPort := ""
-	if p, perr := publicDevPort(); perr == nil {
+	if p, perr := publicDevPortValue(devEnvValue("PORT", envValues)); perr == nil {
 		publicPort = p
 	} else {
 		return perr
@@ -407,7 +420,7 @@ func runDevWith(c *Context, deps devDeps) error {
 	var proxy *devProxy
 	var proxyWait <-chan error
 	if node != "" && deps.startProxy != nil {
-		proxy, err = deps.startProxy(origin, s.out)
+		proxy, err = deps.startProxy(origin, publicPort, s.out)
 		if err != nil {
 			return err
 		}
@@ -417,8 +430,12 @@ func runDevWith(c *Context, deps devDeps) error {
 
 	if node != "" {
 		viteCtx := withWorkingDir(context.Background(), root)
+		viteValues := append([]string(nil), viteEnv...)
 		if proxy != nil {
-			viteCtx = context.WithValue(viteCtx, ctxKeyEnv, []string{"GO_META_PUBLIC_PORT=" + proxy.publicPort})
+			viteValues = append(viteValues, "GO_META_PUBLIC_PORT="+proxy.publicPort)
+		}
+		if len(viteValues) > 0 {
+			viteCtx = context.WithValue(viteCtx, ctxKeyEnv, viteValues)
 		}
 		viteProc, err := deps.runner.Start(viteCtx, s.out.vite(), node, viteArgs...)
 		if err != nil {
@@ -428,11 +445,15 @@ func runDevWith(c *Context, deps devDeps) error {
 	}
 
 	airCtx := withWorkingDir(context.Background(), root)
+	env := append([]string(nil), envValues...)
+	env = append(env, "GO_META_DEV=1")
 	if origin != "" {
-		env := []string{"GO_META_VITE_ORIGIN=" + origin}
+		env = append(env, "GO_META_VITE_ORIGIN="+origin)
 		if proxy != nil {
 			env = append(env, "GO_META_DEV_SOCKET="+proxy.backendSocket)
 		}
+	}
+	if len(env) != 0 {
 		airCtx = context.WithValue(airCtx, ctxKeyEnv, env)
 	}
 	airProc, err := deps.runner.Start(airCtx, s.out.air(), airPath, config)

@@ -1,0 +1,17 @@
+package envexample
+
+import "os"
+
+// Envexample demonstrates a deliberately public application message.
+// Never render secrets into HTML.
+templ Envexample() {
+ {{
+  message := os.Getenv("APP_MESSAGE")
+  if message == "" { message = "Set APP_MESSAGE in .env and restart meta dev." }
+ }}
+ <main>
+  <h1>Server environment example</h1>
+  <p>{ message }</p>
+  <a href="/envbrowser">See the browser environment example</a>
+ </main>
+}

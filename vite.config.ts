@@ -10,6 +10,8 @@ export default defineConfig({
   plugins: [svelte()],
   // Meta serves public files directly, without Vite following symlinks.
   publicDir: false,
+  // Meta selects the env files and passes public VITE_ values explicitly.
+  envDir: false,
   // The explicit public port disables Vite's direct-port WebSocket fallback.
   ...(process.env.GO_META_PUBLIC_PORT ? {
     server: { ws: { clientPort: Number(process.env.GO_META_PUBLIC_PORT) } },

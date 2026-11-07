@@ -35,8 +35,15 @@ func projectCommand(ctx *Context, name string, args []string, fn func(string) er
 }
 
 func runStep(ctx *Context, root, name string, args ...string) error {
+	return runStepEnv(ctx, root, nil, name, args...)
+}
+
+func runStepEnv(ctx *Context, root string, env []string, name string, args ...string) error {
 	cmd := exec.Command(name, args...)
 	cmd.Dir = root
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = ctx.Stdout
 	cmd.Stderr = ctx.Stderr
@@ -71,7 +78,11 @@ func runBuild(ctx *Context, args []string) error {
 		if err := generateProject(ctx, root); err != nil {
 			return err
 		}
-		if err := runStep(ctx, root, "npm", "run", "build"); err != nil {
+		viteEnv, err := fileEnv(root, "production", true)
+		if err != nil {
+			return err
+		}
+		if err := runStepEnv(ctx, root, viteEnv, "npm", "run", "build"); err != nil {
 			return err
 		}
 		if err := os.MkdirAll(filepath.Join(root, "bin"), 0o755); err != nil {

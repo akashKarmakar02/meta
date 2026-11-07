@@ -7,9 +7,13 @@ import (
 
 	generated "{{MODULE}}/generated"
 	"github.com/akashKarmakar02/meta/server"
+	"github.com/akashKarmakar02/meta/env"
 )
 
 func main() {
+	if os.Getenv("GO_META_DEV") != "1" {
+		if err := env.LoadProduction("."); err != nil { log.Fatal(err) }
+	}
 	cfg := server.Config{
 		PublicDir: "public",
 		Routes: generated.RegisterRoutes(), SSRPage: generated.SSRPage,
