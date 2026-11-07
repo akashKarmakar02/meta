@@ -38,10 +38,10 @@ func MountAPI(app *fiber.App, route APIRoute, middleware ...fiber.Handler) {
 		app.All(internalrouting.FiberRegistrationPath(route.Path), handler)
 		return
 	}
-	handlers := make([]any, 0, len(middleware))
+	chain := make([]any, 0, len(middleware))
 	for _, item := range middleware[1:] {
-		handlers = append(handlers, item)
+		chain = append(chain, item)
 	}
-	handlers = append(handlers, handler)
-	app.All(internalrouting.FiberRegistrationPath(route.Path), middleware[0], handlers...)
+	chain = append(chain, handler)
+	app.All(internalrouting.FiberRegistrationPath(route.Path), middleware[0], chain...)
 }
