@@ -5,7 +5,6 @@ package server
 import (
 	"fmt"
 	"net/url"
-	"os"
 	"strings"
 
 	"github.com/a-h/templ"
@@ -195,9 +194,6 @@ func New(cfg Config) (*fiber.App, error) {
 	var telemetry observability.Config
 	if cfg.Observability != nil {
 		telemetry = *cfg.Observability
-	}
-	if telemetry.Logger == nil && !telemetry.DisableLogging && (cfg.DevOrigin != "" || os.Getenv("GO_META_DEV") == "1") {
-		telemetry.Logger = observability.DevelopmentLogger(os.Stderr)
 	}
 	app.Use(observability.Middleware(telemetry))
 	app.Use(httpserver.ValidatePagePath)

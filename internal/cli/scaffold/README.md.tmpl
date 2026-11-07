@@ -13,7 +13,7 @@ Open http://localhost:3000. Files in `public/` are available at the site root, s
 
 Configure server middleware and route policies in `app/hooks.go`. Policies do not provide authentication by themselves; implement your own credential and authorization checks.
 
-The server emits readable request logs in development, structured JSON logs in production, and `X-Request-ID` response headers. Metrics can be enabled through `server.Config.Observability`.
+The server emits readable request logs in development and production, and `X-Request-ID` response headers. Metrics can be enabled through `server.Config.Observability`.
 
 To build a Node-free production server:
 

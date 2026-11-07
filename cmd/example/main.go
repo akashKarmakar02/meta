@@ -213,9 +213,6 @@ func main() {
 	}
 	var metrics *observability.Collector
 	telemetry := observability.Config{}
-	if devOrigin != "" || os.Getenv("GO_META_DEV") == "1" {
-		telemetry.Logger = observability.DevelopmentLogger(os.Stderr)
-	}
 	if os.Getenv("GO_META_OBSERVABILITY") != "0" {
 		metrics = observability.NewCollector()
 		telemetry.Metrics = metrics

@@ -46,8 +46,6 @@ type request struct {
 	route   string
 }
 
-var defaultLogger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
-
 // RequestID returns the server-generated identifier for this request.
 func RequestID(ctx context.Context) string {
 	if ctx == nil {
@@ -100,7 +98,7 @@ func Middleware(cfg Config) fiber.Handler {
 	if cfg.DisableLogging {
 		logger = nil
 	} else if logger == nil {
-		logger = defaultLogger
+		logger = DevelopmentLogger(os.Stderr)
 	}
 	return func(c fiber.Ctx) (err error) {
 		var token [16]byte
