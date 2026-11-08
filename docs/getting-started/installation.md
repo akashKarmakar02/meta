@@ -5,7 +5,7 @@ You need Go 1.26.10 or newer, Node.js and npm, and [Air](https://github.com/air-
 Install the CLI and Air:
 
 ```sh
-go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-beta.1
+go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-beta.2
 go install github.com/air-verse/air@latest
 ```
 

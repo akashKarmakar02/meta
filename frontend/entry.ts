@@ -19,6 +19,7 @@
 // root and becomes the region hosting the mounted layout subtree; exactly
 // one [data-go-page-root] exists afterward, inside the layout outlet.
 import { mountComponent } from './svelte-mounter';
+import { outletContext } from './layout-context';
 import type { MountHandle } from './svelte-mounter';
 import { loadPage, declaredLayoutsFor, hasLayout, loadLayout } from './route-import-map';
 import {
@@ -105,7 +106,7 @@ async function boot(): Promise<void> {
       clientEntry: routeId,
     } satisfies NavigationResponse;
     pageTarget = createLayoutPageRoot(currentLayout!.outlet, env);
-    const handle = mountComponent(component, { target: pageTarget, props: { data: initialData } });
+    const handle = mountComponent(component, { target: pageTarget, props: { data: initialData }, context: outletContext(currentLayout!.outlet) });
     bootPage = { ...handle, pageRoot: pageTarget };
     return;
   }

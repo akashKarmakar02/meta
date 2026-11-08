@@ -1,3 +1,4 @@
+import { outletContext } from './layout-context';
 // G05: child-only page swap inside a RETAINED persistent layout
 // (blueprint G05: "Switch /dashboard→/dashboard/settings by replacing
 // child only. Done: sidebar counter remains unchanged").
@@ -111,6 +112,7 @@ export async function swapLayoutChildPage(
   const handle = mountComponent(component as Parameters<typeof mountComponent>[0], {
     target: pageRoot,
     props: { data: env.data },
+    context: outletContext(outlet),
   });
   return { ...handle, pageRoot };
 }

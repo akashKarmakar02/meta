@@ -74,3 +74,35 @@ Create `app/counter/page.svelte`:
 Add `layout.templ` or `layout.svelte` to a route directory to apply a visual layout. Meta selects the nearest layout in the page's directory or an ancestor directory. It does not compose every ancestor layout. A templ layout can wrap templ or Svelte pages. A Svelte layout can wrap Svelte pages only. Do not put both layout types in the same directory.
 
 The framework creates the surrounding HTML document. A templ layout accepts a `templ.Component` and renders it with `@content`. It should not create its own `<html>`, `<head>`, or `<body>` elements. See [page titles and metadata](metadata.md) for current document limitations.
+
+### Svelte layout outlets
+
+A Svelte layout must identify itself and contain exactly one initially empty outlet where Meta mounts the page. For `app/dashboard/layout.svelte`:
+
+```svelte
+<div data-go-layout="app/dashboard/layout.svelte">
+  <nav><a href="/dashboard">Dashboard</a></nav>
+  <div data-go-layout-outlet></div>
+</div>
+```
+
+The `data-go-layout` value must match the layout's file path from the project root. Change it when you move or rename the layout. Meta mounts each page separately inside the outlet; the outlet is not a Svelte `children` snippet. To share a Svelte provider with pages, replace the plain outlet with `LayoutOutlet` inside the provider:
+
+```svelte
+<script lang="ts">
+  import LayoutOutlet from "../../frontend/LayoutOutlet.svelte";
+  import { ClerkProvider } from "svelte-clerk/client";
+
+  const publishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
+</script>
+
+<main data-go-layout="app/dashboard/layout.svelte">
+  <ClerkProvider {publishableKey}>
+    <LayoutOutlet />
+  </ClerkProvider>
+</main>
+```
+
+Projects created before v0.1.0-beta.2 have an older copied frontend runtime: updating the Go module or CLI alone does not update those files. Merge the v0.1.0-beta.2 runtime changes into your project before using `LayoutOutlet`; preserve any application edits in `frontend/`. The affected files are `frontend/LayoutOutlet.svelte`, `layout-context.ts`, `svelte-mounter.ts`, `layout-mount.ts`, `layout-child-swap.ts`, `navigation-pipeline.ts`, and `entry.ts`.
+
+Adjust the relative import for the layout location. `LayoutOutlet` carries the Svelte context at its position to the separately mounted page. The original plain outlet remains supported but does not share context. See [Clerk authentication](clerk.md).

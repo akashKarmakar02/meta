@@ -32,6 +32,8 @@
 // - G07: unmounting the layout on subtree exit.
 // - G08: fresh layout state on re-entry after such an unmount.
 
+import { tick } from 'svelte';
+import { outletContext } from './layout-context';
 import { hasLayout, loadLayout } from './route-import-map';
 import { mountComponent, type MountHandle } from './svelte-mounter';
 import {
@@ -129,9 +131,18 @@ export async function mountPersistentLayout(
 
   let handle: MountHandle;
   try {
-    handle = mountComponent(component, { target: host });
+    handle = mountComponent(component, {
+      target: host,
+      context: region instanceof Element ? outletContext(region) : undefined,
+    });
   } catch (err) {
     host.remove();
+    throw err;
+  }
+  try {
+    await tick();
+  } catch (err) {
+    try { await handle.unmount(); } finally { host.remove(); }
     throw err;
   }
 

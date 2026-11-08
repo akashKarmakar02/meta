@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-//go:embed *.ts
+//go:embed *.ts *.svelte
 var sources embed.FS
 
 // RuntimeSources returns copies of the TypeScript runtime sources. Generated

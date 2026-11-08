@@ -1,3 +1,4 @@
+import { outletContext } from './layout-context';
 // navigation-pipeline.ts — F12: complete soft-navigation pipeline.
 //
 // Assembles the Phase F primitives into the blueprint's §5.2 algorithm:
@@ -190,6 +191,7 @@ async function mountPageInLayout(
   const handle = mountComponent(component as Parameters<typeof mountComponent>[0], {
     target: pageRoot,
     props: { data: env.data },
+    context: outletContext(layout.outlet),
   });
   return { ...handle, pageRoot };
 }

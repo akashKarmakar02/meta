@@ -13,6 +13,8 @@ export interface MountOptions {
   target: Element;
   /** Optional props passed to the component. */
   props?: Record<string, any>;
+  /** Svelte context inherited from a layout outlet. */
+  context?: Map<any, any>;
 }
 
 /**
@@ -112,6 +114,7 @@ export function mountComponent(
   const instance = svelteMount(component, {
     target,
     ...(options.props ? { props: options.props } : {}),
+    ...(options.context ? { context: options.context } : {}),
   });
   occupiedTargets.add(target);
   liveInstances++;
