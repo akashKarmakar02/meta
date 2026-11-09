@@ -22,7 +22,7 @@ test('singleflight configuration rebuilds and recovers in development', async ({
       expect(value).toBeTruthy();
       await expect(other.locator('[data-cache-refreshed]')).toHaveText(value!);
       const runs = (session.output.match(/running\.\.\./g) ?? []).length;
-      const disabled = original.replace('bindings := append(loaders.Bindings(), loaders.CachedDemoBindingsWithFlights(demoCache, demoInvalidator, demoFlights)...)', '_ = demoFlights\n\tbindings := append(loaders.Bindings(), loaders.CachedDemoBindings(demoCache, demoInvalidator)...)');
+      const disabled = original.replace('bindings := append(loaders.Bindings(), loaders.CachedDemoBindingsWithFlights(demoStore, demoInvalidator, demoFlights)...)', '_ = demoFlights\n\tbindings := append(loaders.Bindings(), loaders.CachedDemoBindings(demoStore, demoInvalidator)...)');
       expect(disabled).not.toBe(original);
       write(session.root, file, disabled);
       await expect.poll(() => (session.output.match(/running\.\.\./g) ?? []).length, { timeout: 60000 }).toBeGreaterThan(runs);
