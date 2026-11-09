@@ -35,6 +35,8 @@ Patterns must be absolute literal paths, optionally ending in `/*`. Route placeh
 
 Policies apply to generated page and API routes and registered action endpoints, not to public files or framework assets. Files in `public/` are public and can take precedence over pages. Never place private data there. The global hook runs for those requests too, but authentication and authorization checks must also happen close to the protected data or mutation. Meta does not provide an identity provider, sessions, login, or authorization rules.
 
+Cross-origin resource sharing is opt-in through the same `Middleware` field — Meta installs no CORS policy by itself. See the [CORS guide](cors.md) for Fiber's cors middleware configuration, preflight behavior, and why CORS approval never authorizes actions or forms.
+
 For an existing project, create `app/hooks.go` and add the following fields to its `server.Config` in `cmd/app/main.go` (import your app package and Fiber):
 
 ```go

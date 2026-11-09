@@ -8,7 +8,7 @@
 GO ?= go
 NPM ?= npm
 
-.PHONY: help generate build test verify e2e check clean
+.PHONY: help generate build test verify e2e e2e-cors check clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-10s %s\n", $$1, $$2}'
@@ -35,9 +35,15 @@ verify: test build ## Full gate battery: test + build + gofmt + e2e in Chromium
 	@git diff --check
 	@# Real-browser verification of the built production binary (§7).
 	$(NPM) exec playwright -- test
+	@# Browser-enforced CORS checks run the same binary a second time with
+	@# CORS opted in through GO_META_CORS_ORIGINS (separate config, ports).
+	$(NPM) exec playwright -- test --config playwright.cors.config.ts
 
 e2e: build ## Real-Chromium E2E against the production binary (needs make build's output fresh)
 	$(NPM) exec playwright -- test
+
+e2e-cors: build ## CORS browser-enforcement suite against a CORS-enabled instance of the production binary
+	$(NPM) exec playwright -- test --config playwright.cors.config.ts
 
 build-native: ## Build the example server with the native image backend (needs libwebp/libavif headers; see README)
 	$(GO) build -tags imageproc_native -o bin/example-native ./cmd/example

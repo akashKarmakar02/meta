@@ -3,12 +3,16 @@ package main
 
 import (
 	"crypto/rand"
+	"fmt"
 	"log"
 	"net"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/cors"
 	"github.com/gofiber/fiber/v3/middleware/recover"
 
 	"github.com/akashKarmakar02/meta/action"
@@ -218,6 +222,17 @@ func main() {
 		telemetry.Metrics = metrics
 	}
 	middleware := []fiber.Handler{observability.Middleware(telemetry)}
+	// Opt-in cross-origin resource sharing for the example API. Meta never
+	// enables CORS by default; GO_META_CORS_ORIGINS exists so the example
+	// binary can demonstrate real browser-enforced CORS (and so E2E can
+	// verify it) without any change to the framework. Empty = disabled.
+	if os.Getenv("GO_META_CORS_ORIGINS") != "" {
+		corsHandler, err := exampleCORSMiddleware()
+		if err != nil {
+			log.Fatalf("cors: %v", err)
+		}
+		middleware = append(middleware, corsHandler)
+	}
 	// The example diagnostics endpoint is intended for the loopback-only
 	// development proxy. Do not expose it on the production listener.
 	if metrics != nil && os.Getenv("GO_META_DEV") == "1" && devOrigin != "" && socket != "" {
@@ -260,6 +275,47 @@ func main() {
 		addr = ":" + p
 	}
 	log.Fatal(app.Listen(addr))
+}
+
+// exampleCORSMiddleware builds Fiber's CORS middleware from
+// GO_META_CORS_ORIGINS (comma-separated explicit browser origins). Values are
+// validated strictly and fail closed: any malformed origin aborts startup
+// rather than being skipped. GO_META_CORS_CREDENTIALS=1 opts into credentialed
+// requests; wildcard origins are rejected outright because they must never be
+// combined with credentials.
+func exampleCORSMiddleware() (fiber.Handler, error) {
+	origins := make([]string, 0, 4)
+	for _, raw := range strings.Split(os.Getenv("GO_META_CORS_ORIGINS"), ",") {
+		origin := strings.TrimSpace(raw)
+		if origin == "" {
+			continue
+		}
+		if origin == "*" {
+			return nil, fmt.Errorf("wildcard origins are not supported by the example configuration")
+		}
+		u, err := url.Parse(origin)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || strings.ContainsAny(u.Host, " \t\r\n") {
+			return nil, fmt.Errorf("invalid CORS origin %q: use scheme://host[:port] with no path", origin)
+		}
+		origins = append(origins, origin)
+	}
+	if len(origins) == 0 {
+		return nil, fmt.Errorf("no valid origins configured")
+	}
+	cfg := cors.Config{
+		AllowOrigins: origins,
+		AllowMethods: []string{fiber.MethodGet, fiber.MethodPost, fiber.MethodPut, fiber.MethodPatch, fiber.MethodDelete, fiber.MethodOptions},
+		AllowHeaders: []string{fiber.HeaderOrigin, fiber.HeaderContentType, fiber.HeaderAuthorization},
+		// Exposing the approval headers lets E2E (and curious developers)
+		// assert the exact-origin echo from inside the browser; a cross-origin
+		// script cannot read any header the server does not expose here.
+		ExposeHeaders: []string{"Access-Control-Allow-Origin", "Access-Control-Allow-Credentials"},
+		MaxAge:        600,
+	}
+	if os.Getenv("GO_META_CORS_CREDENTIALS") == "1" {
+		cfg.AllowCredentials = true
+	}
+	return cors.New(cfg), nil
 }
 
 // trustedActionOrigin resolves the origin action requests must come from.

@@ -46,6 +46,8 @@ APIRoutes: generated.RegisterAPIRoutes(),
 
 The example application includes `/api/posts` and `/api/posts/42`. API handlers run on the server and can return any Fiber response. They do not automatically run page loaders or actions. Protect and validate each endpoint as appropriate: API routes do not inherit actions' origin checks, form CSRF protection, authentication, or authorization.
 
+To make an API reachable from another origin in a browser, enable CORS through the middleware field — see the [CORS guide](cors.md) for configuration, preflight handling, and an API-only pattern that leaves server actions untouched.
+
 For a typed JSON mutation, you can also register an action. Meta exposes it as `POST /_meta/actions/<id>` and handles JSON decoding and response formatting.
 
 ## Define an action

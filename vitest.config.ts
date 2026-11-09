@@ -16,7 +16,7 @@ export default defineConfig({
   test: {
     // Playwright specs run under their own runner (`make e2e`); vitest
     // must not double-execute them (test.describe is runner-specific).
-    exclude: ['**/node_modules/**', '**/dist/**', 'tests/browser/**', 'tests/development/**'],
+    exclude: ['**/node_modules/**', '**/dist/**', 'tests/browser/**', 'tests/development/**', 'tests/cors/**'],
     environment: 'happy-dom',
     environmentOptions: {
       happyDOM: {

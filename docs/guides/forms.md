@@ -112,3 +112,7 @@ The repository's [guestbook form and feedback renderer](../../app/guestbookform/
 ## Enhanced submissions
 
 Add `data-go-meta-enhance` to an eligible same-origin action form to opt into Meta's browser enhancement. The normal form and CSRF requirements still apply. Without JavaScript, the browser uses the native submission and redirect. The [enhanced form reference](../../README.md#enhanced-native-forms-d05) describes supported forms and response handling.
+
+## Cross-origin submissions
+
+Native form validation is unaffected by CORS: enabling CORS for an origin never makes a cross-origin form submission valid, because it fails the trusted-origin check before the CSRF token is even consulted, and a same-origin submission still requires a matching signed token. The two mechanisms answer different questions — see the [CORS guide](cors.md) for the distinction between browser permission to read a response and server-side authorization of a mutation.

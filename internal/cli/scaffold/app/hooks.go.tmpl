@@ -6,6 +6,9 @@ import (
 )
 
 // Handle runs for incoming requests before Meta's routes.
+// Add Fiber middleware (for example the cors middleware for cross-origin API
+// access) to cmd/app/main.go's Middleware field; see docs/guides/cors.md.
+// Meta enables no CORS policy by default.
 func Handle(c fiber.Ctx) error {
  return c.Next()
 }
