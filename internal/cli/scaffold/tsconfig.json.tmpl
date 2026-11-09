@@ -1,5 +1,15 @@
 {
   "compilerOptions": {
-    "types": ["vite/client"]
-  }
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": ["vite/client", "node"],
+    "paths": {"@/*": ["./*"]}
+  },
+  "include": ["frontend/**/*.ts", "frontend/**/*.svelte", "app/**/*.svelte", "vite.config.ts"],
+  "exclude": ["node_modules", "dist"]
 }

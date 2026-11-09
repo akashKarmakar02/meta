@@ -33,6 +33,8 @@ my-app/
 
 The starter's `.gitignore` excludes generated source, dependencies, and build output. Commit source files and the dependency lockfiles your team uses. Generated output can be recreated with `meta generate` and `meta build`.
 
+In TypeScript and Svelte files, `@/` imports from the project root — for example `import { greeting } from '@/lib/greeting'` resolves `lib/greeting.ts` next to `package.json`. The mapping lives in `tsconfig.json` (`paths`) for editors and type checks, and in `vite.config.ts` (`resolve.alias`) for `meta build` bundles. Relative imports keep working; use whichever reads better.
+
 ## What to edit
 
 Edit `app/` pages, layouts, components, and your own Go packages. Put publicly accessible files in `public/`. Add loader and action bindings to `cmd/app/main.go` or import them from your own packages. You can change `go.mod`, `package.json`, `vite.config.ts`, `.air.toml`, and `.gitignore` for your application. Keep the Vite manifest, entry point, output directory, and Air build steps consistent with the server and CLI.

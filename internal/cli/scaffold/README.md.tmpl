@@ -11,6 +11,8 @@ Create a `.env` file for local configuration. Values prefixed `VITE_` are public
 
 Open http://localhost:3000. Files in `public/` are available at the site root, such as `public/robots.txt` at `/robots.txt`. Tailwind CSS is configured in `frontend/app.css`; use utility classes in templ and Svelte files, or add your own global CSS there.
 
+In TypeScript and Svelte files, `@/` imports from the project root (for example `import { navigate } from '@/frontend/navigation'`), mirroring `tsconfig.json`'s `paths` mapping and the Vite alias in `vite.config.ts`. Relative imports keep working; use whichever reads better.
+
 Configure server middleware and route policies in `app/hooks.go`. Policies do not provide authentication by themselves; implement your own credential and authorization checks.
 
 The server emits readable request logs in development and production, and `X-Request-ID` response headers. Metrics can be enabled through `server.Config.Observability`.

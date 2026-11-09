@@ -2,11 +2,13 @@
   "name": "meta-app",
   "private": true,
   "type": "module",
-  "scripts": {"build": "vite build"},
+  "scripts": {"build": "vite build", "check": "svelte-check --tsconfig ./tsconfig.json"},
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@tailwindcss/vite": "^4.3.5",
+    "@types/node": "^26.6.6",
     "svelte": "^5.57.3",
+    "svelte-check": "^4.7.7",
     "tailwindcss": "^4.3.5",
     "typescript": "^6.0.3",
     "vite": "^8.3.5"

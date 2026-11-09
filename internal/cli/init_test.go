@@ -27,8 +27,9 @@ func TestInitCreatesIndependentProject(t *testing.T) {
 		}
 	}
 	for name, want := range map[string][]string{
-		"package.json":              {`"tailwindcss"`, `"@tailwindcss/vite"`},
-		"vite.config.ts":            {"tailwindcss()", "frontend/app.css"},
+		"package.json":              {`"tailwindcss"`, `"@tailwindcss/vite"`, `"svelte-check"`},
+		"vite.config.ts":            {"tailwindcss()", "frontend/app.css", "find: '@'"},
+		"tsconfig.json":             {`"@/*": ["./*"]`, `"moduleResolution": "bundler"`},
 		"frontend/app.css":          {`@import "tailwindcss"`, `@source "../app"`},
 		"cmd/app/main.go":           {"GlobalStylesheet: true"},
 		"app/page.templ":            {"text-3xl", "font-bold"},
