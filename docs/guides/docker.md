@@ -58,6 +58,12 @@ RUN go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-beta.4 \
 ########## Runtime stage: Go-only, no Node ##########
 FROM debian:bookworm-slim AS runtime
 
+# libwebp/libavif are only needed if you build with -tags imageproc_native
+# (see "Image optimization in Docker" below); omit them for the default build.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 # curl for the container healthcheck (bookworm-slim ships no wget).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates \
@@ -89,6 +95,41 @@ Notes on the choices:
 - **Health check:** the scaffolded server serves `/healthz` when `HealthCheck: true` in `server.Config`. Keep `HealthCheck: true` or replace the probe.
 
 If you prefer building outside Docker (CI already runs `meta build`), the runtime stage is enough — copy `bin/app`, `dist/client`, and `public/` from the checkout instead of the build stage, and the base image only needs to run a static binary.
+
+## Image optimization in Docker
+
+**Short answer: yes — the image works without any image-processing packages, by design.** Meta's native WebP/AVIF processor is behind the `imageproc_native` build tag. A plain `meta build` compiles a pure-Go binary with zero image-library dependencies, and the framework fails closed without them: the scaffolded app never registers an image endpoint at all, and apps modeled on `cmd/example` serve a truthful 501 "backend unavailable" error from `/_meta/image` instead of fabricating unoptimized bytes. Pages, assets, forms, and actions are unaffected.
+
+If you want real optimization, two things must be true: your app must contain build-tagged wiring for the native processor (see `cmd/example/imageproc_native.go`, the contract is the `imageopt` package), and the binary must be compiled with `-tags imageproc_native`. In Docker:
+
+```dockerfile
+########## Build stage additions ##########
+# Native image processing needs the WebP and AVIF C libraries at compile time.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libwebp-dev libavif-dev pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# meta build passes its environment through to go build, so the tag rides
+# along on GOFLAGS:
+ENV GOFLAGS="-tags=imageproc_native"
+RUN go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-beta.4 \
+    && meta build
+
+########## Runtime stage additions ##########
+# Only the runtime libraries, not the -dev headers. Package names are for
+# Debian bookworm; check your base's naming.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libwebp7 libavif15 \
+    && rm -rf /var/lib/apt/lists/*
+```
+
+Caveats:
+
+- Verify the tag actually took effect after building: `docker run --rm my-app sh -c "ldd bin/app | grep webp"` should show `libwebp.so`. An untagged build succeeds silently — that failure mode is why this check is worth keeping in CI.
+- The resulting binary is dynamically linked against those libraries, so the runtime image cannot be `FROM scratch` — keep the Debian slim base (or copy the `.so` files yourself).
+
 
 ## .dockerignore
 
