@@ -54,6 +54,11 @@ type Config struct {
 	// disables public file serving; missing directories may be created later.
 	PublicDir string
 	DevOrigin string
+	// PageCache optionally caches fully rendered SSR HTML responses in the
+	// supplied store. It wraps only ModeSSR page routes after route params
+	// are bound; CSR pages, actions, APIs, and assets are never cached. A nil
+	// value disables response caching without code changes elsewhere.
+	PageCache *httpserver.PageCache
 	// HealthCheck reserves GET /healthz for development readiness.
 	HealthCheck bool
 }
@@ -228,6 +233,9 @@ func New(cfg Config) (*fiber.App, error) {
 		switch route.Mode {
 		case routing.ModeSSR:
 			handler = render.SSRNavigationHandler(route, assets, render.PageResolver(cfg.SSRPage), render.PageResolver(cfg.BarePage), render.VisualLayoutResolver(cfg.VisualLayout))
+			if cfg.PageCache != nil {
+				handler = cfg.PageCache.Wrap(handler)
+			}
 		case routing.ModeCSR:
 			handler = render.CSRNavigationHandler(route, assets, render.VisualLayoutResolver(cfg.VisualLayout))
 		}

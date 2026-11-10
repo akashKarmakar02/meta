@@ -24,6 +24,7 @@ import (
 	"github.com/akashKarmakar02/meta/loader"
 	"github.com/akashKarmakar02/meta/observability"
 	"github.com/akashKarmakar02/meta/server"
+	"github.com/akashKarmakar02/meta/sitemap"
 
 	routes "github.com/akashKarmakar02/meta/generated"
 	"github.com/akashKarmakar02/meta/internal/httpserver"
@@ -137,6 +138,73 @@ func newConfiguredAppBase(assets *httpserver.Assets, privateSocket bool, registr
 	// compiled data — no request-time discovery, no reflection. Order is
 	// the manifest (path-sorted) order; paths are unique post-validation
 	// (B08), so no route can be registered twice.
+	//
+	// PageCache (opt-in via GO_META_PAGE_CACHE): when set, SSR renders are
+	// cached and served on hit without re-running loaders or templ. The
+	// wrapper sits INSIDE WithRouteParams so the cache key can include the
+	// matched pattern and typed params. GO_META_PAGE_CACHE=memory enables the
+	// in-memory store; GO_META_PAGE_CACHE=disk,path persists across restarts.
+	var pageCache *httpserver.PageCache
+	switch mode := os.Getenv("GO_META_PAGE_CACHE"); mode {
+	case "":
+		// Caching disabled — every request renders fresh. The default.
+	case "memory":
+		memoryStore, err := cache.NewMemory(cache.MemoryConfig{MaxEntries: 256, MaxBytes: 8 << 20})
+		if err != nil {
+			log.Fatalf("page cache configuration: %v", err)
+		}
+		pageCache = httpserver.NewPageCache(memoryStore, 30*time.Second)
+	case "disk":
+		diskStore, err := cache.NewDiskStore(cache.DiskConfig{Dir: ".meta/page-cache", MaxEntryBytes: 2 << 20})
+		if err != nil {
+			log.Fatalf("page cache store: %v", err)
+		}
+		pageCache = httpserver.NewPageCache(diskStore, time.Hour)
+	default:
+		log.Fatalf("page cache: unknown GO_META_PAGE_CACHE value %q (want \"memory\" or \"disk\")", mode)
+	}
+
+	// Dynamic sitemap (M4): GO_META_SITEMAP_URL enables /sitemap.xml, built
+	// from the discovered page routes and persisted with the disk store when
+	// GO_META_SITEMAP_CACHE names a directory. Static-path routes appear by
+	// default; parameterized routes are listed when a dynamic URL resolver is
+	// registered in the route map below.
+	var siteMap *sitemap.Sitemap
+	if baseURL := os.Getenv("GO_META_SITEMAP_URL"); baseURL != "" {
+		baseURL = strings.TrimSuffix(baseURL, "/")
+		smRoutes := make(sitemap.Source, 0, len(routes.RegisterRoutes()))
+		for _, r := range routes.RegisterRoutes() {
+			smRoutes = append(smRoutes, sitemap.RouteInfo{Path: r.Path})
+		}
+		smCfg := sitemap.Config{BaseURL: baseURL, RouteSource: smRoutes}
+		if dir := os.Getenv("GO_META_SITEMAP_CACHE"); dir != "" {
+			diskStore, derr := cache.NewDiskStore(cache.DiskConfig{Dir: dir, MaxEntryBytes: 1 << 20})
+			if derr != nil {
+				log.Fatalf("sitemap cache store: %v", derr)
+			}
+			smCfg.Store = diskStore
+		}
+		var serr error
+		siteMap, serr = sitemap.New(smCfg)
+		if serr != nil {
+			log.Fatalf("sitemap configuration: %v", serr)
+		}
+	}
+
+	// Serve the sitemap when enabled. Invalidations from mutations flow
+	// through siteMap.Invalidate (called by demo actions below).
+	if siteMap != nil {
+		sm := siteMap
+		fapp.Get("/sitemap.xml", func(c fiber.Ctx) error {
+			xml, err := sm.XML(c.Context())
+			if err != nil {
+				return err
+			}
+			c.Set(fiber.HeaderContentType, "application/xml; charset=utf-8")
+			return c.Send(xml)
+		})
+	}
+
 	ordered := routes.RegisterRoutes()
 	apiByID := make(map[string]server.APIRoute)
 	for _, api := range routes.RegisterAPIRoutes() {
@@ -155,7 +223,11 @@ func newConfiguredAppBase(assets *httpserver.Assets, privateSocket bool, registr
 			// C03: run the route's registered loader (if any) before rendering,
 			// attaching the typed result to the render context. WithLoader is a
 			// no-op when the registry is nil or the route has no binding.
-			fapp.Get(routing.FiberRegistrationPath(route.Path), httpserver.WithRouteParams(route, httpserver.WithLoader(registry, route, render.SSRNavigationHandler(route, assets, routes.SSRPage, routes.BarePage, routes.VisualLayout))))
+			ssrHandler := httpserver.WithLoader(registry, route, render.SSRNavigationHandler(route, assets, routes.SSRPage, routes.BarePage, routes.VisualLayout))
+			if pageCache != nil {
+				ssrHandler = pageCache.Wrap(ssrHandler)
+			}
+			fapp.Get(routing.FiberRegistrationPath(route.Path), httpserver.WithRouteParams(route, ssrHandler))
 		case routing.ModeCSR:
 			// C04: run the route's registered loader (if any) before serving the
 			// CSR shell or envelope, serializing the result to JSON for the

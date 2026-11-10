@@ -19,6 +19,7 @@ Meta is a Go web framework with server-rendered templ pages and client-rendered 
 - [Middleware and route policies](guides/middleware.md)
 - [Clerk authentication (experimental)](guides/clerk.md)
 - [Logs and metrics](guides/observability.md)
+- [Caching: loaders, pages, sitemap](guides/caching.md)
 - [Load data for a page](guides/loaders.md)
 - [Forms and validation](guides/forms.md)
 - [Build and deploy](guides/deployment.md)
