@@ -21,7 +21,7 @@ export default defineConfig({
     // Trusted input is the point: these tests click like users and verify
     // the router's trust boundary (F05) doesn't interfere.
   },
-  webServer: {
+  webServer: [{
     // PORT picks the scratch port; the binary itself comes from `make
     // build` and is NOT rebuilt here — a stale binary is a build bug, not
     // an E2E failure to hide behind retries.
@@ -31,5 +31,12 @@ export default defineConfig({
     stdout: 'ignore',
     stderr: 'pipe',
     timeout: 15_000,
-  },
+  }, {
+    command: 'PORT=3133 ./bin/pagecache-fixture',
+    port: 3133,
+    reuseExistingServer: false,
+    stdout: 'ignore',
+    stderr: 'pipe',
+    timeout: 15_000,
+  }],
 });

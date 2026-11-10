@@ -29,13 +29,20 @@ func newCacheMemory(t *testing.T) *cache.Memory {
 func newPageCacheFixture(t *testing.T) (*fiber.App, *PageCache, *int) {
 	t.Helper()
 	store := newCacheMemory(t)
-	pc := NewPageCache(store, time.Minute)
+	pc := NewPageCache(store, time.Minute, PublicRoutes("p/x", "p/p"))
 	count := 0
 	app := fiber.New(fiber.Config{CaseSensitive: true})
-	handler := pc.Wrap(func(c fiber.Ctx) error {
+	uncached := func(c fiber.Ctx) error {
 		count++
 		c.Set("X-Render-Count", strconv.Itoa(count))
 		return c.SendString("render-" + strconv.Itoa(count))
+	}
+	handler := pc.Wrap(uncached, func(c fiber.Ctx) (*GeneratedPage, error) {
+		count++
+		return &GeneratedPage{
+			HTML:       CachedResponse{StatusCode: 200, ContentType: "text/html; charset=utf-8", Body: []byte("render-" + strconv.Itoa(count))},
+			Navigation: CachedResponse{StatusCode: 200, ContentType: "application/json", Body: []byte(`{"version":1}`)},
+		}, nil
 	})
 	app.Get("/x", httpserver.WithRouteParams(routing.Route{ID: "p/x", Path: "/x"}, handler))
 	app.Get("/p", httpserver.WithRouteParams(routing.Route{ID: "p/p", Path: "/p"}, handler))

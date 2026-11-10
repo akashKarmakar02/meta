@@ -1,204 +1,380 @@
-// Package pagecache wraps page handlers with an opt-in SSR response cache.
-//
-// PageCache is a Fiber middleware: it looks up the fully rendered HTML for
-// GET page requests in a cache.Store before the handler runs, and on a miss
-// captures the handler's response for future hits. Caching is disabled
-// unless constructed with a store, so the default configuration keeps
-// today's behavior byte-for-byte.
+// Package pagecache provides opt-in eager dual-representation SSR caching.
 package pagecache
 
 import (
-	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
-	"sort"
+	"net/url"
+	"path"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/akashKarmakar02/meta/cache"
+	"github.com/akashKarmakar02/meta/internal/httpserver"
+	"github.com/akashKarmakar02/meta/internal/ssrresponse"
+	"github.com/akashKarmakar02/meta/observability"
 	"github.com/akashKarmakar02/meta/routecontext"
 	"github.com/gofiber/fiber/v3"
 )
 
-// ErrPageCacheDisabled is returned by PageCache.Invalidate when no store is
-// configured. It is distinct from the cache package's errors because it means
-// the caller wired the feature off, not that invalidation failed.
 var ErrPageCacheDisabled = errors.New("pagecache: page cache disabled")
 
-// PageCacheConfig controls PageCache. The zero value is not usable; use
-// NewPageCache.
+// GeneratedPage contains one coherent generation without request-specific headers.
+type GeneratedPage = ssrresponse.Page
+type CachedResponse = ssrresponse.Response
+type Generator func(fiber.Ctx) (*GeneratedPage, error)
+type Option func(*PageCache)
+
+// PublicRoutes declares deterministic, anonymous route IDs safe for shared
+// caching. Omission disables caching. Never opt in personalized pages, including
+// pages reading identity/tenant/private headers through a Go context.
+func PublicRoutes(ids ...string) Option {
+	return func(pc *PageCache) {
+		for _, id := range ids {
+			pc.public[id] = true
+		}
+	}
+}
+
+// BuildID scopes persisted pages to an application deployment. Change it when
+// templates, loaders, layout selection, or assets change.
+func BuildID(id string) Option {
+	return func(pc *PageCache) {
+		if id != "" {
+			pc.buildID = id
+		}
+	}
+}
+
+// GenerationTimeout bounds synchronous work. Loaders/components must cooperate
+// with context cancellation. No Fiber object outlives its request handler.
+func GenerationTimeout(timeout time.Duration) Option {
+	return func(pc *PageCache) {
+		if timeout > 0 {
+			pc.timeout = timeout
+		}
+	}
+}
+
+// PageCacheConfig is retained for source compatibility. Construct with
+// NewPageCache; stale responses are not served by this cache.
 type PageCacheConfig struct {
-	// Store receives rendered HTML. Required.
-	Store cache.Store
-	// TTL bounds how long a rendered page may be reused. Must be positive.
-	TTL time.Duration
-	// StaleWhileRevalidate, when positive, lets a hit be served while the
-	// entry is expired if regeneration fails; the next request then sees
-	// fresh HTML. Optional; zero disables it.
+	Store                cache.Store
+	TTL                  time.Duration
 	StaleWhileRevalidate time.Duration
 }
 
-// PageCache caches rendered SSR pages in a cache.Store keyed by route
-// pattern, path parameters, and query string.
+// PageCache coordinates one store in one active process. Sequential restarts
+// retain invalidation tokens. Concurrent processes sharing a disk directory
+// require external coordination and are unsupported by the Store contract.
 type PageCache struct {
-	store cache.Store
-	ttl   time.Duration
-	swr   time.Duration
-
-	// mu guards index: concrete request path -> keys cached for that path.
-	// The store's keys hash the pattern (not the path), so path-based
-	// invalidation needs this side index. It is process-local by design.
-	mu    sync.Mutex
-	index map[string]map[cache.Key]struct{}
+	store   cache.Store
+	ttl     time.Duration
+	timeout time.Duration
+	buildID string
+	public  map[string]bool
+	// mu orders token checks, writes and invalidation; never loader/render work.
+	mu      sync.Mutex
+	flights map[cache.Key]*flight
 }
 
-// NewPageCache returns a cache that stores responses under store with ttl.
-func NewPageCache(store cache.Store, ttl time.Duration) *PageCache {
-	return &PageCache{store: store, ttl: ttl, index: make(map[string]map[cache.Key]struct{})}
+type flight struct {
+	done chan struct{}
+	page *GeneratedPage
+	err  error
 }
 
-// remember records key under the request path so InvalidatePath can find it.
-func (pc *PageCache) remember(path string, key cache.Key) {
-	pc.mu.Lock()
-	defer pc.mu.Unlock()
-	if pc.index == nil {
-		pc.index = make(map[string]map[cache.Key]struct{})
+func NewPageCache(store cache.Store, ttl time.Duration, options ...Option) *PageCache {
+	pc := &PageCache{store: store, ttl: ttl, timeout: 30 * time.Second, buildID: executableBuildID(), public: make(map[string]bool), flights: make(map[cache.Key]*flight)}
+	for _, option := range options {
+		option(pc)
 	}
-	keys, ok := pc.index[path]
-	if !ok {
-		keys = make(map[cache.Key]struct{})
-		pc.index[path] = keys
-	}
-	keys[key] = struct{}{}
+	return pc
 }
 
-// Wrap returns a middleware wrapping next. Requests that are not cacheable
-// pass through untouched.
-func (pc *PageCache) Wrap(next fiber.Handler) fiber.Handler {
-	if pc == nil || pc.store == nil {
+// Wrap integrates a deliberate pair generator after required middleware and
+// before loaders. next is the uncached path. Without a generator it passes
+// through: a single HTTP response cannot establish a coherent pair.
+// The owning request generates synchronously with a bounded context; waiters
+// share only immutable bytes and cancel independently. No background worker
+// or Fiber request object survives a handler's return.
+func (pc *PageCache) Wrap(next fiber.Handler, generators ...Generator) fiber.Handler {
+	if pc == nil || pc.store == nil || len(generators) != 1 || generators[0] == nil {
 		return next
 	}
+	generate := generators[0]
 	return func(c fiber.Ctx) error {
-		if c.Method() != fiber.MethodGet {
-			return next(c)
-		}
 		route, ok := routecontext.FromContext(c.Context())
-		if !ok {
+		if !ok || !pc.public[route.RouteID] || !eligible(c) {
 			return next(c)
 		}
-		key, err := pc.keyFor(route)
-		if err != nil {
-			return next(c) // Unkeyable request: render through.
+		path := normalizePath(string(c.Request().URI().PathOriginal()))
+		// The envelope preserves URL spelling and query order. An equivalent
+		// decoded query must not receive the first caller's differently spelled URL.
+		rawURL := string(c.Request().URI().PathOriginal())
+		if query := string(c.Request().URI().QueryString()); query != "" {
+			rawURL += "?" + query
 		}
 		ctx := c.Context()
-		entry, hit, err := pc.store.Get(ctx, key)
-		if err == nil && hit {
-			value := entry.Value
-			contentType, body, ok := splitCachedResponse(value)
-			if ok {
-				c.Set(fiber.HeaderContentType, contentType)
-				return c.Send(body)
+		for {
+			pc.mu.Lock()
+			token, err := pc.pathToken(ctx, path)
+			if err != nil {
+				pc.mu.Unlock()
+				pc.record(ctx, route.RouteID, "lookup", "error")
+				return next(c)
 			}
-			// Malformed envelope: treat as miss and re-render below.
+			key, err := pc.pageKey(route, rawURL, token)
+			if err != nil {
+				pc.mu.Unlock()
+				return next(c)
+			}
+			entry, hit, err := pc.store.Get(ctx, key)
+			if err != nil {
+				pc.mu.Unlock()
+				pc.record(ctx, route.RouteID, "lookup", "error")
+				return next(c)
+			}
+			if hit {
+				if page, err := decodePage(entry.Value); err == nil {
+					pc.mu.Unlock()
+					pc.record(ctx, route.RouteID, "dual", "hit")
+					return send(c, page)
+				}
+			}
+			pc.record(ctx, route.RouteID, "dual", "miss")
+			if f := pc.flights[key]; f != nil {
+				pc.mu.Unlock()
+				pc.record(ctx, route.RouteID, "generation", "coalesced")
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-f.done:
+				}
+				if f.err != nil {
+					return f.err
+				}
+				if f.page != nil {
+					return send(c, f.page)
+				}
+				// Unsafe output, canceled owner or invalidation: retry using this
+				// request. Never replay cookies, redirects or personalized output.
+				continue
+			}
+			f := &flight{done: make(chan struct{})}
+			pc.flights[key] = f
+			pc.mu.Unlock()
+			return pc.fill(c, route, path, token, key, f, generate)
 		}
-		renderErr := next(c)
-		if renderErr != nil || c.Response().StatusCode() >= 400 {
-			return renderErr
-		}
-		ctype := string(c.Response().Header.ContentType())
-		body := append([]byte(nil), c.Response().Body()...)
-		envelope := append([]byte(nil), ctype...)
-		envelope = append(envelope, 0)
-		envelope = append(envelope, body...)
-		policy := cache.Policy{TTL: pc.ttl}
-		if err := pc.store.Set(ctx, key, cache.Entry{Value: envelope}, policy); err != nil {
-			// A failed write must never fail the request: report through
-			// headers only.
-			_ = err
-		} else {
-			pc.remember(string(c.Request().URI().Path()), key)
-		}
-		return nil
 	}
 }
 
-// Invalidate evicts the cached response for a route pattern + params + query.
-func (pc *PageCache) Invalidate(ctx context.Context, route routecontext.Route) error {
-	if pc == nil || pc.store == nil {
-		return ErrPageCacheDisabled
+func (pc *PageCache) fill(c fiber.Ctx, route routecontext.Route, path, token string, key cache.Key, f *flight, generate Generator) error {
+	// Fiber recovery handles panics; always release waiters, including on panic.
+	defer func() {
+		pc.mu.Lock()
+		delete(pc.flights, key)
+		close(f.done)
+		pc.mu.Unlock()
+	}()
+	parent := c.Context()
+	ctx, cancel := context.WithTimeout(parent, pc.timeout)
+	defer cancel()
+	c.SetContext(ctx)
+	defer c.SetContext(parent)
+	pc.record(ctx, route.RouteID, "generation", "started")
+	page, err := generate(c)
+	if err == nil {
+		err = ctx.Err()
 	}
-	key, err := pc.keyFor(route)
 	if err != nil {
+		pc.record(ctx, route.RouteID, "generation", "failed")
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			f.err = err
+		}
 		return err
 	}
-	return pc.store.Delete(ctx, key)
+	if page == nil { // loader redirect/control-flow already wrote the response
+		pc.record(ctx, route.RouteID, "generation", "failed")
+		return nil
+	}
+	pc.record(ctx, route.RouteID, "generation", "completed")
+	if eligible(c) && validPage(page) {
+		value, encodeErr := encodePage(page)
+		if encodeErr == nil {
+			pc.mu.Lock()
+			current, tokenErr := pc.pathToken(ctx, path)
+			if tokenErr == nil && current == token {
+				f.page = page
+				if err := pc.store.Set(ctx, key, cache.Entry{Value: value}, cache.Policy{TTL: pc.ttl}); err != nil {
+					pc.record(ctx, route.RouteID, "write", "failed")
+				}
+			} else {
+				pc.record(ctx, route.RouteID, "generation", "stale-rejected")
+			}
+			pc.mu.Unlock()
+		}
+	}
+	return send(c, page)
 }
 
-// InvalidatePath evicts every cached response rendered at path. Use it after
-// a mutation that changes what one specific page shows:
-//
-//	err := pageCache.InvalidatePath(ctx, "/blog/hello-world")
-//
-// The path must be the concrete URL the browser requests ("/blog/hello-world",
-// not the pattern "/blog/:slug"). PageCache indexes paths as it caches them,
-// so invalidating a path this process has never served is a no-op. All query
-// variants of the path are evicted together. An empty path is rejected.
-//
-// Multi-instance deployments: the index lives in process memory, so this only
-// evicts entries cached by this instance. Run invalidation on every instance,
-// or share nothing and let TTL bound staleness.
+func eligible(c fiber.Ctx) bool {
+	if c.Method() != fiber.MethodGet {
+		return false
+	}
+	// Check presence across every line, including an empty first line followed
+	// by credentials interpreted by application middleware.
+	for _, name := range []string{fiber.HeaderCookie, fiber.HeaderAuthorization, "Proxy-Authorization"} {
+		if len(c.Request().Header.PeekAll(name)) != 0 {
+			return false
+		}
+	}
+	if c.Response().StatusCode() != fiber.StatusOK || len(c.Response().Header.PeekAll(fiber.HeaderSetCookie)) != 0 {
+		return false
+	}
+	for _, value := range c.Request().Header.PeekAll(fiber.HeaderCacheControl) {
+		if forbiddenControl(string(value)) {
+			return false
+		}
+	}
+	for _, value := range c.Response().Header.PeekAll(fiber.HeaderCacheControl) {
+		if forbiddenControl(string(value)) {
+			return false
+		}
+	}
+	for _, name := range []string{"Content-Security-Policy", "Content-Security-Policy-Report-Only"} {
+		for _, value := range c.Response().Header.PeekAll(name) {
+			if strings.Contains(strings.ToLower(string(value)), "'nonce-") {
+				return false
+			}
+		}
+	}
+	return len(c.Response().Header.PeekAll(fiber.HeaderVary)) == 0
+}
+
+func forbiddenControl(value string) bool {
+	for _, directive := range strings.Split(strings.ToLower(value), ",") {
+		name, _, _ := strings.Cut(strings.TrimSpace(directive), "=")
+		name = strings.TrimSpace(name)
+		if name == "private" || name == "no-store" {
+			return true
+		}
+	}
+	return false
+}
+
+func send(c fiber.Ctx, page *GeneratedPage) error {
+	response := page.HTML
+	navigation := c.Get(httpserver.NavigationHeader) == "1"
+	if navigation {
+		response = page.Navigation
+	}
+	if response.CacheControl != "" {
+		c.Set(fiber.HeaderCacheControl, response.CacheControl)
+	}
+	if response.ContentLanguage != "" {
+		c.Set(fiber.HeaderContentLanguage, response.ContentLanguage)
+	}
+	// Protocol no-store follows internal validation. Application no-store was
+	// checked before lookup and before writing; no other header can override it.
+	if navigation {
+		c.Set(fiber.HeaderCacheControl, "no-store")
+	}
+	c.Set(fiber.HeaderContentType, response.ContentType)
+	c.Status(response.StatusCode)
+	// Fiber Send borrows the slice. Downstream middleware may mutate its
+	// response body after c.Next(), so give each response its own buffer while
+	// the immutable flight bytes remain safe for concurrent waiters.
+	c.Response().SetBody(response.Body)
+	return nil
+}
+
+func digest(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
+}
+
+func (pc *PageCache) tokenKey(path string) cache.Key {
+	key, _ := cache.NewKey("ssr-path:v1", digest(pc.buildID), digest(path))
+	return key
+}
+
+// Called with mu held. Missing/evicted tokens get fresh randomness; a default
+// token could resurrect old pages when a metadata entry is evicted.
+func (pc *PageCache) pathToken(ctx context.Context, path string) (string, error) {
+	entry, hit, err := pc.store.Get(ctx, pc.tokenKey(path))
+	if err != nil {
+		return "", err
+	}
+	if hit && len(entry.Value) == 32 {
+		return string(entry.Value), nil
+	}
+	return pc.advanceToken(ctx, path)
+}
+
+func (pc *PageCache) advanceToken(ctx context.Context, path string) (string, error) {
+	var random [16]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return "", err
+	}
+	token := hex.EncodeToString(random[:])
+	err := pc.store.Set(ctx, pc.tokenKey(path), cache.Entry{Value: []byte(token)}, cache.Policy{TTL: cache.Never})
+	return token, err
+}
+
+func (pc *PageCache) pageKey(route routecontext.Route, rawURL, token string) (cache.Key, error) {
+	return cache.NewKey("ssr-page:v3", digest(pc.buildID), digest(route.RouteID+"\x00"+route.Pattern), digest(rawURL), token)
+}
+
+// Invalidate invalidates all query variants of a concrete route. Pattern uses
+// declaration syntax (/blog/[slug]); Params supplies decoded parameter values.
+func (pc *PageCache) Invalidate(ctx context.Context, route routecontext.Route) error {
+	path := route.Pattern
+	for name, value := range route.Params.All() {
+		path = strings.ReplaceAll(path, "["+name+"]", url.PathEscape(value))
+		segments := strings.Split(value, "/")
+		for i := range segments {
+			segments[i] = url.PathEscape(segments[i])
+		}
+		path = strings.ReplaceAll(path, "[..."+name+"]", strings.Join(segments, "/"))
+	}
+	return pc.InvalidatePath(ctx, path)
+}
+
+// InvalidatePath replaces a durable path token, invalidating the entire pair
+// and all query variants even after restart. Older fills cannot publish into
+// the new generation. Old requests may finish with their original snapshot.
+// No scan is needed; unreachable entries expire by TTL (Never needs offline
+// reclamation). Failed token writes promise no invalidation and return an error.
 func (pc *PageCache) InvalidatePath(ctx context.Context, path string) error {
 	if pc == nil || pc.store == nil {
 		return ErrPageCacheDisabled
 	}
-	if path == "" {
-		return errors.New("pagecache: empty path")
+	if path == "" || !strings.HasPrefix(path, "/") || strings.ContainsAny(path, "?#") {
+		return errors.New("pagecache: expected concrete absolute path without query or fragment")
 	}
-	path = normalizePath(path)
 	pc.mu.Lock()
-	keys := pc.index[path]
-	delete(pc.index, path)
+	_, err := pc.advanceToken(ctx, normalizePath(path))
 	pc.mu.Unlock()
-	var firstErr error
-	for key := range keys {
-		if err := pc.store.Delete(ctx, key); err != nil && firstErr == nil {
-			firstErr = err
-		}
+	outcome := "invalidated"
+	if err != nil {
+		outcome = "error"
 	}
-	return firstErr
+	pc.record(ctx, "pagecache", "cache", outcome)
+	return err
 }
 
-func normalizePath(p string) string {
-	if len(p) > 1 && strings.HasSuffix(p, "/") {
-		return strings.TrimSuffix(p, "/")
+func normalizePath(value string) string {
+	if decoded, err := url.PathUnescape(value); err == nil {
+		value = decoded
 	}
-	return p
+	return path.Clean(value)
 }
 
-func (pc *PageCache) keyFor(route routecontext.Route) (cache.Key, error) {
-	components := make([]string, 0, 2+len(route.Params.All()))
-	components = append(components, route.Pattern)
-	params := route.Params.All()
-	names := make([]string, 0, len(params))
-	for name := range params {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		components = append(components, name+"="+params[name])
-	}
-	if raw := route.Query.All().Encode(); raw != "" {
-		components = append(components, "q:"+raw)
-	}
-	return cache.NewKey("page", components...)
-}
-
-// splitCachedResponse decodes the envelope written by Wrap. It returns ok
-// false when value is malformed.
-func splitCachedResponse(value []byte) (contentType string, body []byte, ok bool) {
-	if i := bytes.IndexByte(value, 0); i >= 0 && i+1 <= len(value) {
-		return string(value[:i]), value[i+1:], true
-	}
-	return "", nil, false
+func (pc *PageCache) record(ctx context.Context, route, operation, outcome string) {
+	observability.Record(ctx, "pagecache", route, operation, outcome, 0)
 }

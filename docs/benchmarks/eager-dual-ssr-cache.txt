@@ -1,0 +1,66 @@
+goos: linux
+goarch: amd64
+pkg: github.com/akashKarmakar02/meta/server
+cpu: AMD Ryzen 5 7520U with Radeon Graphics
+BenchmarkSSRRepresentations/uncached-html-8         	    5365	     58582 ns/op	   18308 B/op	      96 allocs/op
+BenchmarkSSRRepresentations/uncached-html-8         	    6997	     54785 ns/op	   18318 B/op	      96 allocs/op
+BenchmarkSSRRepresentations/uncached-html-8         	    7270	     54358 ns/op	   18313 B/op	      96 allocs/op
+BenchmarkSSRRepresentations/uncached-html-8         	    6516	     55332 ns/op	   18322 B/op	      96 allocs/op
+BenchmarkSSRRepresentations/uncached-html-8         	    5782	     54758 ns/op	   18314 B/op	      96 allocs/op
+BenchmarkSSRRepresentations/uncached-html-8         	    6741	     55083 ns/op	   18297 B/op	      96 allocs/op
+BenchmarkSSRRepresentations/uncached-html-8         	    7240	     54475 ns/op	   18299 B/op	      96 allocs/op
+BenchmarkSSRRepresentations/uncached-html-8         	    6819	     53726 ns/op	   18283 B/op	      96 allocs/op
+BenchmarkSSRRepresentations/uncached-html-8         	    6445	     54927 ns/op	   18299 B/op	      96 allocs/op
+BenchmarkSSRRepresentations/uncached-html-8         	    7191	     54837 ns/op	   18276 B/op	      96 allocs/op
+BenchmarkSSRRepresentations/uncached-navigation-8   	    5881	     57745 ns/op	   17914 B/op	     100 allocs/op
+BenchmarkSSRRepresentations/uncached-navigation-8   	    6525	     59296 ns/op	   17926 B/op	     100 allocs/op
+BenchmarkSSRRepresentations/uncached-navigation-8   	    7048	     58036 ns/op	   17925 B/op	     100 allocs/op
+BenchmarkSSRRepresentations/uncached-navigation-8   	    5930	     66446 ns/op	   17935 B/op	     100 allocs/op
+BenchmarkSSRRepresentations/uncached-navigation-8   	    6132	     58135 ns/op	   17914 B/op	     100 allocs/op
+BenchmarkSSRRepresentations/uncached-navigation-8   	    6776	     58028 ns/op	   17921 B/op	     100 allocs/op
+BenchmarkSSRRepresentations/uncached-navigation-8   	    6578	     57157 ns/op	   17902 B/op	     100 allocs/op
+BenchmarkSSRRepresentations/uncached-navigation-8   	    6810	     57339 ns/op	   17915 B/op	     100 allocs/op
+BenchmarkSSRRepresentations/uncached-navigation-8   	    6430	     58989 ns/op	   17931 B/op	     100 allocs/op
+BenchmarkSSRRepresentations/uncached-navigation-8   	    6480	     57985 ns/op	   17936 B/op	     100 allocs/op
+BenchmarkSSRRepresentations/dual-generation-8       	    2895	    107414 ns/op	   26645 B/op	     166 allocs/op
+BenchmarkSSRRepresentations/dual-generation-8       	    3381	    103176 ns/op	   26632 B/op	     166 allocs/op
+BenchmarkSSRRepresentations/dual-generation-8       	    3518	    103289 ns/op	   26722 B/op	     167 allocs/op
+BenchmarkSSRRepresentations/dual-generation-8       	    3307	    104740 ns/op	   26691 B/op	     167 allocs/op
+BenchmarkSSRRepresentations/dual-generation-8       	    3082	    104430 ns/op	   26602 B/op	     166 allocs/op
+BenchmarkSSRRepresentations/dual-generation-8       	    3250	    129338 ns/op	   26616 B/op	     166 allocs/op
+BenchmarkSSRRepresentations/dual-generation-8       	    3026	    114767 ns/op	   26664 B/op	     166 allocs/op
+BenchmarkSSRRepresentations/dual-generation-8       	    3259	    114507 ns/op	   26659 B/op	     166 allocs/op
+BenchmarkSSRRepresentations/dual-generation-8       	    3123	    102138 ns/op	   26687 B/op	     167 allocs/op
+BenchmarkSSRRepresentations/dual-generation-8       	    3356	    103111 ns/op	   26653 B/op	     166 allocs/op
+BenchmarkSSRRepresentations/cached-html-8           	    7270	     56502 ns/op	   18875 B/op	     106 allocs/op
+BenchmarkSSRRepresentations/cached-html-8           	    7057	     55143 ns/op	   18881 B/op	     106 allocs/op
+BenchmarkSSRRepresentations/cached-html-8           	    7287	     54994 ns/op	   18857 B/op	     106 allocs/op
+BenchmarkSSRRepresentations/cached-html-8           	    6616	     55008 ns/op	   18873 B/op	     106 allocs/op
+BenchmarkSSRRepresentations/cached-html-8           	    6147	     55307 ns/op	   18868 B/op	     106 allocs/op
+BenchmarkSSRRepresentations/cached-html-8           	    7615	     55076 ns/op	   18852 B/op	     106 allocs/op
+BenchmarkSSRRepresentations/cached-html-8           	    6411	     55361 ns/op	   18860 B/op	     106 allocs/op
+BenchmarkSSRRepresentations/cached-html-8           	    7160	     54922 ns/op	   18861 B/op	     106 allocs/op
+BenchmarkSSRRepresentations/cached-html-8           	    6826	     55555 ns/op	   18870 B/op	     106 allocs/op
+BenchmarkSSRRepresentations/cached-html-8           	    7123	     55628 ns/op	   18870 B/op	     106 allocs/op
+BenchmarkSSRRepresentations/cached-navigation-8     	    6267	     57277 ns/op	   18445 B/op	     108 allocs/op
+BenchmarkSSRRepresentations/cached-navigation-8     	    6510	     56808 ns/op	   18431 B/op	     108 allocs/op
+BenchmarkSSRRepresentations/cached-navigation-8     	    6397	     55976 ns/op	   18454 B/op	     108 allocs/op
+BenchmarkSSRRepresentations/cached-navigation-8     	    6318	     56844 ns/op	   18451 B/op	     108 allocs/op
+BenchmarkSSRRepresentations/cached-navigation-8     	    7094	     57153 ns/op	   18445 B/op	     108 allocs/op
+BenchmarkSSRRepresentations/cached-navigation-8     	    6997	     56118 ns/op	   18447 B/op	     108 allocs/op
+BenchmarkSSRRepresentations/cached-navigation-8     	    6754	     55960 ns/op	   18441 B/op	     108 allocs/op
+BenchmarkSSRRepresentations/cached-navigation-8     	    6434	     55959 ns/op	   18428 B/op	     108 allocs/op
+BenchmarkSSRRepresentations/cached-navigation-8     	    6297	     56110 ns/op	   18447 B/op	     108 allocs/op
+BenchmarkSSRRepresentations/cached-navigation-8     	    6351	     63592 ns/op	   18459 B/op	     108 allocs/op
+BenchmarkSSRRepresentations/concurrent-mixed-generation-8         	    1071	    318075 ns/op	  156868 B/op	     927 allocs/op
+BenchmarkSSRRepresentations/concurrent-mixed-generation-8         	    1252	    284767 ns/op	  156448 B/op	     927 allocs/op
+BenchmarkSSRRepresentations/concurrent-mixed-generation-8         	    1322	    270294 ns/op	  155861 B/op	     925 allocs/op
+BenchmarkSSRRepresentations/concurrent-mixed-generation-8         	    1350	    271480 ns/op	  156235 B/op	     926 allocs/op
+BenchmarkSSRRepresentations/concurrent-mixed-generation-8         	    1300	    271349 ns/op	  156614 B/op	     926 allocs/op
+BenchmarkSSRRepresentations/concurrent-mixed-generation-8         	    1339	    268930 ns/op	  156649 B/op	     927 allocs/op
+BenchmarkSSRRepresentations/concurrent-mixed-generation-8         	    1302	    273231 ns/op	  156228 B/op	     926 allocs/op
+BenchmarkSSRRepresentations/concurrent-mixed-generation-8         	    1366	    275066 ns/op	  156674 B/op	     926 allocs/op
+BenchmarkSSRRepresentations/concurrent-mixed-generation-8         	    1279	    272924 ns/op	  156213 B/op	     926 allocs/op
+BenchmarkSSRRepresentations/concurrent-mixed-generation-8         	    1297	    276716 ns/op	  156632 B/op	     926 allocs/op
+PASS
+ok  	github.com/akashKarmakar02/meta/server	26.123s

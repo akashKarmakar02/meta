@@ -55,10 +55,9 @@ type Config struct {
 	// disables public file serving; missing directories may be created later.
 	PublicDir string
 	DevOrigin string
-	// PageCache optionally caches fully rendered SSR HTML responses in the
-	// supplied store. It wraps only ModeSSR page routes after route params
-	// are bound; CSR pages, actions, APIs, and assets are never cached. A nil
-	// value disables response caching without code changes elsewhere.
+	// PageCache caches coherent HTML/navigation pairs for explicitly declared
+	// public SSR routes. Policies and CSRF still execute on hits; loaders do
+	// not. DevOrigin disables it. CSR, actions, APIs and assets are excluded.
 	PageCache *pagecache.PageCache
 	// HealthCheck reserves GET /healthz for development readiness.
 	HealthCheck bool
@@ -234,13 +233,24 @@ func New(cfg Config) (*fiber.App, error) {
 		switch route.Mode {
 		case routing.ModeSSR:
 			handler = render.SSRNavigationHandler(route, assets, render.PageResolver(cfg.SSRPage), render.PageResolver(cfg.BarePage), render.VisualLayoutResolver(cfg.VisualLayout))
-			if cfg.PageCache != nil {
-				handler = cfg.PageCache.Wrap(handler)
+			handler = httpserver.WithLoader(loaders, route, handler)
+			if cfg.PageCache != nil && cfg.DevOrigin == "" {
+				pair := render.SSRPairGenerator(route, assets, render.PageResolver(cfg.BarePage), render.VisualLayoutResolver(cfg.VisualLayout))
+				generate := func(c fiber.Ctx) (*pagecache.GeneratedPage, error) {
+					var result *pagecache.GeneratedPage
+					err := httpserver.WithLoader(loaders, route, func(c fiber.Ctx) error {
+						var err error
+						result, err = pair(c)
+						return err
+					})(c)
+					return result, err
+				}
+				handler = cfg.PageCache.Wrap(handler, generate)
 			}
 		case routing.ModeCSR:
 			handler = render.CSRNavigationHandler(route, assets, render.VisualLayoutResolver(cfg.VisualLayout))
+			handler = httpserver.WithLoader(loaders, route, handler)
 		}
-		handler = httpserver.WithLoader(loaders, route, handler)
 		path := internalrouting.FiberRegistrationPath(route.Path)
 		middleware := []fiber.Handler{httpserver.WithRouteParams(route, func(c fiber.Ctx) error { return c.Next() })}
 		middleware = append(middleware, policies.middleware()...)

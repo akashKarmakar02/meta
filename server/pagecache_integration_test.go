@@ -38,7 +38,7 @@ func TestServerPageCache(t *testing.T) {
 	if merr != nil {
 		t.Fatal(merr)
 	}
-	pc := pagecache.NewPageCache(mstore, time.Minute)
+	pc := pagecache.NewPageCache(mstore, time.Minute, pagecache.PublicRoutes("page.templ"))
 	app, err := New(Config{
 		Routes: routes, SSRPage: resolver, BarePage: resolver,
 		VisualLayout: func(_ routing.Route, c templ.Component) (templ.Component, error) { return c, nil },

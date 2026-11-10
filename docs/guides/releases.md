@@ -38,6 +38,52 @@ After upgrading, run your full checks (`go test ./...`, `npm run check`, `npm ru
 
 ## Migration guide
 
+### To v0.1.0-beta.6 (prepared; not yet published)
+
+Fixes beta.5 full-response cache poisoning between HTML and navigation JSON.
+One eager generation now runs the loader, page and visual layout once, then
+stores the complete HTML document and existing navigation envelope atomically.
+Request order no longer affects correctness; cache hits skip loaders/rendering.
+Mixed concurrent misses share one generation. Navigation still returns
+`application/json` with `Cache-Control: no-store`.
+
+**Security migration:** shared SSR caching now requires explicit public route
+IDs. Existing `NewPageCache(store, ttl)` calls still compile but cache nothing
+until reviewed routes are added:
+
+```go
+cfg.PageCache = pagecache.NewPageCache(store, cache.Never,
+    pagecache.PublicRoutes("about/page.templ", "blog/[slug]/page.templ"),
+    pagecache.BuildID("your-entire-release-id"),
+)
+```
+
+New scaffolds leave the public list empty. Remove beta.5's automatic cache-all
+bootstrap or replace it with this policy. Never opt in personalized, protected,
+tenant-sensitive, CSRF-token or nonce-bearing pages. Cookie/auth requests and
+unsafe responses bypass caching; middleware and authorization still execute.
+Development (`DevOrigin`) disables it. Custom `Wrap(next)` integrations must
+provide a deliberate pair generator; without one they now pass through safely.
+`server.Config.PageCache` integrations are wired automatically.
+
+`ssr-page:v3` ignores old beta.5 entries; no manual `.pagecache/` deletion is
+needed for correctness. A release ID prevents reuse across changed templates,
+loaders and assets. The default fingerprints the executable; independently
+deployed assets require an explicit ID. The scaffold reads `GO_META_BUILD_ID`.
+
+`InvalidatePath` now replaces a durable path-generation token: HTML, JSON and
+all query variants invalidate together after restart. In-flight older renders
+cannot republish into the new generation. `Invalidate(ctx, route)` now also
+invalidates all concrete-path query variants. Use one coordinator/active process
+per store/disk directory; multi-process invalidation is not provided. Old
+unreachable `cache.Never` entries require offline reclamation to bound disk use.
+Also invalidate separately cached loader data before regenerating a page.
+
+No navigation protocol, frontend runtime copy, public `cache.Store` contract,
+SSR/CSR boundary, or production runtime change is required. See the
+[caching guide](caching.md) and [implementation report](../dual-representation-implementation.md)
+for validation, benchmarks and operational limits.
+
 ### To v0.1.0-beta.5
 
 The caching release. New packages: `cache.NewDiskStore` (persistent disk store), `sitemap` (disk-backed sitemap XML), `pagecache` (SSR page response caching), and `metadata.SitemapCache`. New guide: [Caching](caching.md).

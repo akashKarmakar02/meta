@@ -19,6 +19,7 @@ generate: ## Run templ + route codegen (must precede go build)
 
 build: generate ## Full production build: templ + Go binary + client assets
 	$(GO) build -o bin/example ./cmd/example
+	$(GO) build -o bin/pagecache-fixture ./tests/fixtures/pagecache
 	$(NPM) ci
 	$(NPM) run build
 

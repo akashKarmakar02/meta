@@ -146,12 +146,14 @@ func newConfiguredAppBase(assets *httpserver.Assets, privateSocket bool, registr
 	// wrapper sits INSIDE WithRouteParams so the cache key can include the
 	// matched pattern and typed params.
 	//
-	// Production convention (also used by meta init scaffolds): disk-backed
-	// with cache.Never — entries live until explicitly invalidated (see
-	// PageCache.InvalidatePath) rather than expiring on a timer. Dev always
-	// leaves this unset so edits show up immediately.
+	// Only the reviewed public home/about routes opt in. cache.Never needs
+	// explicit invalidation after mutations. Development always renders fresh.
 	var pageCache *pagecache.PageCache
-	switch mode := os.Getenv("GO_META_PAGE_CACHE"); mode {
+	cacheMode := os.Getenv("GO_META_PAGE_CACHE")
+	if os.Getenv("GO_META_DEV") == "1" || (assets != nil && assets.DevClientURL != "") {
+		cacheMode = ""
+	}
+	switch mode := cacheMode; mode {
 	case "":
 		// Caching disabled — every request renders fresh. The dev default.
 	case "memory":
@@ -159,21 +161,20 @@ func newConfiguredAppBase(assets *httpserver.Assets, privateSocket bool, registr
 		if err != nil {
 			log.Fatalf("page cache configuration: %v", err)
 		}
-		pageCache = pagecache.NewPageCache(memoryStore, 30*time.Second)
+		pageCache = pagecache.NewPageCache(memoryStore, 30*time.Second, pagecache.PublicRoutes("page.templ", "about/page.templ"))
 	case "disk":
 		diskStore, err := cache.NewDiskStore(cache.DiskConfig{Dir: ".meta/page-cache", MaxEntryBytes: 2 << 20})
 		if err != nil {
 			log.Fatalf("page cache store: %v", err)
 		}
-		pageCache = pagecache.NewPageCache(diskStore, time.Hour)
+		pageCache = pagecache.NewPageCache(diskStore, time.Hour, pagecache.PublicRoutes("page.templ", "about/page.templ"))
 	case "prod":
-		// The scaffold default for production: disk store + Never TTL; every
-		// entry survives until InvalidatePath is called for it.
+		// Explicitly safe public pages, persisted until InvalidatePath.
 		diskStore, err := cache.NewDiskStore(cache.DiskConfig{Dir: ".meta/page-cache", MaxEntryBytes: 2 << 20})
 		if err != nil {
 			log.Fatalf("page cache store: %v", err)
 		}
-		pageCache = pagecache.NewPageCache(diskStore, cache.Never)
+		pageCache = pagecache.NewPageCache(diskStore, cache.Never, pagecache.PublicRoutes("page.templ", "about/page.templ"))
 	default:
 		log.Fatalf("page cache: unknown GO_META_PAGE_CACHE value %q (want \"memory\", \"disk\" or \"prod\")", mode)
 	}
@@ -239,7 +240,16 @@ func newConfiguredAppBase(assets *httpserver.Assets, privateSocket bool, registr
 			// no-op when the registry is nil or the route has no binding.
 			ssrHandler := httpserver.WithLoader(registry, route, render.SSRNavigationHandler(route, assets, routes.SSRPage, routes.BarePage, routes.VisualLayout))
 			if pageCache != nil {
-				ssrHandler = pageCache.Wrap(ssrHandler)
+				pair := render.SSRPairGenerator(route, assets, routes.BarePage, routes.VisualLayout)
+				ssrHandler = pageCache.Wrap(ssrHandler, func(c fiber.Ctx) (*pagecache.GeneratedPage, error) {
+					var result *pagecache.GeneratedPage
+					err := httpserver.WithLoader(registry, route, func(c fiber.Ctx) error {
+						var err error
+						result, err = pair(c)
+						return err
+					})(c)
+					return result, err
+				})
 			}
 			fapp.Get(routing.FiberRegistrationPath(route.Path), httpserver.WithRouteParams(route, ssrHandler))
 		case routing.ModeCSR:

@@ -1,18 +1,14 @@
 # Caching
 
-Meta's caching is one contract with three stores and two layers. The same
-`cache.Store` interface backs loader data caching, the sitemap, and full SSR
-HTML response caching; the same `cache.Policy` governs TTL; the same
-invalidation fence guarantees a mutation never serves stale data.
+Meta uses the same `cache.Store` contract for typed loader data, sitemap XML,
+and complete SSR response pairs. Each layer is explicitly configured.
 
 ```text
-request ──► PageCache.Wrap ──► WithRouteParams ──► your page
-                │ hit                          │ miss (render)
-                ▼                              ▼
-            store.Get                    loader cache (BindCached)
-                                              │ miss
-                                              ▼
-                                         your loader function
+request → required middleware → route context → authorization / CSRF
+        → public-page eligibility → page cache lookup
+          ├─ hit: select cached HTML or navigation JSON (no loader/render)
+          └─ miss: loader once → page + layout once → HTML and JSON
+                   → fence check → atomically persist pair → select response
 ```
 
 ## The contract
@@ -24,15 +20,14 @@ type Store interface {
     Get(ctx context.Context, key Key) (Entry, bool, error)
     Set(ctx context.Context, key Key, entry Entry, policy Policy) error
     Delete(ctx context.Context, key Key) error
-    Close(ctx context.Context) error
 }
 ```
 
 Entries hold opaque bytes. `Key` is an opaque string built with
-`cache.NewKey(parts ...string)` — components are length-prefixed so `("a","bc")`
-and `("ab","c")` never collide. Policies carry `TTL`, `StaleTTL`, and `Tags`;
-both TTLs must be positive and TTL ≤ 24h (`cache.MaxTTL`) — a cache in this
-framework is a bounded-TTL structure by design, not a permanent database.
+`cache.NewKey(namespace string, components ...string)` — components are length-prefixed so `("a","bc")`
+and `("ab","c")` never collide. Policies carry `TTL`: a positive duration up to 24h (`cache.MaxTTL`), or
+`cache.Never` for content governed by explicit invalidation. Concrete memory
+and disk stores also expose `Close() error`; it is not part of `Store`.
 
 ## Loader data caching
 
@@ -40,9 +35,10 @@ The layer most apps touch. Wrap a typed Go loader with the generated binding:
 
 ```go
 // app/loaders/posts.go — hand-written, uses the loader package directly.
-binding := loader.BindCached("posts-index", loadPosts, loader.CacheOptions[[]Post]{
+binding := loader.BindCached("posts/page.templ", loadPosts, loader.CacheOptions[[]Post]{
     Store:  store,
-    Policy: cache.Policy{TTL: time.Minute, Tags: []string{"posts"}},
+    Policy: cache.Policy{TTL: time.Minute},
+    Codec:  loader.JSONCodec[[]Post](),
     Scope:  myScopeFn,        // func(ctx, route) (scope string, cacheable bool, err error)
     Invalidator: invalidator, // same store as Store; wired into the fence
 })
@@ -68,14 +64,14 @@ store, err := cache.NewMemory(cache.MemoryConfig{
 })
 ```
 
-**Disk** — persistence across restarts for loader data, sitemaps, and SSR HTML.
+**Disk** — persistence across restarts for loader data, sitemaps, and SSR pairs.
 Atomic writes (temp file + rename), CRC-checked envelopes, lazy expiry, optional
 background sweeper. Same contract; a corrupt file surfaces as a miss, never a
 crash.
 
 Both stores accept `TTL: cache.Never` — an entry that never expires on its own
-and lives until invalidated or deleted. The production page cache that
-`meta init` scaffolds uses it.
+and lives until invalidated or deleted. Use it only for explicitly safe public pages with mutation invalidation.
+New scaffolds leave page caching disabled until public route IDs are declared.
 
 ```go
 store, err := cache.NewDiskStore(cache.DiskConfig{
@@ -98,7 +94,7 @@ Invalidate explicitly when content changes:
 ```go
 sm, err := sitemap.New(sitemap.Config{
     BaseURL: "https://example.com",
-    Source:  sitemap.RouteSource{Routes: myRoutes},
+    RouteSource: sitemap.Source{{Path: "/"}, {Path: "/about"}},
     Store:   diskStore,
 })
 xml, err := sm.XML(ctx)
@@ -124,68 +120,181 @@ file, so this lands in your editor's intellisense like any other declaration.
 Omit it and the sitemap persists indefinitely, regenerating only on explicit
 invalidation.
 
-## SSR HTML response caching
+## Eager dual-representation SSR caching (beta.6)
 
-Full-page caching of templ-rendered HTML. Opt-in per app via
-`server.Config.PageCache`; CSR/Svelte pages are never cached by it (their HTML
-shell is static, hydration data flows through loader caching instead).
+A cache entry represents one logical generation of a public templ SSR page:
+a complete HTML document **and** Meta's version-1 navigation JSON envelope.
+The first eligible GET generates and stores both before responding, regardless
+of whether HTML or navigation arrived first. Later requests select their
+pre-generated representation without running a loader, page, or layout.
+Svelte stays client-only; CSR shells and data, actions, APIs, and assets are
+outside this cache. Production remains a Go binary plus built assets.
 
-New projects scaffolded by `meta init` enable it **by default in production**
-(disk-backed, indefinite TTL) and **never in development** — see the
-`Caching (production only)` block in `cmd/app/main.go`.
+Caching requires both `server.Config.PageCache` and explicit source-derived
+route IDs in `pagecache.PublicRoutes`. Constructing a cache with no route IDs
+stores nothing. `meta init` now scaffolds an empty public-page list instead of
+automatically caching every SSR page.
 
 ```go
+pc := pagecache.NewPageCache(diskStore, cache.Never,
+    pagecache.PublicRoutes("blog/[slug]/page.templ", "about/page.templ"),
+    pagecache.BuildID("myapp-release-2026-11-10"),
+    pagecache.GenerationTimeout(15*time.Second),
+)
 app, err := server.New(server.Config{
-    // ...
-    PageCache: pagecache.NewPageCache(diskStore, cache.Never),
+    // Generated Routes, SSRPage, BarePage and VisualLayout, plus Loaders...
+    PageCache: pc,
 })
 ```
 
-`cache.Never` disables expiry: entries live until explicitly invalidated.
-Use a real duration (`TTL: 30 * time.Second`) when data tolerates staleness
-bounded by time instead.
+Use a finite duration such as `30*time.Second` for bounded freshness.
+`cache.Never` requires explicit invalidation after every relevant mutation.
+`BuildID` should identify the entire application release, including assets.
+When omitted, Meta hashes the running executable once; if it cannot read the
+executable, it uses a process-specific ID and safely forgoes restart reuse.
+If assets are deployed independently of the binary, set an explicit release ID.
+The scaffold accepts `GO_META_BUILD_ID` (change it for every release).
 
-Only successful, non-navigation-envelope responses are stored. On a hit, the
-middleware serves the cached bytes before any rendering runs. Keys include
-route pattern + params + query string, so `/blog?page=2` never collides with
-`/blog?page=3`.
+The renderer resolves the bare templ page, then wraps a capture component in
+the selected visual layout. At the layout's child invocation it renders the
+page into a buffer once, with layout-provided context and typed loader data,
+then writes those same bytes into the layout. A repeated child invocation
+replays bytes. The layout also renders once. Page metadata overrides layout
+metadata even when the layout sets defaults after its child. The document
+builder and existing navigation-envelope builder use the same visual HTML and
+structured metadata, including canonical, Open Graph, and Twitter fields.
+No final-document parsing, loopback request, fabricated Fiber context, second
+loader, or second templ tree is involved. Only document assembly and JSON
+serialization are representation-specific.
 
-## Invalidation
+Custom resolvers must follow the generated-resolver contract: `SSRPage` is
+`BarePage` composed through `VisualLayout`, and the visual layout renders the
+child. A layout that never invokes its child fails pair generation; it cannot
+publish a partial pair. Cache-enabled pages must be deterministic and free of
+per-request side effects.
 
-Three layers coordinate through the shared invalidator:
+### Eligibility and HTTP behavior
 
-1. **Loaders**: `invalidator.Invalidate(ctx, route, "posts")` drops loader
-   entries tagged with the `"posts"` scope.
-2. **Pages**: `pc.InvalidatePath(ctx, "/blog/hello-world")` drops the cached
-   HTML for that exact path (query variants included). The next request
-   re-renders and re-stores fresh HTML. Call it from server actions after a
-   mutation:
+Opt in only pages whose **entire** output is public, anonymous, deterministic,
+and independent of user/session/tenant identity, private headers, CSRF tokens,
+and CSP nonces. A public URL is not proof of public data. Applications must
+keep personalized routes out of `PublicRoutes`. Middleware handling custom
+identity/tenant headers must reject the request or set `private, no-store`
+**before** calling `c.Next()`; setting policy after dispatch cannot protect a
+lookup. Tenant-scoped shared page caching is not provided.
 
-   ```go
-   func UpdatePost(ctx context.Context, slug string) error {
-       if err := db.UpdatePost(ctx, slug); err != nil {
-           return err
-       }
-       return pageCache.InvalidatePath(ctx, "/blog/"+slug)
-   }
-   ```
+Before lookup, Meta rejects cookie-bearing requests, Authorization and
+Proxy-Authorization, private/no-store controls, Set-Cookie responses, CSP
+nonces, non-200 status, and Vary responses. The same checks run after generation
+before storing or sharing output. Required application middleware, route
+policies, and CSRF middleware still run on every hit. Protected policies mark
+responses `private, no-store`; CSRF middleware uses no-store and may issue a
+cookie. Neither is bypassed by caching. Requests with those policies retain
+the ordinary uncached path. Redirects, errors, and negative results are not
+cached.
 
-3. **Sitemap**: `sm.Invalidate(ctx)` regenerates on next request. Wire it into
-   the same action that mutates content.
+HTML returns `text/html; charset=utf-8`. Navigation uses the existing
+`X-Go-Web-Navigation: 1` header, exact version-1 envelope, `application/json`,
+and `Cache-Control: no-store`. The protocol no-store is applied after internal
+cache decisions: it forbids browser/proxy storage while the explicitly
+controlled application cache can retain the pair. An application's own
+no-store prevents lookup and storage.
 
-With `cache.Never` as your TTL, invalidation is the *only* way cached pages
-expire — wire it into every mutation path or pages will serve stale HTML until
-redeployed.
+Only status, content type, Cache-Control, Content-Language, and body are stored.
+Each response owns its body buffer, protecting coalesced output from downstream
+middleware mutation.
+Cookies, request IDs, traces, session headers, and nonces are never replayed.
+Request-specific/security headers belong in middleware that runs on every
+request. Unsupported navigation versions receive HTML as before.
 
-The fence: if a cached binding and its invalidator disagree about store
-identity, the registry rejects the wiring at startup. You cannot build a
-"stale-forever" cache by accident.
+### Persistence, format, and upgrades
 
-## What not to do
+One opaque `cache.Entry` under namespace `ssr-page:v3` holds both responses.
+It uses magic `META-SSR` plus version byte 3, bounded little-endian lengths and
+status fields, header/body bytes for each representation, and a CRC32 over the
+whole envelope. Hits use slices into the store's private copy. The cache store
+contract remains unchanged. A single atomic store write publishes the pair
+with one TTL; disk uses its existing atomic rename and outer CRC envelope.
 
-- Don't cache sessions or per-user data in the page cache — keys don't include
-  cookies. Loader caching with user-specific key parts is the right tool.
-- Don't set TTL above what your data tolerates. Cache expiry bounds staleness;
-  invalidation removes it early when you know better.
-- Don't share one store between apps with untrusted tenants — keys are namespaced,
-  not access-controlled.
+Keys cover deployment ID, route identity/pattern, exact requested URL, and a
+path-generation token. Exact URL spelling preserves the navigation `url`
+field, including query order; query variants share the same invalidation token.
+Beta.5's ambiguous `page` keys and NUL-separated responses are never read.
+Upgrading automatically causes a fresh generation; deleting `.pagecache/` is
+not required for correctness. A corrupt or incomplete pair is a miss.
+
+### Invalidation and concurrency
+
+```go
+if err := db.UpdatePost(ctx, slug); err != nil { return err }
+return pc.InvalidatePath(ctx, "/blog/"+slug)
+```
+
+`InvalidatePath` replaces a persistent random path-generation token in the
+same store under `ssr-path:v1`. This invalidates both representations and all
+query variants, even after restart and even before the new process serves the
+path. Escaped path spellings share a decoded-path token. No full disk scan or
+process-local variant index is needed. `Invalidate(ctx, route)` also advances
+the concrete path's token using declaration pattern and params; it invalidates
+all query variants. Check returned errors: a failed token write does not
+promise invalidation.
+
+A fence orders the token check and page write against invalidation. An old
+in-flight request may return its original snapshot, but cannot repopulate the
+current cache generation after successful invalidation. A request beginning
+after invalidation uses the new token and cannot join the old flight. Concurrent
+HTML and JSON misses for one identity share a single flight. Failure stores
+nothing and releases waiters; the next request can recover.
+
+The owning Fiber handler generates synchronously, with a 30-second default
+context bound; loaders/components must honor cancellation. Waiters cancel
+independently. Owner cancellation prevents storage and lets remaining waiters
+retry. There are no background generation goroutines or retained Fiber objects;
+server shutdown retains its normal request-lifetime semantics. Store failures
+are observable and fail open to rendering. A failed write cannot publish a
+half-pair or fail an otherwise successful page response.
+
+Use **one PageCache coordinator per store and one active process per disk
+cache directory**. Sequential restarts are supported. Distributed/multi-process
+invalidation and crash/power-loss durability beyond the existing disk store
+are not promised. Invalidate each instance when using separate stores. Do not
+share one directory between independently running coordinators.
+
+Token replacement leaves older entries unreachable. Finite TTL expires those
+page entries normally; `cache.Never` entries and per-path token metadata need
+periodic offline directory reclamation during deployment if disk growth matters.
+An evicted/missing token gets fresh randomness, so it cannot resurrect old data.
+Regeneration may still observe cached loader data: if using `BindCached`, also
+invalidate its loader cache after the mutation before invalidating the page.
+Sitemap invalidation remains separate (`sm.Invalidate(ctx)`).
+
+### Development and troubleshooting
+
+New scaffolds construct no page cache in development. `server.Config.DevOrigin`
+also disables response caching even if a PageCache is supplied. Live edits keep
+the existing single-representation render path and do not incur eager pair
+construction.
+
+If navigation returns HTML, inspect `X-Go-Web-Navigation: 1`, content type,
+and the client pipeline log (`?go-meta-debug=1`, `window.__goMetaNavLog`). Check
+that a public route ID matches its generated source filename, that no cookies,
+authorization, CSRF, private/no-store, nonce, or Vary policy makes it ineligible,
+and that the application is not in development. An unsupported header version
+intentionally falls back to HTML. Confirm the deployment ID when investigating
+stale assets. Never log cached bodies or sensitive keys.
+
+Existing observability emits `pagecache` events: `dual` hit/miss; `generation`
+started/completed/failed/coalesced/stale-rejected; `write` failed; `lookup`
+error; and `cache` invalidated/error. Labels contain route IDs and fixed
+outcomes, never URLs, keys, or bodies. Invalidation events use the caller's
+observability context when available.
+
+The repository includes mixed-request integration/race tests and Chromium
+navigation tests. Run `make verify`; benchmark the production HTTP paths with:
+
+```sh
+go test ./server -run '^$' -bench BenchmarkSSRRepresentations -benchmem -count=5
+```
+
+See the [implementation report](../dual-representation-implementation.md) for
+validation results, benchmark samples and deployment limitations.

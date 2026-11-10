@@ -106,3 +106,21 @@ The `data-go-layout` value must match the layout's file path from the project ro
 Projects created before v0.1.0-beta.2 have an older copied frontend runtime: updating the Go module or CLI alone does not update those files. Merge the v0.1.0-beta.2 runtime changes into your project before using `LayoutOutlet`; preserve any application edits in `frontend/`. The affected files are `frontend/LayoutOutlet.svelte`, `layout-context.ts`, `svelte-mounter.ts`, `layout-mount.ts`, `layout-child-swap.ts`, `navigation-pipeline.ts`, and `entry.ts`.
 
 Adjust the relative import for the layout location. `LayoutOutlet` carries the Svelte context at its position to the separately mounted page. The original plain outlet remains supported but does not share context. See [Clerk authentication](clerk.md).
+
+## Public SSR page caching (beta.6)
+
+SSR routes may opt into eager document/navigation caching through
+`pagecache.PublicRoutes("blog/[slug]/page.templ")` on a configured
+`server.Config.PageCache`. IDs are generated source filenames; dynamic params
+and exact query URLs remain separate entries. CSR/Svelte routes are excluded.
+The first HTML or soft-navigation request generates both responses from one
+loader/page/layout snapshot, before returning. Later requests select the
+correct representation without rerendering or reloading data.
+
+Required middleware, route authorization, and CSRF execute before lookup.
+Cookies, authorization, private/no-store, Set-Cookie, nonce and Vary responses
+bypass shared caching. Only explicitly reviewed anonymous deterministic pages
+belong in the public list. After mutations, `pc.InvalidatePath(ctx, concretePath)`
+invalidates both representations and every query variant, including across
+sequential disk-backed restarts. See [Caching](caching.md) for deployment IDs,
+security rules, format migration, concurrency, and persistent invalidation.
