@@ -22,6 +22,7 @@ import (
 	"github.com/akashKarmakar02/meta/env"
 	"github.com/akashKarmakar02/meta/formcsrf"
 	"github.com/akashKarmakar02/meta/loader"
+	"github.com/akashKarmakar02/meta/metadata"
 	"github.com/akashKarmakar02/meta/observability"
 	"github.com/akashKarmakar02/meta/server"
 	"github.com/akashKarmakar02/meta/sitemap"
@@ -30,6 +31,7 @@ import (
 	"github.com/akashKarmakar02/meta/internal/httpserver"
 	"github.com/akashKarmakar02/meta/internal/render"
 	"github.com/akashKarmakar02/meta/internal/routing"
+	pagecache "github.com/akashKarmakar02/meta/pagecache"
 )
 
 // newApp constructs the Fiber application with its middleware and routes.
@@ -142,26 +144,38 @@ func newConfiguredAppBase(assets *httpserver.Assets, privateSocket bool, registr
 	// PageCache (opt-in via GO_META_PAGE_CACHE): when set, SSR renders are
 	// cached and served on hit without re-running loaders or templ. The
 	// wrapper sits INSIDE WithRouteParams so the cache key can include the
-	// matched pattern and typed params. GO_META_PAGE_CACHE=memory enables the
-	// in-memory store; GO_META_PAGE_CACHE=disk,path persists across restarts.
-	var pageCache *httpserver.PageCache
+	// matched pattern and typed params.
+	//
+	// Production convention (also used by meta init scaffolds): disk-backed
+	// with cache.Never — entries live until explicitly invalidated (see
+	// PageCache.InvalidatePath) rather than expiring on a timer. Dev always
+	// leaves this unset so edits show up immediately.
+	var pageCache *pagecache.PageCache
 	switch mode := os.Getenv("GO_META_PAGE_CACHE"); mode {
 	case "":
-		// Caching disabled — every request renders fresh. The default.
+		// Caching disabled — every request renders fresh. The dev default.
 	case "memory":
 		memoryStore, err := cache.NewMemory(cache.MemoryConfig{MaxEntries: 256, MaxBytes: 8 << 20})
 		if err != nil {
 			log.Fatalf("page cache configuration: %v", err)
 		}
-		pageCache = httpserver.NewPageCache(memoryStore, 30*time.Second)
+		pageCache = pagecache.NewPageCache(memoryStore, 30*time.Second)
 	case "disk":
 		diskStore, err := cache.NewDiskStore(cache.DiskConfig{Dir: ".meta/page-cache", MaxEntryBytes: 2 << 20})
 		if err != nil {
 			log.Fatalf("page cache store: %v", err)
 		}
-		pageCache = httpserver.NewPageCache(diskStore, time.Hour)
+		pageCache = pagecache.NewPageCache(diskStore, time.Hour)
+	case "prod":
+		// The scaffold default for production: disk store + Never TTL; every
+		// entry survives until InvalidatePath is called for it.
+		diskStore, err := cache.NewDiskStore(cache.DiskConfig{Dir: ".meta/page-cache", MaxEntryBytes: 2 << 20})
+		if err != nil {
+			log.Fatalf("page cache store: %v", err)
+		}
+		pageCache = pagecache.NewPageCache(diskStore, cache.Never)
 	default:
-		log.Fatalf("page cache: unknown GO_META_PAGE_CACHE value %q (want \"memory\" or \"disk\")", mode)
+		log.Fatalf("page cache: unknown GO_META_PAGE_CACHE value %q (want \"memory\", \"disk\" or \"prod\")", mode)
 	}
 
 	// Dynamic sitemap (M4): GO_META_SITEMAP_URL enables /sitemap.xml, built
@@ -176,7 +190,7 @@ func newConfiguredAppBase(assets *httpserver.Assets, privateSocket bool, registr
 		for _, r := range routes.RegisterRoutes() {
 			smRoutes = append(smRoutes, sitemap.RouteInfo{Path: r.Path})
 		}
-		smCfg := sitemap.Config{BaseURL: baseURL, RouteSource: smRoutes}
+		smCfg := sitemap.Config{BaseURL: baseURL, RouteSource: smRoutes, Cache: metadata.SitemapCache{TTL: metadata.DefaultSitemapCacheTTL}}
 		if dir := os.Getenv("GO_META_SITEMAP_CACHE"); dir != "" {
 			diskStore, derr := cache.NewDiskStore(cache.DiskConfig{Dir: dir, MaxEntryBytes: 1 << 20})
 			if derr != nil {

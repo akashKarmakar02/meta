@@ -4,16 +4,20 @@ import (
 	"log"
 	"net"
 	"os"
-	"github.com/gofiber/fiber/v3"
+	"time"
 
+	"github.com/gofiber/fiber/v3"
 	generated "{{MODULE}}/generated"
 	apphooks "{{MODULE}}/app"
-	"github.com/akashKarmakar02/meta/server"
+	"github.com/akashKarmakar02/meta/cache"
 	"github.com/akashKarmakar02/meta/env"
+	"github.com/akashKarmakar02/meta/pagecache"
+	"github.com/akashKarmakar02/meta/server"
 )
 
 func main() {
-	if os.Getenv("GO_META_DEV") != "1" {
+	isDev := os.Getenv("GO_META_DEV") == "1"
+	if !isDev {
 		if err := env.LoadProduction("."); err != nil { log.Fatal(err) }
 	}
 	cfg := server.Config{
@@ -28,6 +32,26 @@ func main() {
 	} else {
 		cfg.ClientDir = "dist/client"
 	}
+
+	// Page caching is enabled by default in production (disk-backed, no TTL expiry —
+	// entries live until you invalidate them after mutations). It is NEVER active
+	// in development: every request renders fresh so templ changes appear
+	// immediately. To disable production caching set GO_META_PAGE_CACHE_DISABLED=1.
+	if !isDev && os.Getenv("GO_META_PAGE_CACHE_DISABLED") == "" {
+		store, err := cache.NewDiskStore(cache.DiskConfig{
+			Dir:           envOr("GO_META_PAGE_CACHE_DIR", ".pagecache"),
+			MaxEntryBytes: 2 << 20,
+			SweepInterval: 10 * time.Minute,
+		})
+		if err != nil { log.Fatal(err) }
+		cfg.PageCache = pagecache.NewPageCache(store, cache.Never)
+	}
+	if isDev {
+		// Development must never serve cached HTML: every request re-renders so
+		// templ edits show up immediately and stale pages are never served.
+		log.Println("development mode: page caching disabled")
+	}
+
 	app, err := server.New(cfg)
 	if err != nil { log.Fatal(err) }
 	if socket := os.Getenv("GO_META_DEV_SOCKET"); socket != "" {
@@ -42,4 +66,9 @@ func main() {
 	port := os.Getenv("PORT")
 	if port == "" { port = "3000" }
 	log.Fatal(app.Listen(":" + port))
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" { return v }
+	return fallback
 }

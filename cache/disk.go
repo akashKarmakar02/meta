@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +23,11 @@ var diskEnvelopeMagic = [4]byte{'G', 'M', 'E', 'T'}
 // version byte differs is foreign or from an incompatible release; readers
 // treat it as corrupt (a miss) rather than guessing at its layout.
 const diskEnvelopeVersion = 1
+
+// neverExpiresAt is the sentinel expiry written for cache.Never entries. It
+// is far in the future but small enough to survive UnixNano round-tripping
+// through the disk envelope without overflow.
+var neverExpiresAt = time.Unix(0, math.MaxInt64)
 
 // envelope sizes: magic(4) + version(1) + reserved(3) + expiresAt(8) +
 // valueLen(8) + crc(4).
@@ -243,7 +249,13 @@ func (d *Disk) Set(ctx context.Context, key Key, entry Entry, policy Policy) err
 	if !d.isOpen() {
 		return ErrClosed
 	}
+	// cache.Never entries carry the fixed neverExpiresAt sentinel so the
+	// timestamp round-trips through the envelope without overflow and the
+	// entry survives restarts until explicitly invalidated.
 	expiresAt := time.Now().Add(policy.TTL)
+	if policy.TTL == Never {
+		expiresAt = neverExpiresAt
+	}
 	return writeAtomic(d.pathFor(key), encodeEnvelope(expiresAt, entry.Value), d.fileMode, d.dirMode)
 }
 

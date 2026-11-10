@@ -18,7 +18,7 @@ import (
 	"github.com/a-h/templ"
 
 	"github.com/akashKarmakar02/meta/cache"
-	"github.com/akashKarmakar02/meta/internal/httpserver"
+	pagecache "github.com/akashKarmakar02/meta/pagecache"
 	"github.com/akashKarmakar02/meta/routing"
 )
 
@@ -38,7 +38,7 @@ func TestServerPageCache(t *testing.T) {
 	if merr != nil {
 		t.Fatal(merr)
 	}
-	pc := httpserver.NewPageCache(mstore, time.Minute)
+	pc := pagecache.NewPageCache(mstore, time.Minute)
 	app, err := New(Config{
 		Routes: routes, SSRPage: resolver, BarePage: resolver,
 		VisualLayout: func(_ routing.Route, c templ.Component) (templ.Component, error) { return c, nil },
@@ -99,7 +99,7 @@ func TestServerPageCacheSkipsCSR(t *testing.T) {
 	if merr != nil {
 		t.Fatal(merr)
 	}
-	pc := httpserver.NewPageCache(mstore, time.Minute)
+	pc := pagecache.NewPageCache(mstore, time.Minute)
 	client := t.TempDir()
 	files := map[string]string{
 		".vite/manifest.json": `{"frontend/entry.ts":{"file":"assets/entry-a.js","isEntry":true}}`,

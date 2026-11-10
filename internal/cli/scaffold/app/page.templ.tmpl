@@ -1,5 +1,18 @@
 package app
 
+import (
+	"time"
+
+	"github.com/akashKarmakar02/meta/metadata"
+)
+
+// SitemapCache bounds how long the sitemap cache entry stays fresh on disk.
+// Delete this declaration (or set TTL: 0) to cache indefinitely, refreshing
+// only on explicit invalidation.
+var SitemapCache = metadata.SitemapCache{
+	TTL: 24 * time.Hour,
+}
+
 templ Page() {
   <main class="mx-auto max-w-2xl p-8">
     <h1 class="text-3xl font-bold">Welcome to Meta</h1>

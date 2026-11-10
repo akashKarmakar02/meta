@@ -18,6 +18,7 @@ import (
 	internalrouting "github.com/akashKarmakar02/meta/internal/routing"
 	"github.com/akashKarmakar02/meta/loader"
 	"github.com/akashKarmakar02/meta/observability"
+	"github.com/akashKarmakar02/meta/pagecache"
 	"github.com/akashKarmakar02/meta/routing"
 )
 
@@ -58,7 +59,7 @@ type Config struct {
 	// supplied store. It wraps only ModeSSR page routes after route params
 	// are bound; CSR pages, actions, APIs, and assets are never cached. A nil
 	// value disables response caching without code changes elsewhere.
-	PageCache *httpserver.PageCache
+	PageCache *pagecache.PageCache
 	// HealthCheck reserves GET /healthz for development readiness.
 	HealthCheck bool
 }

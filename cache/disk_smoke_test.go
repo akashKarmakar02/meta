@@ -209,3 +209,47 @@ func TestDiskConcurrentAccess(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestDiskNeverTTL(t *testing.T) {
+	store, dir := newDiskStore(t)
+	ctx := context.Background()
+
+	k, err := cache.NewKey("test", "never")
+	if err != nil {
+		t.Fatalf("NewKey: %v", err)
+	}
+	if err := store.Set(ctx, k, cache.Entry{Value: []byte("forever")}, cache.Policy{TTL: cache.Never}); err != nil {
+		t.Fatalf("Set with Never: %v", err)
+	}
+
+	// Reload from disk: a Never entry must still be present.
+	store2, err := cache.NewDiskStore(cache.DiskConfig{Dir: dir})
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	entry, ok, err := store2.Get(ctx, k)
+	if !ok || err != nil {
+		t.Fatalf("Never entry lost on reload: ok=%v err=%v", ok, err)
+	}
+	if string(entry.Value) != "forever" {
+		t.Fatalf("value = %q, want %q", entry.Value, "forever")
+	}
+}
+
+func TestMemoryNeverTTL(t *testing.T) {
+	m, err := cache.NewMemory(cache.MemoryConfig{MaxEntries: 10, MaxBytes: 1 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	k, err := cache.NewKey("test", "never")
+	if err != nil {
+		t.Fatalf("NewKey: %v", err)
+	}
+	ctx := context.Background()
+	if err := m.Set(ctx, k, cache.Entry{Value: []byte("v")}, cache.Policy{TTL: cache.Never}); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if _, ok, err := m.Get(ctx, k); !ok || err != nil {
+		t.Fatalf("Never entry expired immediately: ok=%v err=%v", ok, err)
+	}
+}

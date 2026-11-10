@@ -73,6 +73,10 @@ Atomic writes (temp file + rename), CRC-checked envelopes, lazy expiry, optional
 background sweeper. Same contract; a corrupt file surfaces as a miss, never a
 crash.
 
+Both stores accept `TTL: cache.Never` — an entry that never expires on its own
+and lives until invalidated or deleted. The production page cache that
+`meta init` scaffolds uses it.
+
 ```go
 store, err := cache.NewDiskStore(cache.DiskConfig{
     Dir:           "/var/lib/myapp/cache", // absolute in production
@@ -103,21 +107,43 @@ xml, err := sm.XML(ctx)
 See the [routing guide](routing.md) for how route metadata feeds `lastmod` and
 priority.
 
+The sitemap's own persistence TTL is declarable in any `page.templ` file:
+
+```templ
+package app
+
+// SitemapCache controls how long the generated sitemap XML is persisted.
+// cache.Never (the default) keeps it until sm.Invalidate is called.
+var SitemapCache = metadata.SitemapCache{
+    TTL: 24 * time.Hour,
+}
+```
+
+templ passes package-level declarations straight through to the generated Go
+file, so this lands in your editor's intellisense like any other declaration.
+Omit it and the sitemap persists indefinitely, regenerating only on explicit
+invalidation.
+
 ## SSR HTML response caching
 
 Full-page caching of templ-rendered HTML. Opt-in per app via
 `server.Config.PageCache`; CSR/Svelte pages are never cached by it (their HTML
 shell is static, hydration data flows through loader caching instead).
 
+New projects scaffolded by `meta init` enable it **by default in production**
+(disk-backed, indefinite TTL) and **never in development** — see the
+`Caching (production only)` block in `cmd/app/main.go`.
+
 ```go
 app, err := server.New(server.Config{
     // ...
-    PageCache: httpserver.NewPageCache(httpserver.PageCacheConfig{
-        Store: diskStore,
-        TTL:   30 * time.Second,
-    }),
+    PageCache: pagecache.NewPageCache(diskStore, cache.Never),
 })
 ```
+
+`cache.Never` disables expiry: entries live until explicitly invalidated.
+Use a real duration (`TTL: 30 * time.Second`) when data tolerates staleness
+bounded by time instead.
 
 Only successful, non-navigation-envelope responses are stored. On a hit, the
 middleware serves the cached bytes before any rendering runs. Keys include
@@ -130,10 +156,26 @@ Three layers coordinate through the shared invalidator:
 
 1. **Loaders**: `invalidator.Invalidate(ctx, route, "posts")` drops loader
    entries tagged with the `"posts"` scope.
-2. **Pages**: the same invalidation bumps a generation counter; the next
-   request re-renders and re-stores fresh HTML.
+2. **Pages**: `pc.InvalidatePath(ctx, "/blog/hello-world")` drops the cached
+   HTML for that exact path (query variants included). The next request
+   re-renders and re-stores fresh HTML. Call it from server actions after a
+   mutation:
+
+   ```go
+   func UpdatePost(ctx context.Context, slug string) error {
+       if err := db.UpdatePost(ctx, slug); err != nil {
+           return err
+       }
+       return pageCache.InvalidatePath(ctx, "/blog/"+slug)
+   }
+   ```
+
 3. **Sitemap**: `sm.Invalidate(ctx)` regenerates on next request. Wire it into
    the same action that mutates content.
+
+With `cache.Never` as your TTL, invalidation is the *only* way cached pages
+expire — wire it into every mutation path or pages will serve stale HTML until
+redeployed.
 
 The fence: if a cached binding and its invalidator disagree about store
 identity, the registry rejects the wiring at startup. You cannot build a

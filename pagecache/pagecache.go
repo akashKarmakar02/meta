@@ -1,17 +1,19 @@
-// Package httpserver wraps page handlers with an opt-in SSR response cache.
+// Package pagecache wraps page handlers with an opt-in SSR response cache.
 //
 // PageCache is a Fiber middleware: it looks up the fully rendered HTML for
 // GET page requests in a cache.Store before the handler runs, and on a miss
 // captures the handler's response for future hits. Caching is disabled
 // unless constructed with a store, so the default configuration keeps
 // today's behavior byte-for-byte.
-package httpserver
+package pagecache
 
 import (
 	"bytes"
 	"context"
 	"errors"
 	"sort"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/akashKarmakar02/meta/cache"
@@ -22,7 +24,7 @@ import (
 // ErrPageCacheDisabled is returned by PageCache.Invalidate when no store is
 // configured. It is distinct from the cache package's errors because it means
 // the caller wired the feature off, not that invalidation failed.
-var ErrPageCacheDisabled = errors.New("httpserver: page cache disabled")
+var ErrPageCacheDisabled = errors.New("pagecache: page cache disabled")
 
 // PageCacheConfig controls PageCache. The zero value is not usable; use
 // NewPageCache.
@@ -43,11 +45,32 @@ type PageCache struct {
 	store cache.Store
 	ttl   time.Duration
 	swr   time.Duration
+
+	// mu guards index: concrete request path -> keys cached for that path.
+	// The store's keys hash the pattern (not the path), so path-based
+	// invalidation needs this side index. It is process-local by design.
+	mu    sync.Mutex
+	index map[string]map[cache.Key]struct{}
 }
 
 // NewPageCache returns a cache that stores responses under store with ttl.
 func NewPageCache(store cache.Store, ttl time.Duration) *PageCache {
-	return &PageCache{store: store, ttl: ttl}
+	return &PageCache{store: store, ttl: ttl, index: make(map[string]map[cache.Key]struct{})}
+}
+
+// remember records key under the request path so InvalidatePath can find it.
+func (pc *PageCache) remember(path string, key cache.Key) {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	if pc.index == nil {
+		pc.index = make(map[string]map[cache.Key]struct{})
+	}
+	keys, ok := pc.index[path]
+	if !ok {
+		keys = make(map[cache.Key]struct{})
+		pc.index[path] = keys
+	}
+	keys[key] = struct{}{}
 }
 
 // Wrap returns a middleware wrapping next. Requests that are not cacheable
@@ -93,6 +116,8 @@ func (pc *PageCache) Wrap(next fiber.Handler) fiber.Handler {
 			// A failed write must never fail the request: report through
 			// headers only.
 			_ = err
+		} else {
+			pc.remember(string(c.Request().URI().Path()), key)
 		}
 		return nil
 	}
@@ -108,6 +133,47 @@ func (pc *PageCache) Invalidate(ctx context.Context, route routecontext.Route) e
 		return err
 	}
 	return pc.store.Delete(ctx, key)
+}
+
+// InvalidatePath evicts every cached response rendered at path. Use it after
+// a mutation that changes what one specific page shows:
+//
+//	err := pageCache.InvalidatePath(ctx, "/blog/hello-world")
+//
+// The path must be the concrete URL the browser requests ("/blog/hello-world",
+// not the pattern "/blog/:slug"). PageCache indexes paths as it caches them,
+// so invalidating a path this process has never served is a no-op. All query
+// variants of the path are evicted together. An empty path is rejected.
+//
+// Multi-instance deployments: the index lives in process memory, so this only
+// evicts entries cached by this instance. Run invalidation on every instance,
+// or share nothing and let TTL bound staleness.
+func (pc *PageCache) InvalidatePath(ctx context.Context, path string) error {
+	if pc == nil || pc.store == nil {
+		return ErrPageCacheDisabled
+	}
+	if path == "" {
+		return errors.New("pagecache: empty path")
+	}
+	path = normalizePath(path)
+	pc.mu.Lock()
+	keys := pc.index[path]
+	delete(pc.index, path)
+	pc.mu.Unlock()
+	var firstErr error
+	for key := range keys {
+		if err := pc.store.Delete(ctx, key); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func normalizePath(p string) string {
+	if len(p) > 1 && strings.HasSuffix(p, "/") {
+		return strings.TrimSuffix(p, "/")
+	}
+	return p
 }
 
 func (pc *PageCache) keyFor(route routecontext.Route) (cache.Key, error) {

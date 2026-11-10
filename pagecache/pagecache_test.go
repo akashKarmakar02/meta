@@ -1,4 +1,4 @@
-package httpserver
+package pagecache
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/akashKarmakar02/meta/cache"
+	"github.com/akashKarmakar02/meta/internal/httpserver"
 	"github.com/akashKarmakar02/meta/internal/routing"
 	"github.com/akashKarmakar02/meta/routecontext"
 	"github.com/gofiber/fiber/v3"
@@ -36,8 +37,8 @@ func newPageCacheFixture(t *testing.T) (*fiber.App, *PageCache, *int) {
 		c.Set("X-Render-Count", strconv.Itoa(count))
 		return c.SendString("render-" + strconv.Itoa(count))
 	})
-	app.Get("/x", WithRouteParams(routing.Route{ID: "p/x", Path: "/x"}, handler))
-	app.Get("/p", WithRouteParams(routing.Route{ID: "p/p", Path: "/p"}, handler))
+	app.Get("/x", httpserver.WithRouteParams(routing.Route{ID: "p/x", Path: "/x"}, handler))
+	app.Get("/p", httpserver.WithRouteParams(routing.Route{ID: "p/p", Path: "/p"}, handler))
 	return app, pc, &count
 }
 
@@ -104,5 +105,46 @@ func TestPageCacheInvalidateForcesRerender(t *testing.T) {
 	}
 	if *count != 2 {
 		t.Fatalf("expected 2 total renders (initial + post-invalidate), got %d", *count)
+	}
+}
+
+func TestPageCacheInvalidatePathForcesRerender(t *testing.T) {
+	f, pc, count := newPageCacheFixture(t)
+	res, _ := f.Test(httptest.NewRequest("GET", "/x", nil))
+	res.Body.Close()
+	// The path-based form is the programmatic API apps call after mutations.
+	if err := pc.InvalidatePath(context.Background(), "/x"); err != nil {
+		t.Fatalf("invalidate path: %v", err)
+	}
+	res2, _ := f.Test(httptest.NewRequest("GET", "/x", nil))
+	defer res2.Body.Close()
+	buf := make([]byte, 64)
+	n, _ := res2.Body.Read(buf)
+	if got := string(buf[:n]); got != "render-2" {
+		t.Fatalf("after invalidate-path a fresh render should run, got %q", got)
+	}
+	if *count != 2 {
+		t.Fatalf("expected 2 total renders, got %d", *count)
+	}
+}
+
+func TestPageCacheInvalidatePathRejectsBadPath(t *testing.T) {
+	_, pc, _ := newPageCacheFixture(t)
+	if err := pc.InvalidatePath(context.Background(), ""); err == nil {
+		t.Fatal("empty path must be rejected")
+	}
+	// A trailing slash names the same page; it must invalidate cleanly too.
+	f, pc2, count := newPageCacheFixture(t)
+	res, _ := f.Test(httptest.NewRequest("GET", "/x", nil))
+	res.Body.Close()
+	if err := pc2.InvalidatePath(context.Background(), "/x/"); err != nil {
+		t.Fatalf("trailing slash should be normalized: %v", err)
+	}
+	res2, _ := f.Test(httptest.NewRequest("GET", "/x", nil))
+	defer res2.Body.Close()
+	buf := make([]byte, 64)
+	n, _ := res2.Body.Read(buf)
+	if got := string(buf[:n]); got != "render-2" || *count != 2 {
+		t.Fatalf("normalized invalidate should force re-render, got %q count=%d", got, *count)
 	}
 }

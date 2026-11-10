@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/akashKarmakar02/meta/cache"
+	"github.com/akashKarmakar02/meta/metadata"
 )
 
 // URL is one sitemap entry. Loc is required; other fields are optional.
@@ -71,6 +72,11 @@ type Config struct {
 	// persistence.
 	Store cache.Store
 
+	// Cache mirrors a metadata.SitemapCache declaration so sites can tune the
+	// sitemap cache TTL. Zero TTL caches indefinitely (cache.Never), refreshed
+	// only by explicit invalidation.
+	Cache metadata.SitemapCache
+
 	// Now overrides the time source in tests. Optional.
 	Now func() time.Time
 }
@@ -111,12 +117,15 @@ func (s *Sitemap) cacheKey() (cache.Key, error) {
 	return cache.NewKey("meta", "sitemap")
 }
 
-// persistPolicy pins the sitemap entry for the maximum the cache contract
-// allows. Sitemaps are regenerated explicitly through Invalidate after content
-// changes, so the TTL is only a freshness bound for crash-recovery scenarios
-// where no explicit invalidation ran; every regeneration re-pins the window.
+// persistPolicy derives the sitemap cache policy. With no metadata.SitemapCache
+// declaration (TTL zero) entries are cached indefinitely and refreshed only by
+// explicit invalidation; a declared TTL bounds freshness instead.
 func (s *Sitemap) persistPolicy() cache.Policy {
-	return cache.Policy{TTL: cache.MaxTTL}
+	ttl := s.cfg.Cache.TTLOrDefault()
+	if ttl <= 0 {
+		return cache.Policy{TTL: cache.Never}
+	}
+	return cache.Policy{TTL: ttl}
 }
 
 // XML returns the sitemap XML, generating it on first use. Concurrent calls
