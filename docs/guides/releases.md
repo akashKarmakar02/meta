@@ -8,8 +8,8 @@ Meta is in beta: public APIs and the starter layout can change between releases.
 - The Go module, the `meta` CLI, and the Clerk integration are versioned independently. A project pins each one explicitly:
 
 ```sh
-go get github.com/akashKarmakar02/meta@v0.1.0-beta.5
-go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-beta.5
+go get github.com/akashKarmakar02/meta@v0.1.0-beta.6
+go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-beta.6
 ```
 
 The module path is `github.com/akashKarmakar02/meta`. There is no `go-meta` module; older material referencing that name predates the rename.
@@ -20,9 +20,9 @@ The module path is `github.com/akashKarmakar02/meta`. There is no `go-meta` modu
 
 ```sh
 # In your project directory:
-go get github.com/akashKarmakar02/meta@v0.1.0-beta.5
+go get github.com/akashKarmakar02/meta@v0.1.0-beta.6
 go mod tidy
-go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-beta.5
+go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-beta.6
 meta generate   # regenerate routes for the new runtime
 go build ./...  # or `meta build`
 npm install     # if the starter's package.json changed
@@ -38,7 +38,7 @@ After upgrading, run your full checks (`go test ./...`, `npm run check`, `npm ru
 
 ## Migration guide
 
-### To v0.1.0-beta.6 (prepared; not yet published)
+### To v0.1.0-beta.6
 
 Fixes beta.5 full-response cache poisoning between HTML and navigation JSON.
 One eager generation now runs the loader, page and visual layout once, then
@@ -47,42 +47,117 @@ Request order no longer affects correctness; cache hits skip loaders/rendering.
 Mixed concurrent misses share one generation. Navigation still returns
 `application/json` with `Cache-Control: no-store`.
 
-**Security migration:** shared SSR caching now requires explicit public route
-IDs. Existing `NewPageCache(store, ttl)` calls still compile but cache nothing
-until reviewed routes are added:
+#### 1. Upgrade the framework and CLI together
+
+Run these commands from your application directory:
+
+```sh
+go get github.com/akashKarmakar02/meta@v0.1.0-beta.6
+go mod tidy
+go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-beta.6
+meta --version
+```
+
+A released CLI should report `v0.1.0-beta.6`. If your `go.mod` still replaces
+`github.com/akashKarmakar02/meta` with a local framework checkout, remove that
+replacement when switching to the published version. The Clerk integration is
+versioned independently and does not need a new version for this release.
+
+#### 2. Review your production page-cache bootstrap
+
+**Caching behavior changes:** `NewPageCache(store, ttl)` remains source
+compatible but caches nothing until you declare reviewed public route IDs.
+`go get` does not rewrite your application's `cmd/app/main.go`.
+
+You can keep caching disabled while upgrading. To enable it for reviewed pages,
+replace beta.5's automatic cache-all configuration with an explicit public list:
 
 ```go
+// Construct the store only in production. Use your existing configured store.
+publicPages := []string{"about/page.templ", "blog/[slug]/page.templ"}
 cfg.PageCache = pagecache.NewPageCache(store, cache.Never,
-    pagecache.PublicRoutes("about/page.templ", "blog/[slug]/page.templ"),
-    pagecache.BuildID("your-entire-release-id"),
+    pagecache.PublicRoutes(publicPages...),
+    pagecache.BuildID("myapp-release-2026-11-10"),
 )
 ```
 
-New scaffolds leave the public list empty. Remove beta.5's automatic cache-all
-bootstrap or replace it with this policy. Never opt in personalized, protected,
-tenant-sensitive, CSRF-token or nonce-bearing pages. Cookie/auth requests and
-unsafe responses bypass caching; middleware and authorization still execute.
-Development (`DevOrigin`) disables it. Custom `Wrap(next)` integrations must
-provide a deliberate pair generator; without one they now pass through safely.
-`server.Config.PageCache` integrations are wired automatically.
+Use generated source filenames as IDs, not URL patterns. Opt in only anonymous,
+deterministic pages whose page, selected layout and loader are independent of
+user/session/tenant identity, private headers, CSRF tokens and CSP nonces.
+Never opt in personalized or protected pages. Keep authorization and tenant
+checks before dispatch; middleware handling private request context must reject
+the request or mark it `private, no-store` before `c.Next()`.
 
-`ssr-page:v3` ignores old beta.5 entries; no manual `.pagecache/` deletion is
-needed for correctness. A release ID prevents reuse across changed templates,
-loaders and assets. The default fingerprints the executable; independently
-deployed assets require an explicit ID. The scaffold reads `GO_META_BUILD_ID`.
+New scaffolds start with an empty `publicPages` list and construct no page cache
+until it is populated. They read `GO_META_BUILD_ID` for the application's release
+identity. Change it whenever templates, loaders, layout selection or assets
+change. It should identify your whole app release, rather than only the Meta
+version. When omitted, Meta fingerprints the executable; assets deployed
+independently require an explicit ID.
 
-`InvalidatePath` now replaces a durable path-generation token: HTML, JSON and
-all query variants invalidate together after restart. In-flight older renders
-cannot republish into the new generation. `Invalidate(ctx, route)` now also
-invalidates all concrete-path query variants. Use one coordinator/active process
-per store/disk directory; multi-process invalidation is not provided. Old
-unreachable `cache.Never` entries require offline reclamation to bound disk use.
-Also invalidate separately cached loader data before regenerating a page.
+Cookie/authorization requests, Set-Cookie, private/no-store, nonce and Vary
+responses bypass shared caching. Existing policy and CSRF middleware still run
+on every request. Global CSRF no-store behavior can make all pages ineligible;
+keep that protection. Development (`DevOrigin`) disables response caching.
+`cache.Never` requires mutation invalidation; a finite TTL remains available.
 
-No navigation protocol, frontend runtime copy, public `cache.Store` contract,
-SSR/CSR boundary, or production runtime change is required. See the
-[caching guide](caching.md) and [implementation report](../dual-representation-implementation.md)
-for validation, benchmarks and operational limits.
+Applications using `server.Config.PageCache` get the eager pair generator
+automatically. A custom `Wrap(next)` integration now passes through unless it
+supplies a deliberate pair generator; it cannot populate a pair by capturing
+one HTTP response. Prefer the public server integration. See the
+[caching guide](caching.md) for the custom resolver contract.
+
+#### 3. Preserve disk data and wire invalidation
+
+No manual `.pagecache/` deletion is needed for correctness. The new
+`ssr-page:v3` namespace ignores beta.5's ambiguous entries and regenerates both
+representations on the first eligible HTML or navigation request.
+
+`InvalidatePath(ctx, "/blog/example")` invalidates HTML, JSON and all query
+variants together, including after a disk-backed restart. In-flight older
+renders cannot republish into the current generation. `Invalidate(ctx, route)`
+now also invalidates every query variant for the concrete path. Invalidate after
+committing application mutations and check returned errors. If your loader is
+independently cached with `BindCached`, invalidate its data before the page;
+sitemap invalidation remains separate.
+
+Use one PageCache coordinator per store and one active process per disk cache
+directory. Sequential restarts are supported; multi-process invalidation is not
+provided. Persist the cache directory as a container volume if restart reuse
+is desired. Old unreachable entries with `cache.Never` need occasional offline
+reclamation to bound disk growth; do not delete an active cache's token metadata
+as an invalidation mechanism.
+
+#### 4. Regenerate, verify, and deploy
+
+```sh
+meta generate
+go test ./...
+npm run check       # when provided by your app
+meta build          # Go binary plus Vite assets
+```
+
+No frontend runtime copy, Node dependency change, navigation protocol update,
+or `cache.Store` adapter migration is needed for beta.5 → beta.6. Svelte remains
+CSR-only and Node remains build-time-only. Earlier versions may still require
+the frontend updates in their migration sections below.
+
+Before deploying, check your app's anonymous and signed-in flows:
+
+- Request a public templ route directly, then navigate to it softly; repeat in
+  the opposite order. Both must preserve the correct content type and metadata.
+- Exercise a Svelte-to-templ link, templ-to-templ link and browser back/forward.
+- Confirm repeated eligible visits skip loader/render work; cookie-bearing
+  sessions should bypass the shared cache.
+- Change content and invalidate; verify both representations update, including
+  after restarting with the same disk directory.
+- Confirm required authorization still rejects denied requests and assets load.
+
+The framework's release validation passed `make verify` and focused cache/server/
+renderer race tests: 248 Vitest passes (one existing skip), 132 Chromium passes
+(12 existing native-image skips), and seven CORS passes. See the
+[implementation report](../dual-representation-implementation.md) for the full
+file list, measurements, and deployment limits.
 
 ### To v0.1.0-beta.5
 

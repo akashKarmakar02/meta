@@ -52,7 +52,7 @@ COPY . .
 # meta build runs templ generate (via go.mod's tool directive), routegen,
 # vite build, and go build. Only the CLI install is needed. Pin it for
 # reproducible images.
-RUN go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-beta.5 \
+RUN go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-beta.6 \
     && meta build
 
 ########## Runtime stage: Go-only, no Node ##########
@@ -90,7 +90,7 @@ CMD ["./bin/app"]
 
 Notes on the choices:
 
-- **`.pagecache/` needs a volume:** since v0.1.0-beta.5 the starter enables a disk-backed page cache in production (never in development). It writes to `.pagecache/` next to the binary — mount a volume (`docker run -v pagecache:/app/.pagecache ...`) or the cache is lost with the container's writable layer and every restart rebuilds it cold.
+- **Persist an opted-in page cache:** beta.6 starters leave shared page caching disabled until you declare public route IDs. If you opt in to disk caching, it writes to `.pagecache/` next to the binary. Mount a volume (`docker run -v pagecache:/app/.pagecache ...`) to preserve complete HTML/navigation pairs and invalidation tokens across container restarts. Ensure the directory is writable by the runtime user (UID 1001 in this example). Use one active process per cache directory and change `GO_META_BUILD_ID` for each application/assets release. See the [caching guide](caching.md).
 - **`debian:bookworm-slim` over `scratch`/`alpine`:** the binary is dynamically linked against glibc (and CGO if you use SQLite or similar), so scratch needs special handling. Alpine's musl can break CGO binaries. If your binary is pure Go (`CGO_ENABLED=0`, no SQLite), swap the runtime stage for `FROM scratch`, add `USER 1001:1001` and copy `/etc/ssl/certs/ca-certificates.crt` if you make outbound HTTPS calls.
 - **`meta build` inside the container:** it requires network access to fetch the `meta` CLI and templ unless you vendor them. Pin versions for reproducible images.
 - **Health check:** the scaffolded server serves `/healthz` when `HealthCheck: true` in `server.Config`. Keep `HealthCheck: true` or replace the probe.
@@ -114,7 +114,7 @@ RUN apt-get update \
 # meta build passes its environment through to go build, so the tag rides
 # along on GOFLAGS:
 ENV GOFLAGS="-tags=imageproc_native"
-RUN go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-beta.5 \
+RUN go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-beta.6 \
     && meta build
 
 ########## Runtime stage additions ##########
