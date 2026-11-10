@@ -8,8 +8,8 @@ Meta is in beta: public APIs and the starter layout can change between releases.
 - The Go module, the `meta` CLI, and the Clerk integration are versioned independently. A project pins each one explicitly:
 
 ```sh
-go get github.com/akashKarmakar02/meta@v0.1.0-beta.4
-go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-beta.4
+go get github.com/akashKarmakar02/meta@v0.1.0-beta.5
+go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-beta.5
 ```
 
 The module path is `github.com/akashKarmakar02/meta`. There is no `go-meta` module; older material referencing that name predates the rename.
@@ -20,9 +20,9 @@ The module path is `github.com/akashKarmakar02/meta`. There is no `go-meta` modu
 
 ```sh
 # In your project directory:
-go get github.com/akashKarmakar02/meta@v0.1.0-beta.4
+go get github.com/akashKarmakar02/meta@v0.1.0-beta.5
 go mod tidy
-go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-beta.4
+go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-beta.5
 meta generate   # regenerate routes for the new runtime
 go build ./...  # or `meta build`
 npm install     # if the starter's package.json changed
@@ -37,6 +37,46 @@ Two things a plain `go get` does **not** update:
 After upgrading, run your full checks (`go test ./...`, `npm run check`, `npm run build`) and click through your app in development before deploying.
 
 ## Migration guide
+
+### To v0.1.0-beta.5
+
+The caching release. New packages: `cache.NewDiskStore` (persistent disk store), `sitemap` (disk-backed sitemap XML), `pagecache` (SSR page response caching), and `metadata.SitemapCache`. New guide: [Caching](caching.md).
+
+**For new projects** (`meta init` from this release): production builds enable disk-backed SSR page caching by default — indefinite TTL, stored under `.pagecache/` (gitignored). In development (`GO_META_DEV=1`) no page cache is constructed at all.
+
+**Existing projects** can adopt each piece:
+
+```sh
+go get github.com/akashKarmakar02/meta@v0.1.0-beta.5
+go mod tidy
+```
+
+1. **Default prod page cache** — replace the app bootstrap's config (see `cmd/app/main.go` in a fresh scaffold at this tag):
+
+```go
+// Constructed only when NOT in development; see comments in main.go.
+store, err := cache.NewDiskStore(cache.DiskConfig{Dir: ".pagecache"})
+if err != nil { log.Fatal(err) }
+cfg.PageCache = pagecache.NewPageCache(store, cache.Never)
+```
+
+2. **Indefinite TTL** — `cache.Policy{TTL: cache.Never}` on any `Set` stores an entry that never expires (both stores; safe across disk restarts). Expiry-bounded policies are still capped at 24h.
+
+3. **Path invalidation after mutations**:
+
+```go
+pc.InvalidatePath(ctx, "/blog/hello-world") // from action handlers
+```
+
+4. **Sitemap TTL declared per page** (in any `page.templ`):
+
+```go
+var SitemapCache = metadata.SitemapCache{
+    TTL: 24 * time.Hour, // omit for indefinite
+}
+```
+
+**Breaking change (beta-only surface):** `server.Config.PageCache` moved from the internal `httpserver` package to the public [`pagecache`](https://pkg.go.dev/github.com/akashKarmakar02/meta/pagecache) package — internal packages were unimportable from user code, so the old field was unusable in practice. `NewPageCache(store, ttl)` takes the TTL directly.
 
 ### To v0.1.0-beta.4
 
