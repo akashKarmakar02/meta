@@ -8,8 +8,8 @@ Meta is in beta: public APIs and the starter layout can change between releases.
 - The Go module, the `meta` CLI, and the Clerk integration are versioned independently. A project pins each one explicitly:
 
 ```sh
-go get github.com/akashKarmakar02/meta@v0.1.0-beta.6
-go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-beta.6
+go get github.com/akashKarmakar02/meta@v0.1.0-beta.7
+go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-beta.7
 ```
 
 The module path is `github.com/akashKarmakar02/meta`. There is no `go-meta` module; older material referencing that name predates the rename.
@@ -20,9 +20,9 @@ The module path is `github.com/akashKarmakar02/meta`. There is no `go-meta` modu
 
 ```sh
 # In your project directory:
-go get github.com/akashKarmakar02/meta@v0.1.0-beta.6
+go get github.com/akashKarmakar02/meta@v0.1.0-beta.7
 go mod tidy
-go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-beta.6
+go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-beta.7
 meta generate   # regenerate routes for the new runtime
 go build ./...  # or `meta build`
 npm install     # if the starter's package.json changed
@@ -37,6 +37,151 @@ Two things a plain `go get` does **not** update:
 After upgrading, run your full checks (`go test ./...`, `npm run check`, `npm run build`) and click through your app in development before deploying.
 
 ## Migration guide
+
+### To v0.1.0-beta.7
+
+This release adds navigation loading state and a default indeterminate progress
+bar after 150ms. Soft navigation keeps the outgoing interface while fetching
+the response and downloading destination JavaScript/CSS and client layouts.
+The state API covers eligible links, `navigateTo`, and Back/Forward; fragments
+keep browser-native behavior without starting loading.
+
+**Existing applications must merge the copied browser runtime to adopt this
+feature.** Updating the CLI or Go module alone does not change their runtime.
+There are no new dependencies, server configuration fields, navigation protocol
+fields, or cache schema changes. The Clerk integration is versioned separately
+and does not require an upgrade for navigation loading. If upgrading from
+before beta.6, apply its page-cache migration below as well.
+
+#### 1. Upgrade the framework and CLI
+
+Run from your application directory:
+
+```sh
+go get github.com/akashKarmakar02/meta@v0.1.0-beta.7
+go mod tidy
+go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-beta.7
+meta --version
+```
+
+The released CLI should report `v0.1.0-beta.7`. Remove a local framework
+`replace` directive when switching to the published module; otherwise your
+application still uses the local checkout.
+
+#### 2. Merge the browser runtime as one update
+
+Compare your runtime against the files in the
+[beta.7 source tree](https://github.com/akashKarmakar02/meta/tree/v0.1.0-beta.7/frontend).
+Merge these seven files together, preserving application edits:
+
+| File under `frontend/` | Action and purpose |
+| --- | --- |
+| `navigation-state.ts` | Add: immutable snapshots, subscriptions, attempt IDs, terminal outcomes |
+| `navigation-guards.ts` | Add: optional guards that approve or cancel before pending/fetch |
+| `navigation-progress.ts` | Add: delayed, accessible progress UI and cleanup |
+| `navigation-pipeline.ts` | Merge: lifecycle ownership, cancellation, prepared imports, mounting/commit completion |
+| `navigation-history.ts` | Merge: managed history-entry identity and rejected-traversal restoration |
+| `csr-mount.ts` | Merge: reuse the page component resolved before teardown |
+| `layout-mount.ts` | Merge: reuse the layout component resolved before teardown |
+
+After `go get`, locate the downloaded module and compare a changed file:
+
+```sh
+meta_runtime_dir="$(go list -m -f '{{.Dir}}' github.com/akashKarmakar02/meta)"
+git diff --no-index -- frontend/navigation-pipeline.ts "$meta_runtime_dir/frontend/navigation-pipeline.ts"
+```
+
+`git diff --no-index` exits with status 1 when it finds differences. Repeat
+the comparison for the other existing files, then merge the changes in your
+editor. Add the three new modules from the same directory. If all seven files
+are framework-owned and have no application customizations, they can instead
+be copied together:
+
+```sh
+for meta_runtime_file in navigation-state.ts navigation-guards.ts navigation-progress.ts navigation-pipeline.ts navigation-history.ts csr-mount.ts layout-mount.ts; do
+  cp "$meta_runtime_dir/frontend/$meta_runtime_file" "frontend/$meta_runtime_file"
+done
+```
+
+`meta generate` does not perform this runtime migration. Do not copy the
+framework's `route-registry.generated.ts`, `generated/` directory, example
+application pages, or tests into your application. Regenerate route artifacts
+from your own routes after merging.
+
+#### 3. Choose the loading UI
+
+The existing `startSoftNavigation()` call in `frontend/entry.ts` enables the
+progress bar by default. No entry or stylesheet edit is needed to use it. It
+appears only after 150ms of pending, uses no fabricated percentages, respects
+reduced motion, and stays outside page/layout outlets. It disappears immediately
+on completion, cancellation, or fallback; navigation never waits for animation.
+
+To disable or replace it, configure the **existing** startup call:
+
+```ts
+startSoftNavigation({ progress: false });
+```
+
+Do not add a second startup call: starting an already active runtime is a no-op.
+Applications with an existing loading indicator should disable the built-in bar
+before connecting their UI to the state subscription. The
+[navigation guide](navigation.md#svelte-example) has complete Svelte and plain
+TypeScript examples, including subscription cleanup.
+
+`getNavigationState()` reads the current snapshot; `subscribeNavigation(fn)`
+immediately delivers it and then each change. Snapshots contain `status`
+(`idle`/`pending`), `attempt` (`id`, absolute requested `url`, and `source`), and
+`outcome` (`completed`, `canceled`, `failed`, or `fallback`). Idle retains the
+last outcome; it is not an event log. Newer attempts supersede older work, and
+an older attempt cannot clear a newer attempt's pending state.
+
+Pending starts after registered `beforeNavigate` guards approve, before the
+response fetch. It covers required imports and destination mounting through
+the Svelte DOM flush, history, metadata, scroll, and focus commit. Guard
+rejection reports cancellation without entering pending. Register guards only
+when needed and unregister them with their owning UI. They are not server
+authorization checks. `navigateTo(url, { signal })` accepts an `AbortSignal` for
+explicit cancellation; its existing `Promise<void>` interface is preserved.
+Observe the state API for navigation outcomes.
+
+#### 4. Regenerate, verify, and deploy matching assets
+
+```sh
+meta generate
+go test ./...
+npm run check               # when provided by your application
+npm exec tsc -- --noEmit
+meta build                  # builds the Go binary and Vite client assets
+```
+
+Deploy the resulting binary and `dist/client` assets together. If you configure
+`GO_META_BUILD_ID`, update it for your application release as usual. No npm
+dependency change or server-side JavaScript process is required for this
+feature. New `meta init` projects receive the updated runtime automatically.
+
+In a real browser, verify a delayed link navigation shows progress while the
+outgoing page stays usable, and a fast transition avoids flashing. Exercise
+Back/Forward, overlapping clicks, a fragment-only link, and your optional guard
+rejection/cancellation flows. A failed response or component/CSS import should
+clear pending and use Meta's existing full-document fallback. Confirm layout
+state, focus, scroll, and application-specific data loading still behave as
+expected.
+
+The release gate passed `make verify`: Go vet/tests, Svelte and TypeScript
+checks, production builds, formatting/diff hygiene, 273 frontend unit-test
+passes (one optional live-server skip), 139 Chromium passes (12 native-image
+skips), and seven CORS passes. The documented Svelte example also compiles.
+
+#### Limits
+
+Navigation completion does not wait for application-owned asynchronous
+`onMount` fetches, images, fonts, or background work. Keep separate loading UI
+for those operations. Cancellation prevents future commits; it does not undo
+DOM teardown already started. A mount failure after teardown triggers document
+fallback. Authentication redirects and server policies are unchanged, and the
+bar does not provide a loading shell for initial document loads. This release
+adds no route-level `loading.svelte`/`loading.templ`, speculative prefetching, or
+navigation-response caching.
 
 ### To v0.1.0-beta.6
 

@@ -1,4 +1,8 @@
 import { outletContext } from './layout-context';
+import { tick } from 'svelte';
+import { publishNavigation, type NavigationAttempt, type NavigationOutcome } from './navigation-state';
+import { navigationGuards } from './navigation-guards';
+import { installNavigationProgress } from './navigation-progress';
 // navigation-pipeline.ts — F12: complete soft-navigation pipeline.
 //
 // Assembles the Phase F primitives into the blueprint's §5.2 algorithm:
@@ -88,6 +92,8 @@ export { startSoftNavigation, stopSoftNavigation };
 
 let active = false;
 let installedPopstate = false;
+let stopProgress: (() => void) | null = null;
+let cancelActive: ((reason: 'aborted' | 'superseded' | 'stopped') => void) | null = null;
 
 /** Current CSR page mount handle, owned exclusively by the pipeline. */
 let currentPage: CsrPageHandle | null = null;
@@ -138,13 +144,6 @@ export function adoptMountedPage(page: MountHandle & { readonly pageRoot: HTMLEl
 /** Serializes destructive DOM commits (unmount / outlet replace / mount). */
 let commitTail: Promise<unknown> = Promise.resolve();
 
-/**
- * Scroll position the pending popstate restoration must apply after its
- * page renders (navigation-history remembers it per destination, F10).
- * Set when popstate fires, consumed (and cleared) inside applyEnvelope.
- */
-let popstateScroll: { x: number; y: number } | null = null;
-
 /** Apply a remembered popstate scroll position, if any (§5.2 step 11). */
 function restoreScroll(scroll: { x: number; y: number } | null): void {
   if (scroll) window.scrollTo(scroll.x, scroll.y);
@@ -164,6 +163,8 @@ function hardNavigate(url: string): void {
   window.location.assign(url);
 }
 
+class FullDocumentFallback extends Error {}
+
 /**
  * Resolve the generated-registry page component for a CSR envelope.
  * Returns null for unknown entries — callers treat that as a failure and
@@ -172,6 +173,28 @@ function hardNavigate(url: string): void {
 async function importComponentFor(env: Envelope): Promise<unknown | null> {
   const { loadPage } = await import('./route-import-map');
   return loadPage(env.clientEntry ?? '');
+}
+
+type PreparedDestination = {
+  component: unknown;
+  layouts: Map<string, Parameters<typeof mountComponent>[0]>;
+};
+
+/** Downloads stay outside the destructive commit queue; stale imports cannot block a newer page. */
+async function prepareDestination(token: NavigationToken, env: Envelope): Promise<PreparedDestination> {
+  const layouts: PreparedDestination['layouts'] = new Map();
+  if (env.mode !== 'csr') return { component: null, layouts };
+  const component = await importComponentFor(env);
+  if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
+  if (!component) throw new LayoutMountError(`unknown clientEntry ${JSON.stringify(env.clientEntry)}`);
+  await Promise.all(clientLayoutSequence(env.layouts).map(async (id) => {
+    const layout = await loadLayout(id);
+    if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
+    if (!layout) throw new LayoutMountError(`unknown client layout ${JSON.stringify(id)}`);
+    layouts.set(id, layout);
+  }));
+  if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
+  return { component, layouts };
 }
 
 /**
@@ -217,6 +240,8 @@ async function applyEnvelope(
   token: NavigationToken,
   env: Envelope,
   push: boolean,
+  scroll: { x: number; y: number } | null,
+  prepared: PreparedDestination,
 ): Promise<void> {
   if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
 
@@ -262,8 +287,7 @@ async function applyEnvelope(
         exitingLayout = currentLayout;
       } else {
         logNavDecision(env.url, 'hard-navigate-discard', mountedClients, desiredClients);
-        hardNavigate(env.url);
-        return;
+        throw new FullDocumentFallback(env.url);
       }
     }
     const exiting = exitingLayout;
@@ -287,10 +311,8 @@ async function applyEnvelope(
     // taken after would record 0 and back could never restore (step 11).
     const leavingScroll = { x: window.scrollX, y: window.scrollY };
 
-    // Resolve the CSR component (dynamic import) BEFORE unmounting anything:
-    // a failed import must leave the current page intact for fallback.
-    const componentPromise =
-      env.mode === 'csr' ? importComponentFor(env) : null;
+    // Downloads were resolved before this queue; mounting must reuse them.
+    const component = prepared.component;
 
     // Tear down any outgoing CSR page first; mountCsrPage owns the unmount
     // (it awaits the outgoing handle's outro before mounting the new page).
@@ -299,17 +321,6 @@ async function applyEnvelope(
     const outgoing = currentPage;
 
     if (env.mode === 'csr') {
-      // Import resolved (or failed — caught by the caller's fallback).
-      const component = await componentPromise;
-      if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
-      if (!component) {
-        throw new LayoutMountError(`unknown clientEntry ${JSON.stringify(env.clientEntry)}`);
-      }
-      for (const layoutId of enteringLayouts) {
-        const layoutComponent = await loadLayout(layoutId);
-        if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
-        if (!layoutComponent) throw new LayoutMountError(`unknown client layout ${JSON.stringify(layoutId)}`);
-      }
       currentPage = null;
 
       if (exiting !== null) {
@@ -386,7 +397,7 @@ async function applyEnvelope(
         }
         let layoutHandle: LayoutInstanceHandle | null = null;
         for (const layoutId of enteringLayouts) {
-          layoutHandle = await mountPersistentLayout(layoutId, region);
+          layoutHandle = await mountPersistentLayout(layoutId, region, prepared.layouts.get(layoutId));
           if (!token.isCurrent()) {
             // Superseded mid-entry: tear down what we just mounted so the
             // newer navigation starts from a clean document.
@@ -424,7 +435,7 @@ async function applyEnvelope(
           if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
           document.querySelector(PageOutletSelector)?.replaceChildren();
         }
-        currentPage = await (seams.mountCsr ?? mountCsrPage)(env, undefined);
+        currentPage = await (seams.mountCsr ?? mountCsrPage)(env, undefined, component as Parameters<typeof mountComponent>[0]);
       }
     } else {
       currentPage = null;
@@ -466,6 +477,9 @@ async function applyEnvelope(
         currentPage = null;
       }
     }
+    // Svelte flushes destination DOM/effects before completion is observable.
+    // Application-owned async onMount work is not part of this flush.
+    await tick();
     // Currency after the last await: a superseding navigation that began during
     // our mount/unmount makes us stale before history commits.
     if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
@@ -474,8 +488,7 @@ async function applyEnvelope(
       (seams.pushState ?? pushNavigationState)(env, { leavingScroll }); // URL + title + scroll reset — post-apply only
     } else {
       document.title = env.title; // popstate owns the history entry already
-      restoreScroll(popstateScroll); // step 11: "restore stored scroll positions"
-      popstateScroll = null;
+      restoreScroll(scroll); // belongs to this attempt, never a newer traversal
     }
 
     // Update only framework-owned head tags after the navigation is current.
@@ -497,30 +510,102 @@ async function applyEnvelope(
  * One soft navigation attempt.  Shared by link clicks (push: true) and
  * popstate restoration (push: false).
  */
-export async function navigateTo(url: string, opts?: { push?: boolean }): Promise<void> {
+export interface NavigateOptions {
+  push?: boolean;
+  signal?: AbortSignal;
+  source?: NavigationAttempt['source'];
+}
+
+export function navigateTo(url: string, opts?: NavigateOptions): Promise<void> {
+  return runNavigation(url, opts);
+}
+
+async function runNavigation(url: string, opts?: NavigateOptions & {
+  scroll?: { x: number; y: number } | null;
+  cancelHistory?: () => void;
+}): Promise<void> {
+  const destination = new URL(url, document.baseURI);
+  // Programmatic fragment changes use the browser's native anchor handling.
+  if (opts?.push !== false && destination.origin === location.origin &&
+    destination.pathname === location.pathname && destination.search === location.search &&
+    destination.hash !== location.hash) {
+    location.hash = destination.hash;
+    return;
+  }
   const push = opts?.push !== false;
-  const token = beginNavigation();
+  const previousCancel = cancelActive;
+  const owner = beginNavigation();
+  const token: NavigationToken = { ...owner, isCurrent: () => owner.isCurrent() && !owner.signal.aborted };
+  const attempt: NavigationAttempt = Object.freeze({
+    id: token.id, url: destination.href, source: opts?.source ?? (push ? 'programmatic' : 'history'),
+  });
+  let settled = false;
+  const finish = (outcome: NavigationOutcome) => {
+    if (settled) return;
+    settled = true;
+    opts?.signal?.removeEventListener('abort', onAbort);
+    if (cancelActive === cancel) cancelActive = null;
+    publishNavigation(attempt, outcome);
+  };
+  const cancel = (reason: 'aborted' | 'superseded' | 'stopped') => {
+    if (settled) return;
+    token.abort();
+    if (owner.isCurrent() && reason !== 'superseded') opts?.cancelHistory?.();
+    finish({ type: 'canceled', reason });
+  };
+  cancelActive = cancel;
+  const onAbort = () => cancel('aborted');
+  opts?.signal?.addEventListener('abort', onAbort, { once: true });
+  previousCancel?.('superseded');
   try {
+    if (opts?.signal?.aborted) { cancel('aborted'); return; }
+    for (const guard of navigationGuards()) {
+      const approved = await guard({ ...attempt, signal: token.signal });
+      if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
+      if (approved === false) {
+        opts?.cancelHistory?.();
+        finish({ type: 'canceled', reason: 'guard' });
+        return;
+      }
+    }
+    if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
+    publishNavigation(attempt, null);
+    // Subscribers may synchronously cancel or begin a newer navigation.
+    if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
     const env = await doFetch(url, token.signal);
     if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
-    await applyEnvelope(token, env, push);
+    const prepared = await prepareDestination(token, env);
+    if (!token.isCurrent()) throw new StaleNavigationError(token.id, currentNavigationId());
+    await applyEnvelope(token, env, push, opts?.scroll ?? null, prepared);
+    if (token.isCurrent()) finish({ type: 'completed' });
   } catch (err) {
     if (err instanceof StaleNavigationError) { // superseded: no-op
+      finish({ type: 'canceled', reason: token.signal.aborted && owner.isCurrent() ? 'aborted' : 'superseded' });
       logNavDecision(String(url), 'stale-navigation', [], []);
       return;
     }
-    if (isAbortError(err)) return; // aborted by newer navigation: no-op
+    if (isAbortError(err)) { cancel('aborted'); return; }
     if (!token.isCurrent()) return; // late failure of a stale request: no fallback
     // Current navigation failed (network error, invalid protocol response,
     // missing component, failed transition): full-document fallback to the
     // intended destination so the user is never stranded on stale content.
-    hardNavigate(url);
+    if (err instanceof FullDocumentFallback) {
+      finish({ type: 'fallback' });
+      if (token.isCurrent()) hardNavigate(err.message);
+    } else {
+      finish({ type: 'failed', error: err });
+      if (token.isCurrent()) hardNavigate(url);
+    }
+  } finally {
+    opts?.signal?.removeEventListener('abort', onAbort);
+    if (cancelActive === cancel) cancelActive = null;
   }
 }
 
 /** Abort errors surface as TypeError/DOMException with name 'AbortError'. */
 function isAbortError(err: unknown): boolean {
   return (
+    (err instanceof NavigationError && err.code === 'aborted') ||
     err instanceof Error &&
     (err.name === 'AbortError' ||
       (err instanceof TypeError && /abort/i.test(String(err))))
@@ -530,15 +615,18 @@ function isAbortError(err: unknown): boolean {
 export interface SoftNavigationOptions {
   /** Reserved for future use. */
   root?: Document;
+  /** Default true. Disable to replace with application UI using subscribeNavigation. */
+  progress?: boolean;
 }
 
 /** Activate the soft-navigation pipeline. Idempotent. */
-function startSoftNavigation(_opts?: SoftNavigationOptions): void {
+function startSoftNavigation(opts?: SoftNavigationOptions): void {
   if (active) return;
   active = true;
+  if (opts?.progress !== false) stopProgress = installNavigationProgress();
 
   installLinkInterceptor(async (nav) => {
-    await navigateTo(nav.destination || nav.url.toString(), { push: true });
+    await navigateTo(nav.destination || nav.url.toString(), { push: true, source: 'link' });
   });
 
   if (!installedPopstate) {
@@ -555,14 +643,16 @@ function startSoftNavigation(_opts?: SoftNavigationOptions): void {
       // is applied by applyEnvelope once the page content it belongs to is
       // actually rendered — never before, or the browser would clamp it
       // against the outgoing page's geometry.
-      popstateScroll = ctx.scroll;
-      void navigateTo(ctx.url.toString(), { push: false });
+      void runNavigation(ctx.url.toString(), { push: false, scroll: ctx.scroll, cancelHistory: ctx.cancel });
     });
   }
 }
 
 /** Deactivate the pipeline (tests). */
 function stopSoftNavigation(): void {
+  cancelActive?.('stopped');
+  stopProgress?.();
+  stopProgress = null;
   if (!active) return;
   active = false;
   uninstallLinkInterceptor();

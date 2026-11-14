@@ -52,7 +52,7 @@ COPY . .
 # meta build runs templ generate (via go.mod's tool directive), routegen,
 # vite build, and go build. Only the CLI install is needed. Pin it for
 # reproducible images.
-RUN go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-beta.6 \
+RUN go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-beta.7 \
     && meta build
 
 ########## Runtime stage: Go-only, no Node ##########
@@ -114,7 +114,7 @@ RUN apt-get update \
 # meta build passes its environment through to go build, so the tag rides
 # along on GOFLAGS:
 ENV GOFLAGS="-tags=imageproc_native"
-RUN go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-beta.6 \
+RUN go install github.com/akashKarmakar02/meta/cmd/meta@v0.1.0-beta.7 \
     && meta build
 
 ########## Runtime stage additions ##########

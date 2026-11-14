@@ -114,11 +114,12 @@ export function clientLayouts(declared: readonly string[]): string[] {
  */
 export async function mountPersistentLayout(
   layoutId: string,
-  region: ParentNode
+  region: ParentNode,
+  preparedComponent?: Parameters<typeof mountComponent>[0]
 ): Promise<LayoutInstanceHandle> {
   // Resolve the component BEFORE touching the DOM (same discipline as
   // csr-mount): unknown IDs fail without side effects.
-  const component = await loadLayout(layoutId);
+  const component = preparedComponent ?? await loadLayout(layoutId);
   if (!component) {
     throw new LayoutMountError(
       `unknown or non-client layout ${JSON.stringify(layoutId)} — not in the generated layout registry`

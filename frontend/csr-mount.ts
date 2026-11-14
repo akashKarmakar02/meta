@@ -59,7 +59,8 @@ export interface CsrPageHandle extends MountHandle {
  */
 export async function mountCsrPage(
   env: NavigationResponse,
-  previous?: MountHandle
+  previous?: MountHandle,
+  preparedComponent?: Parameters<typeof mountComponent>[0]
 ): Promise<CsrPageHandle> {
   if (env.mode !== 'csr' || typeof env.clientEntry !== 'string') {
     throw new CsrMountError(
@@ -74,7 +75,7 @@ export async function mountCsrPage(
       `unknown clientEntry ${JSON.stringify(env.clientEntry)} — not in the generated route registry`
     );
   }
-  const component = await loadPage(env.clientEntry);
+  const component = preparedComponent ?? await loadPage(env.clientEntry);
   if (!component) {
     throw new CsrMountError(
       `failed to load page module for clientEntry ${JSON.stringify(env.clientEntry)}`

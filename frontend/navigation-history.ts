@@ -16,6 +16,9 @@ import type { NavigationResponse } from './types';
 
 /** Marker stored in every history entry this framework creates. */
 const NAV_STATE_KEY = '__goMetaNavigation';
+const INDEX_KEY = '__goMetaIndex';
+let currentIndex = 0;
+let restoringTraversal = false;
 
 /** Cap on remembered scroll positions (bounded memory, oldest evicted). */
 const MAX_SCROLL_MEMORY = 50;
@@ -122,7 +125,8 @@ export function pushNavigationState(
     y: window.scrollY,
   });
 
-  const state = { [NAV_STATE_KEY]: true, url: destination };
+  if (destination !== currentDestination()) currentIndex++;
+  const state = { [NAV_STATE_KEY]: true, [INDEX_KEY]: currentIndex, url: destination };
   if (destination === currentDestination()) {
     // Same destination: replace instead of pushing a duplicate entry.
     window.history.replaceState(state, '', destination);
@@ -164,6 +168,8 @@ export interface PopstateContext {
    * blueprint 5.2 step 2 — native anchor behavior, not a navigation).
    */
   sameDocument: boolean;
+  /** Restore the previous entry if a guard rejects this traversal. */
+  cancel(): void;
 }
 
 type PopstateHandler = (context: PopstateContext) => void;
@@ -181,6 +187,14 @@ function onPopstate(): void {
     return;
   }
   const url = new URL(window.location.href);
+  if (restoringTraversal) {
+    restoringTraversal = false;
+    return;
+  }
+  const previousDocument = currentDocument;
+  const previousIndex = currentIndex;
+  const index = window.history.state?.[INDEX_KEY];
+  if (typeof index === 'number') currentIndex = index;
   const context: PopstateContext = {
     url,
     scroll: scrollMemory.get(destinationOf(url)) ?? null,
@@ -188,6 +202,14 @@ function onPopstate(): void {
       currentDocument !== null &&
       url.pathname === currentDocument.pathname &&
       url.search === currentDocument.search,
+    cancel() {
+      currentDocument = previousDocument;
+      currentIndex = previousIndex;
+      if (typeof index === 'number' && index !== previousIndex) {
+        restoringTraversal = true;
+        window.history.go(previousIndex - index);
+      }
+    },
   };
   // This traversal becomes the new current document for the next one —
   // including hash-only moves, whose path+search keep it identical.
@@ -211,6 +233,9 @@ export function installPopstateNavigation(handler: PopstateHandler): void {
     pathname: window.location.pathname,
     search: window.location.search,
   };
+  currentIndex = window.history.state?.[INDEX_KEY] ?? 0;
+  window.history.replaceState({ ...window.history.state, [INDEX_KEY]: currentIndex }, '', window.location.href);
+  restoringTraversal = false;
   if (!popstateListenerInstalled) {
     window.addEventListener('popstate', onPopstate);
     popstateListenerInstalled = true;

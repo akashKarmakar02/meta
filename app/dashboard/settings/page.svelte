@@ -14,3 +14,8 @@
   {/if}
   <button type="button" onclick={save}>Save settings</button>
 </main>
+
+<style>
+  /* Also exercises destination CSS loading in production navigation tests. */
+  main { max-width: 60rem; }
+</style>

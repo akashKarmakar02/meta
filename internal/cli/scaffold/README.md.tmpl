@@ -11,7 +11,9 @@ Create a `.env` file for local configuration. Values prefixed `VITE_` are public
 
 Open http://localhost:3000. Files in `public/` are available at the site root, such as `public/robots.txt` at `/robots.txt`. Tailwind CSS is configured in `frontend/app.css`; use utility classes in templ and Svelte files, or add your own global CSS there.
 
-In TypeScript and Svelte files, `@/` imports from the project root (for example `import { navigate } from '@/frontend/navigation'`), mirroring `tsconfig.json`'s `paths` mapping and the Vite alias in `vite.config.ts`. Relative imports keep working; use whichever reads better.
+In TypeScript and Svelte files, `@/` imports from the project root (for example `import { navigateTo } from '@/frontend/navigation-pipeline'`), mirroring `tsconfig.json`'s `paths` mapping and the Vite alias in `vite.config.ts`. Relative imports keep working; use whichever reads better.
+
+Soft navigation includes an indeterminate progress bar after 150ms. To replace it, set `startSoftNavigation({ progress: false })` in `frontend/entry.ts` and subscribe with `subscribeNavigation` from `@/frontend/navigation-state`; `getNavigationState` reads the current snapshot. Unsubscribe when your UI is destroyed. Completion covers destination rendering, not application-owned async `onMount` fetches. The indicator does not cover initial document loads or remove authentication redirects.
 
 Configure server middleware and route policies in `app/hooks.go`. Policies do not provide authentication by themselves; implement your own credential and authorization checks.
 
