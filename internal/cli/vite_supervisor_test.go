@@ -58,10 +58,24 @@ func TestDevSupervisesViteAndAir(t *testing.T) {
 			go func() {
 				done <- runDevWith(&Context{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}, devDeps{lookAir: func() (string, error) { return "air", nil }, lookNode: func() (string, error) { return "node", nil }, runner: runner, signals: func() (<-chan os.Signal, func()) { return sigs, func() {} }, grace: time.Second})
 			}()
-			if got := <-runner.calls; got != "node" {
+			// nextCall receives the next process start or fails immediately
+			// when the supervisor exits first — e.g. the Vite-port preflight
+			// rejected a busy port — instead of hanging until the test
+			// timeout.
+			nextCall := func(t *testing.T) string {
+				t.Helper()
+				select {
+				case name := <-runner.calls:
+					return name
+				case err := <-done:
+					t.Fatalf("supervisor exited before starting processes: %v", err)
+					return ""
+				}
+			}
+			if got := nextCall(t); got != "node" {
 				t.Fatalf("first process: %s", got)
 			}
-			if got := <-runner.calls; got != "air" {
+			if got := nextCall(t); got != "air" {
 				t.Fatalf("second process: %s", got)
 			}
 			switch exit {

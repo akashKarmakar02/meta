@@ -19,7 +19,11 @@ func TestCLISmoke(t *testing.T) {
 	}
 
 	bin := filepath.Join(t.TempDir(), "meta")
-	build := exec.Command("go", "build", "-o", bin, ".")
+	// -buildvcs=false keeps the embedded build info free of the checkout's
+	// VCS state: on an exact release tag, Go would otherwise stamp the tag
+	// version into the binary and --version would report it instead of
+	// "dev", failing this test on a clean tagged tree.
+	build := exec.Command("go", "build", "-buildvcs=false", "-o", bin, ".")
 	build.Stdout = os.Stdout
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
