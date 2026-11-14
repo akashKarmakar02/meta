@@ -1,11 +1,11 @@
 # Clerk authentication (experimental)
 
-This separate Go module connects Clerk sessions and signed webhooks to Meta's Fiber server. It has not yet been validated against a live Clerk instance; treat it as experimental and verify the complete sign-in flow before deployment. Install the independent module with `go get github.com/akashKarmakar02/meta/integrations/clerk@v0.1.0-beta.1`.
+This separate Go module connects Clerk sessions and signed webhooks to Meta's Fiber server. It has not yet been validated against a live Clerk instance; treat it as experimental and verify the complete sign-in flow before deployment. Install the independent module with `go get github.com/akashKarmakar02/meta/integrations/clerk@v0.1.0-beta.2`.
 
 ## Install
 
 ```bash
-go get github.com/akashKarmakar02/meta/integrations/clerk@v0.1.0-beta.1
+go get github.com/akashKarmakar02/meta/integrations/clerk@v0.1.0-beta.2
 ```
 
 ## 1. Add your keys
@@ -104,6 +104,83 @@ app, err := server.New(cfg)
 Restart `meta dev`. Configure Clerk to send `user.created`, `user.updated`, and `user.deleted` to `https://your-domain/api/webhooks/clerk`. The webhook route must remain public and needs a public tunnel during local development. The integration handles up to 1 MiB of webhook data; also set appropriate server or proxy request-size limits. Unhandled events and nil callbacks receive 204, so only subscribe to events your application handles.
 
 `AuthorizedParties` is an exact list of frontend origins (no trailing slash). Configure production and development origins separately. Tokens without an `azp` claim are rejected, even though Clerk documents that the claim can be absent. Unauthenticated or invalid tokens are treated as signed out; a failed key fetch returns 503. Signing keys are cached and refresh attempts are bounded. `RequirePageUser` redirects only GET and HEAD to a configured local sign-in path; other methods return 401. Use `RequireUser` for APIs and action endpoints. Each protected action needs its own policy; page policies do not protect actions. Authentication does not replace authorization, CSRF checks, or application-specific ownership checks.
+
+## Signing-key retries and diagnostics
+
+Signing-key fetches retry **within the incoming request**, so a successful retry
+continues normal session verification. The zero-value `RetryConfig` uses these
+per-field defaults:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `MaxRetries` | `3` | Retries after the initial attempt (four attempts total) |
+| `InitialBackoff` | `100 * time.Millisecond` | Doubles between retries: about 100ms, 200ms, 400ms |
+| `MaxBackoff` | `time.Second` | Caps backoff including 80–120% jitter |
+| `AttemptTimeout` | `time.Second` | Bounds each HTTP attempt, including reading its response |
+| `TotalTimeout` | `5 * time.Second` | Bounds all attempts and backoff in a sequence |
+
+Each zero field selects its default, even when other fields are set. Set
+`MaxRetries: -1` to disable retries (one attempt, still subject to the timeouts).
+Other negative values and a maximum backoff below the initial backoff fail in
+`New`. A total timeout shorter than the attempt timeout is valid and takes
+precedence. The caller's earlier deadline or cancellation always takes precedence.
+
+```go
+// Add context, log/slog, net/http, and time to your imports.
+auth, err := metaclerk.New(metaclerk.Config{
+    SecretKey: os.Getenv("CLERK_SECRET_KEY"),
+    AuthorizedParties: []string{"https://example.com"},
+    Retry: metaclerk.RetryConfig{
+        MaxRetries:     3,
+        InitialBackoff: 100 * time.Millisecond,
+        MaxBackoff:     time.Second,
+        AttemptTimeout: time.Second,
+        TotalTimeout:   5 * time.Second,
+    },
+    HTTPClient: &http.Client{},
+    OnKeyFetch: func(ctx context.Context, event metaclerk.KeyFetchEvent) {
+        slog.InfoContext(ctx, "Clerk signing-key fetch",
+            "attempt", event.Attempt, "final", event.Final,
+            "success", event.Success, "category", event.Category,
+            "upstream_status", event.StatusCode, "duration", event.Duration)
+    },
+})
+```
+
+The optional HTTP client is copied by `New`; no process globals are modified.
+Its transport must honor request contexts and must not add its own retries.
+Redirects are rejected. An injected client's shorter timeout also applies.
+`OnKeyFetch` runs synchronously outside the cache mutex: keep it fast and safe
+for concurrent calls. It receives one event per attempt and a final sequence
+summary. Success means keys were fetched; authentication still requires a valid
+token signature and claims. Diagnostics contain only counts, safe categories,
+status codes, and durations, never raw errors, bodies, tokens, cookies, or keys.
+No diagnostics are emitted unless a hook is configured. Context values from the
+initiating request are preserved for a logging handler to extract request IDs;
+`InfoContext` alone does not automatically attach them. Do not attach credentials.
+Set a request context with Fiber's `c.SetContext` before this middleware to supply
+correlation values or cancellation. Fiber's default context does not automatically
+cancel on a client disconnect.
+
+Retries cover eligible connection failures, timeouts, and HTTP 429/500/502/503/504.
+HTTP 401/403, permanent DNS/TLS/configuration failures, and malformed successful
+responses stop immediately. Signature or claims failures do not trigger retries.
+For 429/503, valid `Retry-After` delta-seconds or HTTP dates set a minimum wait;
+it may exceed `MaxBackoff`. If that wait (or backoff) cannot fit in the remaining
+caller/sequence budget, the sequence stops without another attempt. All waits
+are cancelable. Exhausted or non-retryable fetch failures keep the existing
+503 response: `Authentication temporarily unavailable`.
+
+The **30-second refresh cooldown is separate**: it bounds new fetch sequences
+for unknown key IDs and failed refreshes, measured from the start of the last
+sequence. It never suppresses retries inside that sequence. Concurrent refreshes
+share one sequence per integration instance; the initiating request owns its
+context, and cancellation of that request ends the shared sequence. A waiting
+request may cancel independently. A later request remains subject to cooldown.
+Keys remain fresh for one hour after a successful fetch. Fresh cached keys stay
+available during refreshes and after refresh failures; expired keys are never
+accepted. A new key ID can refresh after cooldown to handle rotation. There are
+no background retry workers or stale-key fallback.
 
 ## Svelte integration
 
@@ -222,4 +299,4 @@ Webhook callbacks run after Svix signature and timestamp verification. They rece
 
 ## Development
 
-This is an independent Go module. Run `go test ./...` from this directory; root-module Go commands do not cover it. Its release tags must use the `integrations/clerk/v...` prefix.
+This is an independent Go module. From `integrations/clerk`, run `go test -race ./...` and `go vet ./...`; root-module Go commands do not cover it. Its release tags must use the `integrations/clerk/v...` prefix.

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 	"sync"
@@ -24,6 +25,14 @@ type Config struct {
 	SigningSecret     string
 	SignInURL         string
 	AuthorizedParties []string
+	Retry             RetryConfig
+	// HTTPClient is optional. New copies it; configure it before calling New.
+	// Its transport must honor request contexts and must not perform retries.
+	HTTPClient *http.Client
+	// OnKeyFetch receives safe attempt and sequence diagnostics. It runs
+	// synchronously, outside the cache lock, and must be fast and concurrency-safe.
+	// The context carries the initiating request's correlation values.
+	OnKeyFetch func(context.Context, KeyFetchEvent)
 }
 
 type Integration struct {
@@ -35,6 +44,9 @@ type Integration struct {
 	cached      map[string]*clerk.JSONWebKey
 	fetched     time.Time
 	lastAttempt time.Time
+	refresh     *keyRefresh
+	retry       RetryConfig
+	onKeyFetch  func(context.Context, KeyFetchEvent)
 }
 
 // New validates configuration; the signing secret is optional unless Webhook is used.
@@ -60,6 +72,10 @@ func New(cfg Config) (*Integration, error) {
 	if err != nil || !strings.HasPrefix(cfg.SignInURL, "/") || strings.HasPrefix(cfg.SignInURL, "//") || strings.HasPrefix(u.Path, "//") || u.IsAbs() || u.Host != "" || strings.ContainsAny(u.Path, "\\\r\n") || strings.ContainsAny(cfg.SignInURL, "\\\r\n") {
 		return nil, errors.New("metaclerk: sign-in URL must be a local path")
 	}
+	retry, err := normalizeRetry(cfg.Retry)
+	if err != nil {
+		return nil, err
+	}
 	var hook *svix.Webhook
 	if cfg.SigningSecret != "" {
 		hook, err = svix.NewWebhook(cfg.SigningSecret)
@@ -67,7 +83,13 @@ func New(cfg Config) (*Integration, error) {
 			return nil, fmt.Errorf("metaclerk: invalid webhook signing secret: %w", err)
 		}
 	}
-	return &Integration{signInURL: cfg.SignInURL, parties: parties, keys: jwks.NewClient(&clerk.ClientConfig{BackendConfig: clerk.BackendConfig{Key: clerk.String(cfg.SecretKey)}}), webhook: hook}, nil
+	return &Integration{
+		signInURL: cfg.SignInURL, parties: parties, webhook: hook,
+		retry: retry, onKeyFetch: cfg.OnKeyFetch,
+		keys: jwks.NewClient(&clerk.ClientConfig{BackendConfig: clerk.BackendConfig{
+			Key: clerk.String(cfg.SecretKey), HTTPClient: keyHTTPClient(cfg.HTTPClient),
+		}}),
+	}, nil
 }
 
 type sessionKey struct{}
@@ -104,8 +126,7 @@ func (a *Integration) Middleware() fiber.Handler {
 		if token == "" || len(token) > 16384 {
 			return c.Next()
 		}
-		ctx, cancel := context.WithTimeout(c.Context(), 5*time.Second)
-		defer cancel()
+		ctx := c.Context()
 		decoded, err := jwt.Decode(ctx, &jwt.DecodeParams{Token: token})
 		if err != nil || decoded.KeyID == "" || len(decoded.KeyID) > 256 {
 			return c.Next()
@@ -127,33 +148,60 @@ func (a *Integration) Middleware() fiber.Handler {
 	}
 }
 
+// keyRefresh publishes one sequence's result to all waiting callers.
+// Closing done synchronizes access to keys and err.
+type keyRefresh struct {
+	done chan struct{}
+	keys map[string]*clerk.JSONWebKey
+	err  error
+}
+
 func (a *Integration) key(ctx context.Context, id string) (*clerk.JSONWebKey, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	now := time.Now()
 	if k := a.cached[id]; k != nil && now.Sub(a.fetched) < time.Hour {
+		a.mu.Unlock()
 		return k, nil
 	}
-	// Bound refreshes for attacker-controlled unknown key IDs and failed requests.
+	if active := a.refresh; active != nil {
+		a.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-active.done:
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return active.keys[id], active.err
+		}
+	}
+	// Bound sequences for attacker-controlled unknown key IDs and failed requests.
+	// This cooldown never applies to attempts within a sequence.
 	if !a.lastAttempt.IsZero() && now.Sub(a.lastAttempt) < 30*time.Second {
-		if a.fetched.IsZero() || now.Sub(a.fetched) >= time.Hour {
-			return nil, errors.New("signing keys unavailable")
+		unavailable := a.fetched.IsZero() || now.Sub(a.fetched) >= time.Hour
+		a.mu.Unlock()
+		if unavailable {
+			return nil, errSigningKeysUnavailable
 		}
 		return nil, nil
 	}
-	a.lastAttempt = now
-	set, err := a.keys.Get(ctx, &jwks.GetParams{})
-	if err != nil {
-		return nil, err
+	active := &keyRefresh{done: make(chan struct{})}
+	a.refresh, a.lastAttempt = active, now
+	a.mu.Unlock()
+
+	keys, err := a.fetchKeys(ctx)
+	a.mu.Lock()
+	if err == nil {
+		a.cached, a.fetched = keys, time.Now()
 	}
-	keys := make(map[string]*clerk.JSONWebKey, len(set.Keys))
-	for _, key := range set.Keys {
-		if key != nil && key.KeyID != "" {
-			keys[key.KeyID] = key
-		}
-	}
-	a.cached, a.fetched = keys, now
-	return keys[id], nil
+	active.keys, active.err = keys, err
+	a.refresh = nil
+	close(active.done)
+	a.mu.Unlock()
+	return keys[id], err
 }
 
 // RequireUser protects API routes and actions with an HTTP 401 response.
