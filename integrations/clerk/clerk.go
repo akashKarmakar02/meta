@@ -13,7 +13,6 @@ import (
 
 	clerk "github.com/clerk/clerk-sdk-go/v2"
 	"github.com/clerk/clerk-sdk-go/v2/jwks"
-	"github.com/clerk/clerk-sdk-go/v2/jwt"
 	"github.com/gofiber/fiber/v3"
 	svix "github.com/svix/svix-webhooks/go"
 )
@@ -21,9 +20,12 @@ import (
 // Config contains server-only credentials and trusted frontend origins.
 // AuthorizedParties must contain the exact origins of the application's frontends.
 type Config struct {
-	SecretKey         string
-	SigningSecret     string
-	SignInURL         string
+	SecretKey     string
+	SigningSecret string
+	SignInURL     string
+	// RecoveryURL opts page requests into a public, application-owned recovery
+	// route (for example /auth/recover). Empty preserves sign-in redirects.
+	RecoveryURL       string
 	AuthorizedParties []string
 	Retry             RetryConfig
 	// HTTPClient is optional. New copies it; configure it before calling New.
@@ -33,20 +35,25 @@ type Config struct {
 	// synchronously, outside the cache lock, and must be fast and concurrency-safe.
 	// The context carries the initiating request's correlation values.
 	OnKeyFetch func(context.Context, KeyFetchEvent)
+	// OnAuthentication reports only safe reasons, credential source and duration.
+	// It runs synchronously and must be fast and safe for concurrent requests.
+	OnAuthentication func(context.Context, AuthenticationEvent)
 }
 
 type Integration struct {
-	signInURL   string
-	parties     map[string]struct{}
-	keys        *jwks.Client
-	webhook     *svix.Webhook
-	mu          sync.Mutex
-	cached      map[string]*clerk.JSONWebKey
-	fetched     time.Time
-	lastAttempt time.Time
-	refresh     *keyRefresh
-	retry       RetryConfig
-	onKeyFetch  func(context.Context, KeyFetchEvent)
+	signInURL        string
+	recoveryURL      string
+	parties          map[string]struct{}
+	keys             *jwks.Client
+	webhook          *svix.Webhook
+	mu               sync.Mutex
+	cached           map[string]*clerk.JSONWebKey
+	fetched          time.Time
+	lastAttempt      time.Time
+	refresh          *keyRefresh
+	retry            RetryConfig
+	onKeyFetch       func(context.Context, KeyFetchEvent)
+	onAuthentication func(context.Context, AuthenticationEvent)
 }
 
 // New validates configuration; the signing secret is optional unless Webhook is used.
@@ -72,6 +79,14 @@ func New(cfg Config) (*Integration, error) {
 	if err != nil || !strings.HasPrefix(cfg.SignInURL, "/") || strings.HasPrefix(cfg.SignInURL, "//") || strings.HasPrefix(u.Path, "//") || u.IsAbs() || u.Host != "" || strings.ContainsAny(u.Path, "\\\r\n") || strings.ContainsAny(cfg.SignInURL, "\\\r\n") {
 		return nil, errors.New("metaclerk: sign-in URL must be a local path")
 	}
+	if cfg.RecoveryURL != "" {
+		recovery, ok := localDestination(cfg.RecoveryURL)
+		if !ok || recovery.RawQuery != "" || recovery.Fragment != "" ||
+			strings.TrimRight(recovery.Path, "/") == strings.TrimRight(u.Path, "/") {
+			return nil, errors.New("metaclerk: recovery URL must be a distinct local path without query or fragment")
+		}
+		cfg.RecoveryURL = recovery.String()
+	}
 	retry, err := normalizeRetry(cfg.Retry)
 	if err != nil {
 		return nil, err
@@ -84,8 +99,9 @@ func New(cfg Config) (*Integration, error) {
 		}
 	}
 	return &Integration{
-		signInURL: cfg.SignInURL, parties: parties, webhook: hook,
+		signInURL: cfg.SignInURL, recoveryURL: cfg.RecoveryURL, parties: parties, webhook: hook,
 		retry: retry, onKeyFetch: cfg.OnKeyFetch,
+		onAuthentication: cfg.OnAuthentication,
 		keys: jwks.NewClient(&clerk.ClientConfig{BackendConfig: clerk.BackendConfig{
 			Key: clerk.String(cfg.SecretKey), HTTPClient: keyHTTPClient(cfg.HTTPClient),
 		}}),
@@ -112,40 +128,7 @@ func SessionFromContext(ctx context.Context) (Session, bool) {
 // Middleware reads and verifies the session without requiring a user.
 // Protected and personalized responses must also disable shared caching.
 func (a *Integration) Middleware() fiber.Handler {
-	return func(c fiber.Ctx) error {
-		token := ""
-		if h := c.Get(fiber.HeaderAuthorization); h != "" {
-			fields := strings.Fields(h)
-			if len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") {
-				return c.Next()
-			}
-			token = fields[1]
-		} else {
-			token = c.Cookies("__session")
-		}
-		if token == "" || len(token) > 16384 {
-			return c.Next()
-		}
-		ctx := c.Context()
-		decoded, err := jwt.Decode(ctx, &jwt.DecodeParams{Token: token})
-		if err != nil || decoded.KeyID == "" || len(decoded.KeyID) > 256 {
-			return c.Next()
-		}
-		key, err := a.key(ctx, decoded.KeyID)
-		if err != nil {
-			return c.Status(fiber.StatusServiceUnavailable).SendString("Authentication temporarily unavailable")
-		}
-		if key == nil {
-			return c.Next()
-		}
-		claims, err := jwt.Verify(ctx, &jwt.VerifyParams{Token: token, JWK: key, AuthorizedPartyHandler: func(p string) bool { _, ok := a.parties[p]; return ok }})
-		if err != nil || claims.Subject == "" || claims.SessionID == "" || claims.Expiry == nil {
-			return c.Next()
-		}
-		c.Set(fiber.HeaderCacheControl, "private, no-store")
-		c.SetContext(context.WithValue(c.Context(), sessionKey{}, Session{UserID: claims.Subject, SessionID: claims.SessionID}))
-		return c.Next()
-	}
+	return a.authenticate
 }
 
 // keyRefresh publishes one sequence's result to all waiting callers.
@@ -222,9 +205,15 @@ func (a *Integration) RequirePageUser() fiber.Handler {
 		c.Set(fiber.HeaderCacheControl, "private, no-store")
 		if _, ok := SessionFromContext(c.Context()); !ok {
 			if c.Method() == fiber.MethodGet || c.Method() == fiber.MethodHead {
+				if a.recoveryURL != "" {
+					return a.redirectPage(c)
+				}
 				return c.Redirect().Status(fiber.StatusSeeOther).To(a.signInURL)
 			}
 			return c.SendStatus(fiber.StatusUnauthorized)
+		}
+		if a.recoveryURL != "" {
+			a.clearRecoveryAttempt(c)
 		}
 		return c.Next()
 	}

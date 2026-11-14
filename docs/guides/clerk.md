@@ -1,11 +1,17 @@
 # Clerk authentication (experimental)
 
-This separate Go module connects Clerk sessions and signed webhooks to Meta's Fiber server. It has not yet been validated against a live Clerk instance; treat it as experimental and verify the complete sign-in flow before deployment. Install the independent module with `go get github.com/akashKarmakar02/meta/integrations/clerk@v0.1.0-beta.2`.
+For the opt-in recovery flow, safe authentication diagnostics, and
+“Checking your session…” Svelte example introduced in v0.1.0-beta.3, see
+[Clerk session recovery](clerk-recovery.md). Signing-key retries and `OnKeyFetch`
+diagnostics from beta.2 remain available. Recovery requires public recovery
+handlers and application browser integration.
+
+This separate Go module connects Clerk sessions and signed webhooks to Meta's Fiber server. It has not yet been validated against a live Clerk instance; treat it as experimental and verify the complete sign-in flow before deployment. Install the independent module with `go get github.com/akashKarmakar02/meta/integrations/clerk@v0.1.0-beta.3`.
 
 ## Install
 
 ```bash
-go get github.com/akashKarmakar02/meta/integrations/clerk@v0.1.0-beta.2
+go get github.com/akashKarmakar02/meta/integrations/clerk@v0.1.0-beta.3
 ```
 
 ## 1. Add your keys
@@ -214,7 +220,7 @@ Create `app/sign-in/page.svelte` in your project:
 <h1>Sign in</h1>
 {#if publishableKey}
   <ClerkProvider {publishableKey}>
-    <SignIn forceRedirectUrl="/dashboard" />
+    <SignIn fallbackRedirectUrl="/dashboard" />
   </ClerkProvider>
 {:else}
   <p role="alert">Missing Clerk publishable key.</p>
@@ -268,7 +274,7 @@ Only verified user and session IDs are exposed. Protect personalized responses f
 
 ## Browser and session limitations
 
-Use [Clerk's official JavaScript SDK](https://clerk.com/docs/js-frontend/getting-started/quickstart) for sign-in, sign-out, and session refresh. Configure its publishable key for Vite and initialize it on pages where it is needed. Clerk's browser SDK maintains the short-lived `__session` cookie. A direct SSR request with a missing or expired cookie will be treated as signed out; this package does not yet implement Clerk's full request handshake or refresh flow. A JavaScript-disabled browser cannot refresh that cookie through Clerk's browser SDK. Test expired tokens, direct navigation, soft navigation, and forms with your Clerk setup.
+Use [Clerk's official JavaScript SDK](https://clerk.com/docs/js-frontend/getting-started/quickstart) for sign-in, sign-out, and session refresh. The browser SDK maintains the short-lived `__session` cookie. With the `RecoveryURL` opt-in, missing or expired cookie sessions can visit a public browser recovery page before interactive sign-in; see the [recovery guide](clerk-recovery.md) for setup, limits, and diagnostics. Without that opt-in, the existing sign-in redirect behavior remains. The pinned Go SDK does not supply a full request-handshake handler, and a JavaScript-disabled browser cannot use this recovery helper. Test your own Clerk instance and existing provider before deployment.
 
 ### Local webhook testing with ngrok
 

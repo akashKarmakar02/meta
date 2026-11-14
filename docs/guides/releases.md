@@ -36,6 +36,31 @@ Two things a plain `go get` does **not** update:
 
 After upgrading, run your full checks (`go test ./...`, `npm run check`, `npm run build`) and click through your app in development before deploying.
 
+## Clerk integration v0.1.0-beta.3
+
+The Clerk integration is released separately as
+`integrations/clerk/v0.1.0-beta.3`. This adds opt-in session recovery and safe
+`OnAuthentication` diagnostics while retaining beta.2 signing-key retries and
+`OnKeyFetch`. The Meta framework and CLI remain at v0.1.0-beta.7.
+
+```sh
+go get github.com/akashKarmakar02/meta/integrations/clerk@v0.1.0-beta.3
+go mod tidy
+```
+
+Existing keyed `Config` literals remain compatible, and recovery stays disabled
+until configured. Follow the [Clerk recovery migration guide](clerk-recovery.md)
+to mount public recovery/status handlers, bind the uncached loader, copy the
+optional browser helper and Svelte example, reuse your initialized Clerk SDK,
+and preserve sign-in destinations. Updating Go dependencies does not copy those
+browser files. Rebuild and deploy matching server/client assets after adoption.
+
+Live Clerk token/cookie synchronization and tenant-specific redirects still need
+application validation. Tests use a simulated SDK/FAPI and signed fixture JWTs;
+this release does not implement the full server handshake or accept expired
+tokens. See the [independent changelog](../../integrations/clerk/CHANGELOG.md)
+for verification and limitations.
+
 ## Migration guide
 
 ### To v0.1.0-beta.7

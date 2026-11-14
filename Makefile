@@ -20,12 +20,16 @@ generate: ## Run templ + route codegen (must precede go build)
 build: generate ## Full production build: templ + Go binary + client assets
 	$(GO) build -o bin/example ./cmd/example
 	$(GO) build -o bin/pagecache-fixture ./tests/fixtures/pagecache
+	$(GO) -C tests/fixtures/clerk build -o ../../../bin/clerk-fixture .
 	$(NPM) ci
 	$(NPM) run build
+	$(NPM) exec vite -- build --config tests/fixtures/clerk/vite.config.ts
 
 test: generate ## Run all checks: Go tests/vet, svelte-check, tsc, vitest
 	$(GO) vet ./...
 	$(GO) test ./...
+	$(GO) -C integrations/clerk vet ./...
+	$(GO) -C integrations/clerk test -race ./...
 	$(NPM) run check
 	$(NPM) exec tsc -- --noEmit
 	$(NPM) run test

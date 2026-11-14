@@ -19,6 +19,7 @@ Meta is a Go web framework with server-rendered templ pages and client-rendered 
 - [Cross-origin resource sharing (CORS)](guides/cors.md)
 - [Middleware and route policies](guides/middleware.md)
 - [Clerk authentication (experimental)](guides/clerk.md)
+- [Clerk session recovery (beta.3)](guides/clerk-recovery.md)
 - [Logs and metrics](guides/observability.md)
 - [Caching: loaders, pages, sitemap](guides/caching.md)
 - [Load data for a page](guides/loaders.md)

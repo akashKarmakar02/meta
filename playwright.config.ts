@@ -38,5 +38,12 @@ export default defineConfig({
     stdout: 'ignore',
     stderr: 'pipe',
     timeout: 15_000,
+  }, {
+    command: 'PORT=3135 ./bin/clerk-fixture',
+    port: 3135,
+    reuseExistingServer: false,
+    stdout: 'ignore',
+    stderr: 'pipe',
+    timeout: 15_000,
   }],
 });

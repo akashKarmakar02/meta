@@ -4,12 +4,12 @@ go 1.26.10
 
 require (
 	github.com/clerk/clerk-sdk-go/v2 v2.8.0
+	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/gofiber/fiber/v3 v3.6.1
 	github.com/svix/svix-webhooks v1.99.1
 )
 
 require (
-	github.com/go-jose/go-jose/v4 v4.1.6 // indirect
 	github.com/gofiber/schema v1.8.8 // indirect
 	github.com/gofiber/utils/v2 v2.6.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
