@@ -36,6 +36,22 @@ Two things a plain `go get` does **not** update:
 
 After upgrading, run your full checks (`go test ./...`, `npm run check`, `npm run build`) and click through your app in development before deploying.
 
+## Clerk integration v0.1.0-beta.4
+
+The independently versioned Clerk integration now defaults to an initial
+signing-key attempt plus two retries. If the cache is empty or expired, a
+request arriving after a failed refresh can start a new sequence immediately.
+The 30-second throttle still applies to unknown key IDs while the cache is
+fresh.
+
+```sh
+go get github.com/akashKarmakar02/meta/integrations/clerk@v0.1.0-beta.4
+go mod tidy
+```
+
+Set `MaxRetries: 2` or omit the field for three total attempts. Explicit retry
+counts retain their existing meaning. See the [Clerk guide](clerk.md#signing-key-retries-and-diagnostics).
+
 ## Clerk integration v0.1.0-beta.3
 
 The Clerk integration is released separately as

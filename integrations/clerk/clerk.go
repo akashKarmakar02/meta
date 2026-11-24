@@ -145,7 +145,8 @@ func (a *Integration) key(ctx context.Context, id string) (*clerk.JSONWebKey, er
 	}
 	a.mu.Lock()
 	now := time.Now()
-	if k := a.cached[id]; k != nil && now.Sub(a.fetched) < time.Hour {
+	cacheFresh := !a.fetched.IsZero() && now.Sub(a.fetched) < time.Hour
+	if k := a.cached[id]; k != nil && cacheFresh {
 		a.mu.Unlock()
 		return k, nil
 	}
@@ -161,14 +162,9 @@ func (a *Integration) key(ctx context.Context, id string) (*clerk.JSONWebKey, er
 			return active.keys[id], active.err
 		}
 	}
-	// Bound sequences for attacker-controlled unknown key IDs and failed requests.
-	// This cooldown never applies to attempts within a sequence.
-	if !a.lastAttempt.IsZero() && now.Sub(a.lastAttempt) < 30*time.Second {
-		unavailable := a.fetched.IsZero() || now.Sub(a.fetched) >= time.Hour
+	// Throttle unknown IDs while the cache can still verify known keys.
+	if cacheFresh && now.Sub(a.lastAttempt) < 30*time.Second {
 		a.mu.Unlock()
-		if unavailable {
-			return nil, errSigningKeysUnavailable
-		}
 		return nil, nil
 	}
 	active := &keyRefresh{done: make(chan struct{})}

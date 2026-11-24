@@ -63,7 +63,10 @@ func keyResponse(t *testing.T, ids ...string) string {
 
 func TestRetryConfiguration(t *testing.T) {
 	a := newTestIntegration(t, testConfig())
-	want := RetryConfig{MaxRetries: 3, InitialBackoff: 100 * time.Millisecond, MaxBackoff: time.Second, AttemptTimeout: time.Second, TotalTimeout: 5 * time.Second}
+	want := RetryConfig{
+		MaxRetries: 2, InitialBackoff: 100 * time.Millisecond, MaxBackoff: time.Second,
+		AttemptTimeout: time.Second, TotalTimeout: 5 * time.Second,
+	}
 	if a.retry != want {
 		t.Fatalf("defaults = %+v, want %+v", a.retry, want)
 	}
@@ -99,8 +102,8 @@ func TestFetchRetryOutcomes(t *testing.T) {
 		success  bool
 	}{
 		{name: "first attempt", attempts: 1, success: true},
-		{name: "success after retries", failures: 3, status: 503, attempts: 4, success: true},
-		{name: "four attempts only", failures: 99, status: 502, attempts: 4},
+		{name: "success after retries", failures: 2, status: 503, attempts: 3, success: true},
+		{name: "three attempts only", failures: 99, status: 502, attempts: 3},
 		{name: "429", failures: 1, status: 429, attempts: 2, success: true},
 		{name: "500", failures: 1, status: 500, attempts: 2, success: true},
 		{name: "504", failures: 1, status: 504, attempts: 2, success: true},
@@ -153,11 +156,55 @@ func TestFetchRetryOutcomes(t *testing.T) {
 						t.Errorf("retry %d delay = %s", i, delay)
 					}
 				}
-				// A subsequent request is subject to the existing cooldown, not
-				// another sequence, even after exhaustion or an unknown key ID.
-				_, _ = a.key(context.Background(), "unknown")
-				if calls != tc.attempts {
-					t.Fatal("cooldown did not bound unknown-key fetches")
+				if tc.success {
+					unknown, err := a.key(context.Background(), "unknown")
+					if unknown != nil || err != nil || calls != tc.attempts {
+						t.Fatal("fresh cache did not bound unknown-key fetches")
+					}
+				}
+			})
+		})
+	}
+}
+
+func TestFailedRefreshDoesNotDelayNextLookup(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		expireCache bool
+	}{
+		{name: "empty cache"},
+		{name: "expired cache", expireCache: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				calls := 0
+				upstreamAvailable := true
+				cfg := testConfig()
+				cfg.HTTPClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+					calls++
+					if !upstreamAvailable {
+						return response(http.StatusServiceUnavailable, ""), nil
+					}
+					return response(http.StatusOK, keyResponse(t, "key-1")), nil
+				})}
+				auth := newTestIntegration(t, cfg)
+				ctx := context.Background()
+				if tc.expireCache {
+					if key, err := auth.key(ctx, "key-1"); err != nil || key == nil {
+						t.Fatalf("seed signing-key cache: key found=%t error=%v", key != nil, err)
+					}
+					time.Sleep(time.Hour)
+				}
+				upstreamAvailable = false
+				if key, err := auth.key(ctx, "key-1"); err == nil || key != nil {
+					t.Fatalf("failed refresh: key found=%t error=%v", key != nil, err)
+				}
+				before := calls
+				started := time.Now()
+				upstreamAvailable = true
+				key, err := auth.key(ctx, "key-1")
+				if elapsed := time.Since(started); err != nil || key == nil || calls != before+1 || elapsed != 0 {
+					t.Fatalf("next lookup: key found=%t error=%v upstream calls=%d elapsed=%s", key != nil, err, calls-before, elapsed)
 				}
 			})
 		})
@@ -259,7 +306,7 @@ func TestFetchCancellationAndDeadlines(t *testing.T) {
 		{name: "cancel in fetch", fetchWait: true, cancelAt: 50 * time.Millisecond, calls: 1, elapsed: 50 * time.Millisecond},
 		{name: "cancel in backoff", cancelAt: 50 * time.Millisecond, calls: 1, elapsed: 50 * time.Millisecond},
 		{name: "earlier caller deadline", fetchWait: true, deadlineAt: 50 * time.Millisecond, calls: 1, elapsed: 50 * time.Millisecond},
-		{name: "default attempt deadlines", fetchWait: true, calls: 4},
+		{name: "default attempt deadlines", fetchWait: true, calls: 3},
 		{name: "total deadline", fetchWait: true, retry: RetryConfig{MaxRetries: 50, TotalTimeout: 1500 * time.Millisecond}, calls: 2, elapsed: 1500 * time.Millisecond},
 		{name: "attempt exceeds total", fetchWait: true, retry: RetryConfig{AttemptTimeout: 10 * time.Second}, calls: 1, elapsed: 5 * time.Second},
 		{name: "budget shorter than backoff", retry: RetryConfig{TotalTimeout: 50 * time.Millisecond}, calls: 1},
@@ -305,7 +352,7 @@ func TestFetchCancellationAndDeadlines(t *testing.T) {
 							t.Errorf("attempt duration %s", d)
 						}
 					}
-					if elapsed := time.Since(start); elapsed < 4560*time.Millisecond || elapsed > 4840*time.Millisecond {
+					if elapsed := time.Since(start); elapsed < 3240*time.Millisecond || elapsed > 3360*time.Millisecond {
 						t.Fatalf("default sequence duration = %s", elapsed)
 					}
 				}
@@ -387,9 +434,6 @@ func TestConcurrentRefreshAndFreshCache(t *testing.T) {
 				}
 				wg.Wait()
 				wantCalls := 4
-				if failure {
-					wantCalls = 5
-				}
 				if calls != wantCalls {
 					t.Fatalf("coalesced calls=%d, want %d", calls, wantCalls)
 				}
@@ -440,8 +484,8 @@ func TestMiddlewareVerificationAndDiagnostics(t *testing.T) {
 		calls      int
 	}{
 		{name: "first attempt verifies", wantStatus: 200, calls: 1},
-		{name: "retry verifies same request", failures: 3, status: 503, wantStatus: 200, calls: 4},
-		{name: "exhaustion generic 503", failures: 99, status: 503, wantStatus: 503, calls: 4},
+		{name: "retry verifies same request", failures: 2, status: 503, wantStatus: 200, calls: 3},
+		{name: "exhaustion generic 503", failures: 99, status: 503, wantStatus: 503, calls: 3},
 		{name: "forbidden generic 503", failures: 99, status: 403, wantStatus: 503, calls: 1},
 		{name: "invalid token", invalid: true, wantStatus: 401},
 		{name: "invalid signature", badSig: true, wantStatus: 401, calls: 1},

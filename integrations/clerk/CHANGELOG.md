@@ -1,5 +1,18 @@
 # Clerk integration releases
 
+## v0.1.0-beta.4 — 2026-11-24
+
+Transient signing-key failures get three attempts in the same request by
+default. If a fetch sequence fails with an empty or expired cache, the next
+request can start another sequence immediately. The 30-second throttle still
+limits unknown key IDs while the cache is fresh. Concurrent requests continue
+to share a single fetch sequence.
+
+An explicit `MaxRetries` still counts retries after the first attempt. Use
+`MaxRetries: 2` or the default for three attempts total. See the
+[module README](README.md#signing-key-retries-and-diagnostics) for timeouts,
+permanent failures, and Retry-After behavior.
+
 ## v0.1.0-beta.3 — 2026-11-14
 
 - Add opt-in `Config.RecoveryURL` and public `RecoveryPage`/`RecoveryStatus`

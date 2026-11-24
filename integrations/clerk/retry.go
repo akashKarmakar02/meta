@@ -17,7 +17,7 @@ import (
 )
 
 // RetryConfig controls a single signing-key fetch sequence. Each zero field
-// selects its default: 3 retries, 100ms initial backoff, 1s maximum backoff,
+// selects its default: 2 retries, 100ms initial backoff, 1s maximum backoff,
 // 1s attempt timeout, and 5s total timeout. MaxRetries = -1 disables retries
 // (one attempt, still bounded by both timeouts). Other negative values are invalid.
 // Backoff doubles with 80–120% jitter, capped at MaxBackoff. Retry-After can
@@ -53,7 +53,7 @@ func normalizeRetry(r RetryConfig) (RetryConfig, error) {
 		return r, errors.New("metaclerk: retry counts and durations must be nonnegative (MaxRetries may be -1)")
 	}
 	if r.MaxRetries == 0 {
-		r.MaxRetries = 3
+		r.MaxRetries = 2
 	}
 	if r.InitialBackoff == 0 {
 		r.InitialBackoff = 100 * time.Millisecond

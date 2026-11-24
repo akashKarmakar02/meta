@@ -6,12 +6,12 @@ Svelte example introduced in v0.1.0-beta.3. Signing-key retries and `OnKeyFetch`
 diagnostics from beta.2 remain available. Recovery requires adopting the updated
 module and application browser code.
 
-This separate Go module connects Clerk sessions and signed webhooks to Meta's Fiber server. It has not yet been validated against a live Clerk instance; treat it as experimental and verify the complete sign-in flow before deployment. Install the independent module with `go get github.com/akashKarmakar02/meta/integrations/clerk@v0.1.0-beta.3`.
+This separate Go module connects Clerk sessions and signed webhooks to Meta's Fiber server. It has not yet been validated against a live Clerk instance; treat it as experimental and verify the complete sign-in flow before deployment. Install the independent module with `go get github.com/akashKarmakar02/meta/integrations/clerk@v0.1.0-beta.4`.
 
 ## Install
 
 ```bash
-go get github.com/akashKarmakar02/meta/integrations/clerk@v0.1.0-beta.3
+go get github.com/akashKarmakar02/meta/integrations/clerk@v0.1.0-beta.4
 ```
 
 ## 1. Add your keys
@@ -119,8 +119,8 @@ per-field defaults:
 
 | Field | Default | Meaning |
 |---|---|---|
-| `MaxRetries` | `3` | Retries after the initial attempt (four attempts total) |
-| `InitialBackoff` | `100 * time.Millisecond` | Doubles between retries: about 100ms, 200ms, 400ms |
+| `MaxRetries` | `2` | Retries after the initial attempt (three attempts total) |
+| `InitialBackoff` | `100 * time.Millisecond` | Doubles between retries: about 100ms and 200ms by default |
 | `MaxBackoff` | `time.Second` | Caps backoff including 80–120% jitter |
 | `AttemptTimeout` | `time.Second` | Bounds each HTTP attempt, including reading its response |
 | `TotalTimeout` | `5 * time.Second` | Bounds all attempts and backoff in a sequence |
@@ -137,7 +137,7 @@ auth, err := metaclerk.New(metaclerk.Config{
     SecretKey: os.Getenv("CLERK_SECRET_KEY"),
     AuthorizedParties: []string{"https://example.com"},
     Retry: metaclerk.RetryConfig{
-        MaxRetries:     3,
+        MaxRetries:     2,
         InitialBackoff: 100 * time.Millisecond,
         MaxBackoff:     time.Second,
         AttemptTimeout: time.Second,
@@ -177,16 +177,14 @@ caller/sequence budget, the sequence stops without another attempt. All waits
 are cancelable. Exhausted or non-retryable fetch failures keep the existing
 503 response: `Authentication temporarily unavailable`.
 
-The **30-second refresh cooldown is separate**: it bounds new fetch sequences
-for unknown key IDs and failed refreshes, measured from the start of the last
-sequence. It never suppresses retries inside that sequence. Concurrent refreshes
-share one sequence per integration instance; the initiating request owns its
-context, and cancellation of that request ends the shared sequence. A waiting
-request may cancel independently. A later request remains subject to cooldown.
-Keys remain fresh for one hour after a successful fetch. Fresh cached keys stay
-available during refreshes and after refresh failures; expired keys are never
-accepted. A new key ID can refresh after cooldown to handle rotation. There are
-no background retry workers or stale-key fallback.
+Keys remain fresh for one hour after a successful fetch. While the cache is
+fresh, a 30-second cooldown measured from the start of the last fetch sequence
+limits new sequences for unknown key IDs. With an empty or expired cache, the
+next request can start a new sequence immediately after a failed refresh.
+Concurrent requests share one fetch sequence per integration instance. The
+initiating request owns the sequence context, and a waiting request can cancel
+independently. Fresh cached keys remain usable during refreshes and after
+refresh failures. Expired keys are never accepted.
 
 ## Svelte integration
 
